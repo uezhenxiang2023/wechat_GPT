@@ -24,7 +24,7 @@ class ElevenLabsVoice(Voice):
         audio = generate(
             text=text,
             voice=name,
-            model='eleven_multilingual_v1'
+            model='eleven_multilingual_v2'
         )
         fileName = TmpDir().path() + "reply-" + str(int(time.time())) + "-" + str(hash(text) & 0x7FFFFFFF) + ".mp3"
         with open(fileName, "wb") as f:
