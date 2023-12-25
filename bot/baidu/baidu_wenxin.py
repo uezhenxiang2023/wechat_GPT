@@ -2,7 +2,6 @@
 
 import requests, json
 from bot.bot import Bot
-from bridge.reply import Reply, ReplyType
 from bot.session_manager import SessionManager
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
@@ -17,7 +16,10 @@ class BaiduWenxinBot(Bot):
 
     def __init__(self):
         super().__init__()
-        self.sessions = SessionManager(BaiduWenxinSession, model=conf().get("baidu_wenxin_model") or "eb-instant")
+        wenxin_model = conf().get("baidu_wenxin_model") or "eb-instant"
+        if conf().get("model") and conf().get("model") == "wenxin-4":
+            wenxin_model = "completions_pro"
+        self.sessions = SessionManager(BaiduWenxinSession, model=wenxin_model)
 
     def reply(self, query, context=None):
         # acquire reply content
