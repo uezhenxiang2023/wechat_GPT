@@ -5,12 +5,15 @@ import openai
 from common.log import logger
 from common.token_bucket import TokenBucket
 from config import conf
+from openai import OpenAI
+
+client = OpenAI() # Instantiate a client according to the latest Openai SDK
 
 
 # OPENAI提供的画图接口
 class OpenAIImage(object):
     def __init__(self):
-        openai.api_key = conf().get("open_ai_api_key")
+        client.api_key = conf().get("open_ai_api_key")
         if conf().get("rate_limit_dalle"):
             self.tb4dalle = TokenBucket(conf().get("rate_limit_dalle", 50))
 
@@ -19,14 +22,14 @@ class OpenAIImage(object):
             if conf().get("rate_limit_dalle") and not self.tb4dalle.get_token():
                 return False, "请求太快了，请休息一下再问我吧"
             logger.info("[OPEN_AI] image_query={}".format(query))
-            response = openai.Image.create(
-                api_key=api_key,
+            response = client.images.generate(
                 prompt=query,  # 图片描述
                 n=1,  # 每次生成图片的数量
                 model=conf().get("text_to_image") or "dall-e-2",
-                # size=conf().get("image_create_size", "256x256"),  # 图片大小,可选有 256x256, 512x512, 1024x1024
+                size=conf().get("image_create_size", "256x256"),  # 图片大小,可选有 256x256, 512x512, 1024x1024
+                
             )
-            image_url = response["data"][0]["url"]
+            image_url = response.data[0].url
             logger.info("[OPEN_AI] image_url={}".format(image_url))
             return True, image_url
         except openai.RateLimitError as e:
