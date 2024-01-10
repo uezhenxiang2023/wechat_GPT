@@ -1,5 +1,5 @@
 """
-channel factory
+bot factory
 """
 from common import const
 
@@ -51,5 +51,9 @@ def create_bot(bot_type):
     elif bot_type == const.GEMINI:
         from bot.gemini.google_gemini_bot import GoogleGeminiBot
         return GoogleGeminiBot()
+    
+    elif bot_type == const.OPEN_AI_ASSISTANT:
+        from bot.openai.open_ai_assistant import OpenAIAssistantBot
+        return OpenAIAssistantBot()
 
     raise RuntimeError
