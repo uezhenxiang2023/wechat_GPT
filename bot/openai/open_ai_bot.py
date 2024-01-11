@@ -14,7 +14,7 @@ from bridge.reply import Reply, ReplyType
 from common.log import logger
 from config import conf
 
-client = OpenAI() #Instantiate a client according to latest openai SDK
+client = OpenAI(api_key=conf().get("open_ai_api_key")) #Instantiate a client according to latest openai SDK
 
 user_session = dict()
 
@@ -23,7 +23,6 @@ user_session = dict()
 class OpenAIBot(Bot, OpenAIImage):
     def __init__(self):
         super().__init__()
-        client.api_key = conf().get("open_ai_api_key")
         if conf().get("open_ai_api_base"):
             openai.base_url = conf().get("open_ai_api_base")
         proxy = conf().get("proxy")

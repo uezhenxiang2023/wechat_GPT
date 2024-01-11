@@ -19,14 +19,13 @@ from common.token_bucket import TokenBucket
 from common import memory,utils,const
 from config import conf, load_config
 
-client = OpenAI() # instantiate a client according to the latest Openai SDK
+client = OpenAI(api_key=conf().get("open_ai_api_key")) #Instantiate a client according to latest openai SDK
 
 # OpenAI对话模型API (可用)
 class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
     def __init__(self):
         super().__init__()
-        # set the default api_key
-        client.api_key = conf().get("open_ai_api_key")
+        # set the default endpoint of curl request
         if conf().get("open_ai_api_base"):
             openai.base_url = conf().get("open_ai_api_base")
         proxy = conf().get("proxy")

@@ -7,21 +7,21 @@ import openai
 from openai import OpenAI
 from bot.bot import Bot
 from bot.openai.open_ai_image import OpenAIImage
+from bot.openai.open_ai_vision import OpenAIVision
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common.log import logger
 from config import conf
 
-client = OpenAI() #Instantiate a client according to latest openai SDK
+client = OpenAI(api_key=conf().get("open_ai_api_key")) #Instantiate a client according to latest openai SDK
 
 user_session = dict()
 
 
 # OpenAI的Assistant对话模型API (可用)
-class OpenAIAssistantBot(Bot, OpenAIImage):
+class OpenAIAssistantBot(Bot, OpenAIImage,OpenAIVision):
     def __init__(self):
         super().__init__()
-        client.api_key = conf().get("open_ai_api_key")
         self.assistant_id = conf().get("OpenAI_Assistant_ID")
         self.thread =client.beta.threads.create()
 
@@ -29,11 +29,20 @@ class OpenAIAssistantBot(Bot, OpenAIImage):
         # acquire reply content
         if context and context.type:
             if context.type == ContextType.TEXT:
-                logger.info("[OPENAI_ASSISTANT] query={}".format(query))
-                content = self.reply_text(query)
+                # Image recongnition and vision completion    
+                vision_res = self.do_vision_completion_if_need(context.kwargs["session_id"],query)
+                if vision_res:
+                    bot_type = "[GPT-4-TURBO]"
+                    logger.info(f"{bot_type} query={query}")
+                    content = vision_res
+                else:
+                    bot_type = "[OPENAI_ASSISTANT]"
+                    logger.info(f"{bot_type} query={query}")
+                    content = self.reply_text(query)
+
                 reply_content = content["content"]
                 reply = Reply(ReplyType.TEXT, reply_content)
-                logger.info(f"[OPENAI_ASSISTANT] reply={reply}")
+                logger.info(f"{bot_type} reply={reply}")
                 return reply
             
             elif context.type == ContextType.IMAGE_CREATE:
