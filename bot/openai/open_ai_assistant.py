@@ -22,8 +22,8 @@ user_session = dict()
 class OpenAIAssistantBot(Bot, OpenAIImage,OpenAIVision):
     def __init__(self):
         super().__init__()
+        self.user_card_lists = []
         self.assistant_id = conf().get("OpenAI_Assistant_ID")
-        self.thread =client.beta.threads.create()
 
     def reply(self, query, context=None):            
         # acquire reply content
@@ -38,7 +38,7 @@ class OpenAIAssistantBot(Bot, OpenAIImage,OpenAIVision):
                 else:
                     bot_type = "[OPENAI_ASSISTANT]"
                     logger.info(f"{bot_type} query={query}")
-                    content = self.reply_text(query)
+                    content = self.reply_text(query,context)
 
                 reply_content = content["content"]
                 reply = Reply(ReplyType.TEXT, reply_content)
@@ -54,10 +54,10 @@ class OpenAIAssistantBot(Bot, OpenAIImage,OpenAIVision):
                     reply = Reply(ReplyType.ERROR, retstring)
                 return reply
 
-    def reply_text(self, query, retry_count=0):
+    def reply_text(self, query, context, retry_count=0):
         try:
             result = {}
-            response = self.run(query)
+            response = self.run(query,context)
             result['content'] = self.get_response(response[0]) 
             return result
         
@@ -114,6 +114,22 @@ class OpenAIAssistantBot(Bot, OpenAIImage,OpenAIVision):
         logger.info("[OPENAI_ASSISTANT] file={} is assigned to assistant".format(context.content))
         return None
     
+    def get_threadID(self,context):
+        session_id = context.kwargs["session_id"]
+        thread = {}
+        for card_list in self.user_card_lists:
+            if session_id == card_list['session_id']:
+                thread = client.beta.threads.retrieve(card_list['thread_id'])
+                break
+        if thread:
+            return thread
+        else:
+            thread = client.beta.threads.create()
+            thread_id = thread.id
+            new_card = {"session_id": session_id, "thread_id": thread_id}
+            self.user_card_lists.append(new_card)
+            return thread
+    
     def wait_on_run(self,run,thread):
         while run.status == 'queued' or run.status == 'in_progress':
             run = client.beta.threads.runs.retrieve(
@@ -142,8 +158,8 @@ class OpenAIAssistantBot(Bot, OpenAIImage,OpenAIVision):
         assistant_message = thread_messages.data[0].content[0].text.value
         return assistant_message 
     
-    def run(self,user_input):
-        thread = self.thread
+    def run(self,user_input,context):
+        thread = self.get_threadID(context)
         run = self.submit_message(self.assistant_id,thread,user_input)
         run = self.wait_on_run(run,thread)
         return thread,run
