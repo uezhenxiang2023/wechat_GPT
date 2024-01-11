@@ -20,9 +20,11 @@ from common.expired_dict import ExpiredDict
 from common.log import logger
 from common.singleton import singleton
 from common.time_check import time_checker
+from common import const
 from config import conf, get_appdata_dir
 from lib import itchat
 from lib.itchat.content import *
+from bot.openai.open_ai_assistant import OpenAIAssistantBot
 
 
 @itchat.msg_register([TEXT, VOICE, PICTURE, NOTE, ATTACHMENT, SHARING])
@@ -103,11 +105,12 @@ def qrCallback(uuid, status, qrcode):
 
 
 @singleton
-class WechatChannel(ChatChannel):
+class WechatChannel(ChatChannel,OpenAIAssistantBot):
     NOT_SUPPORT_REPLYTYPE = []
 
     def __init__(self):
         super().__init__()
+        OpenAIAssistantBot.__init__(self)
         self.receivedMsgs = ExpiredDict(60 * 60)
 
     def startup(self):
@@ -153,11 +156,15 @@ class WechatChannel(ChatChannel):
             logger.debug("[WX]receive image msg: {}".format(cmsg.content))
         elif cmsg.ctype == ContextType.PATPAT:
             logger.debug("[WX]receive patpat msg: {}".format(cmsg.content))
+        elif cmsg.ctype == ContextType.FILE:
+            logger.debug("[WX]receive file msg: {}".format(cmsg.content))
         elif cmsg.ctype == ContextType.TEXT:
             logger.debug("[WX]receive text msg: {}, cmsg={}".format(json.dumps(cmsg._rawmsg, ensure_ascii=False), cmsg))
         else:
             logger.debug("[WX]receive msg: {}, cmsg={}".format(cmsg.content, cmsg))
         context = self._compose_context(cmsg.ctype, cmsg.content, isgroup=False, msg=cmsg)
+        if context.type == ContextType.FILE and conf().get("OpenAI_RAG") and conf().get("model")==const.OPEN_AI_ASSISTANT:
+            self.assistant_file(context)
         if context:
             self.produce(context)
 
