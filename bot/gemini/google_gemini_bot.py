@@ -35,11 +35,11 @@ class GoogleGeminiBot(Bot,GeminiVision):
             session_id = context["session_id"]
             session = self.sessions.session_query(query, session_id)
             gemini_messages = self._convert_to_gemini_messages(self._filter_messages(session.messages))
-
+            
             vision_res = self.do_vision_completion_if_need(session_id,query) # Image recongnition and vision completion
             if vision_res:
                 return vision_res
-
+        
             genai.configure(api_key=self.api_key,transport='rest')
             model = genai.GenerativeModel('gemini-pro')
             response = model.generate_content(gemini_messages)

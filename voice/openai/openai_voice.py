@@ -4,6 +4,7 @@ google voice service
 import json
 
 import openai
+from openai import OpenAI
 
 from bridge.reply import Reply, ReplyType
 from common.log import logger
@@ -13,16 +14,18 @@ import requests
 from common import const
 import datetime, random
 
+client = OpenAI()
+
 class OpenaiVoice(Voice):
     def __init__(self):
-        openai.api_key = conf().get("open_ai_api_key")
+        client.api_key = conf().get("open_ai_api_key")
 
     def voiceToText(self, voice_file):
         logger.debug("[Openai] voice file name={}".format(voice_file))
         try:
             file = open(voice_file, "rb")
-            result = openai.Audio.transcribe("whisper-1", file)
-            text = result["text"]
+            result = client.audio.transcriptions.create(model="whisper-1", file=file)
+            text = result.text
             reply = Reply(ReplyType.TEXT, text)
             logger.info("[Openai] voiceToText text={} voice file name={}".format(text, voice_file))
         except Exception as e:

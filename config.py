@@ -16,7 +16,7 @@ available_setting = {
     "open_ai_api_base": "https://api.openai.com/v1",
     "proxy": "",  # openai使用的代理
     # chatgpt模型， 当use_azure_chatgpt为true时，其名称为Azure上model deployment名称
-    "model": "gpt-3.5-turbo",  # 还支持 gpt-4, gpt-4-turbo, wenxin, xunfei, qwen
+    "model": "gpt-3.5-turbo",  # 还支持 gpt-4, gpt-4-turbo, wenxin, xunfei, qwen, openAIAssistant
     "use_azure_chatgpt": False,  # 是否使用azure的chatgpt
     "azure_deployment_id": "",  # azure 模型部署名称
     "azure_api_version": "",  # azure api版本
@@ -98,6 +98,8 @@ available_setting = {
     # elevenlabs 语音api配置
     "xi_api_key": "",    #获取ap的方法可以参考https://docs.elevenlabs.io/api-reference/quick-start/authentication
     "xi_voice_id": "",   #ElevenLabs提供了9种英式、美式等英语发音id，分别是“Adam/Antoni/Arnold/Bella/Domi/Elli/Josh/Rachel/Sam”
+    # 图像模型设置
+    "image_recognition": False, # 是否开启图片识别
     # 服务时间限制，目前支持itchat
     "chat_time_module": False,  # 是否开启服务时间限制
     "chat_start_time": "00:00",  # 服务开始时间
@@ -153,6 +155,9 @@ available_setting = {
     "linkai_api_key": "",
     "linkai_app_code": "",
     "linkai_api_base": "https://api.link-ai.chat",  # linkAI服务地址，若国内无法访问或延迟较高可改为 https://api.link-ai.tech
+
+    "OpenAI_RAG": False, # Freedom of Retrieval Augmented Generation
+    "OpenAI_Assistant_ID": "" # Assistant ID in openai platform  
 }
 
 
