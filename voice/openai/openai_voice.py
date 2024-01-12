@@ -14,11 +14,9 @@ import requests
 from common import const
 import datetime, random
 
-client = OpenAI()
+client = OpenAI(api_key=conf().get("open_ai_api_key"))
 
 class OpenaiVoice(Voice):
-    def __init__(self):
-        client.api_key = conf().get("open_ai_api_key")
 
     def voiceToText(self, voice_file):
         logger.debug("[Openai] voice file name={}".format(voice_file))
