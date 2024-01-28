@@ -163,9 +163,9 @@ class WechatChannel(ChatChannel,OpenAIAssistantBot):
         else:
             logger.debug("[WX]receive msg: {}, cmsg={}".format(cmsg.content, cmsg))
         context = self._compose_context(cmsg.ctype, cmsg.content, isgroup=False, msg=cmsg)
-        if context.type == ContextType.FILE and conf().get("OpenAI_RAG") and conf().get("model")==const.OPEN_AI_ASSISTANT:
-            self.assistant_file(context)
         if context:
+            if context.type == ContextType.FILE and conf().get("OpenAI_RAG") and conf().get("model")==const.OPEN_AI_ASSISTANT:
+                self.assistant_file(context)
             self.produce(context)
 
     @time_checker
