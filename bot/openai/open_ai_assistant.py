@@ -1,6 +1,6 @@
 # encoding:utf-8
 
-import time
+import time, io
 
 import openai
 
@@ -13,13 +13,13 @@ from bridge.reply import Reply, ReplyType
 from common.log import logger
 from config import conf
 
-client = OpenAI(api_key=conf().get("open_ai_api_key")) #Instantiate a client according to latest openai SDK
+client = OpenAI(api_key=conf().get("open_ai_api_key")) # Instantiate a client according to latest openai SDK
 
 user_session = dict()
 
 
 # OpenAI的Assistant对话模型API (可用)
-class OpenAIAssistantBot(Bot, OpenAIImage,OpenAIVision):
+class OpenAIAssistantBot(Bot, OpenAIImage, OpenAIVision):
     def __init__(self):
         super().__init__()
         self.user_card_lists = []
@@ -39,6 +39,11 @@ class OpenAIAssistantBot(Bot, OpenAIImage,OpenAIVision):
                     bot_type = "[OPENAI_ASSISTANT]"
                     logger.info(f"{bot_type} query={query}")
                     content = self.reply_text(query,context)
+                    for k, v in content.items():
+                        if k == 'image' and v:
+                            reply = Reply(ReplyType.IMAGE, v)
+                            logger.info(f"{bot_type} reply={reply}")
+                            return reply
 
                 reply_content = content["content"]
                 reply = Reply(ReplyType.TEXT, reply_content)
@@ -58,7 +63,7 @@ class OpenAIAssistantBot(Bot, OpenAIImage,OpenAIVision):
         try:
             result = {}
             response = self.run(query,context)
-            result['content'] = self.get_response(response[0]) 
+            result['image'], result['content'] = self.get_response(response[0]) 
             return result
         
         except Exception as e:
@@ -151,12 +156,22 @@ class OpenAIAssistantBot(Bot, OpenAIImage,OpenAIVision):
         )
     
     def get_response(self,thread):
+        image_storage = None
         thread_messages =client.beta.threads.messages.list(
             thread_id=thread.id,
             order='desc'
         )        
-        assistant_message = thread_messages.data[0].content[0].text.value
-        return assistant_message 
+        assistant_messages = thread_messages.data[0].content
+        for m in assistant_messages:
+            if m.type == 'image_file':
+                image_id = m.image_file.file_id
+                image_data = client.files.content(image_id)
+                image_data_bytes = image_data.read()
+                image_storage = io.BytesIO(image_data_bytes)
+                    
+            elif m.type == 'text':
+                assistant_message = m.text.value 
+        return image_storage, assistant_message 
     
     def run(self,user_input,context):
         thread = self.get_threadID(context)
