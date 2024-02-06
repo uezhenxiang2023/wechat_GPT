@@ -39,16 +39,15 @@ class OpenAIAssistantBot(Bot, OpenAIImage, OpenAIVision):
                     bot_type = "[OPENAI_ASSISTANT]"
                     logger.info(f"{bot_type} query={query}")
                     content = self.reply_text(query,context)
-                    for k, v in content.items():
-                        if k == 'image' and v:
-                            reply = Reply(ReplyType.IMAGE, v)
-                            logger.info(f"{bot_type} reply={reply}")
-                            return reply
+                    if "image" in content and content["image"]:
+                        reply_img = Reply(ReplyType.IMAGE, content["image"])
+                        logger.info(f"{bot_type} reply={reply_img}")
+                        return reply_img
 
                 reply_content = content["content"]
-                reply = Reply(ReplyType.TEXT, reply_content)
-                logger.info(f"{bot_type} reply={reply}")
-                return reply
+                reply_txt = Reply(ReplyType.TEXT, reply_content)
+                logger.info(f"{bot_type} reply={reply_txt}")
+                return reply_txt
             
             elif context.type == ContextType.IMAGE_CREATE:
                 ok, retstring = self.create_img(query, 0)
