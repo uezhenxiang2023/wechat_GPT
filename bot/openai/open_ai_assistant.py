@@ -12,6 +12,7 @@ from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common.log import logger
 from config import conf
+from lib import itchat
 
 client = OpenAI(api_key=conf().get("open_ai_api_key")) # Instantiate a client according to latest openai SDK
 
@@ -42,7 +43,12 @@ class OpenAIAssistantBot(Bot, OpenAIImage, OpenAIVision):
                     if "image" in content and content["image"]:
                         reply_img = Reply(ReplyType.IMAGE, content["image"])
                         logger.info(f"{bot_type} reply={reply_img}")
-                        return reply_img
+                        receiver = context["receiver"]
+                        image_storage = reply_img.content
+                        image_storage.seek(0)
+                        itchat.send_image(image_storage, toUserName=receiver)
+                        logger.info("[WX] sendImage, receiver={}".format(receiver))
+                        #return reply_img
 
                 reply_content = content["content"]
                 reply_txt = Reply(ReplyType.TEXT, reply_content)
