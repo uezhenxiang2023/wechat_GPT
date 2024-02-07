@@ -28,7 +28,7 @@ class OpenAIVision(object):
         msg = img_cache.get("msg")
         path = img_cache.get("path")
         msg.prepare()
-        logger.info(f"[GPT-4-1106-visionn-preview] query with images, path={path}")
+        logger.info(f"[GPT-4-VISION-PREVIEW] query with images, path={path}")
         
         # Request the gpt-4-vision-preview with the latest openai SDK
         try:
@@ -40,7 +40,7 @@ class OpenAIVision(object):
             
             return res,None
         except Exception as e:
-            logger.error(f"[GPT-4-1106-visionn-preview] vision completion, err response={e}")
+            logger.error(f"[GPT-4-VISION-PREVIEW] vision completion, err response={e}")
             return None, e
 
     def build_vision_msg(self, query: str, path: str):
