@@ -13,6 +13,7 @@ from bridge.reply import Reply, ReplyType
 from common.log import logger
 from config import conf
 from lib import itchat
+from common.tmp_dir import TmpDir
 
 client = OpenAI(api_key=conf().get("open_ai_api_key")) # Instantiate a client according to latest openai SDK
 
@@ -68,7 +69,7 @@ class OpenAIAssistantBot(Bot, OpenAIImage, OpenAIVision):
         try:
             result = {}
             response = self.run(query,context)
-            result['image'], result['content'] = self.get_response(response[0]) 
+            result['image'], result['content'] = self.get_response(response[0], context) 
             return result
         
         except Exception as e:
@@ -160,7 +161,7 @@ class OpenAIAssistantBot(Bot, OpenAIImage, OpenAIVision):
             assistant_id=assistant_id
         )
     
-    def get_response(self,thread):
+    def get_response(self, thread, context=None):
         image_storage = None
         thread_messages =client.beta.threads.messages.list(
             thread_id=thread.id,
@@ -175,7 +176,18 @@ class OpenAIAssistantBot(Bot, OpenAIImage, OpenAIVision):
                 image_storage = io.BytesIO(image_data_bytes)
                     
             elif m.type == 'text':
-                assistant_message = m.text.value 
+                assistant_message = m.text.value
+                annotations_tpye = m.text.annotations[0].type if m.text.annotations else None
+                if annotations_tpye == 'file_path':
+                    file_id = m.text.annotations[0].file_path.file_id
+                    file = client.files.content(file_id)
+                    file_data = file.read() 
+                    file_name = TmpDir().path() + m.text.annotations[0].text[18:]
+                    with open(file_name, 'wb') as f:
+                        f.write(file_data)
+                    file_storage = file_name
+                    itchat.send_file(file_storage, toUserName=context['receiver'])
+                    logger.info("[WX] sendFile, receiver={}".format(context['receiver']))
         return image_storage, assistant_message 
     
     def run(self,user_input,context):
