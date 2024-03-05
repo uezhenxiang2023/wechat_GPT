@@ -18,8 +18,29 @@ GPT4_VISION_PREVIEW = "gpt-4-vision-preview"
 WHISPER_1 = "whisper-1"
 TTS_1 = "tts-1"
 TTS_1_HD = "tts-1-hd"
+CLAUDE_3_SONNET = "claude-3-sonnet-20240229"
+CLAUDE_3_OPUT = "claude-3-opus-20240229"
+CLAUDE_21 = "claude-2.1"
+CLAUDE_20 = "claude-2.0"
 
-MODEL_LIST = ["gpt-3.5-turbo", "gpt-3.5-turbo-16k", "gpt-4", "wenxin", "wenxin-4", "xunfei", "claude", "gpt-4-turbo", GPT4_TURBO_PREVIEW, QWEN, GEMINI,OPEN_AI_ASSISTANT]
+MODEL_LIST = [
+    "gpt-3.5-turbo",
+    "gpt-3.5-turbo-16k",
+    "gpt-4", 
+    "wenxin", 
+    "wenxin-4", 
+    "xunfei", 
+    "claude", 
+    "gpt-4-turbo", 
+    GPT4_TURBO_PREVIEW, 
+    QWEN, 
+    GEMINI,
+    OPEN_AI_ASSISTANT,
+    CLAUDE_3_SONNET,
+    CLAUDE_3_OPUT,
+    CLAUDE_21,
+    CLAUDE_20
+    ]
 
 # channel
 FEISHU = "feishu"
