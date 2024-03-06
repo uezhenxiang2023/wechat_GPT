@@ -1,6 +1,7 @@
 import time
 import anthropic
 from bot.bot import Bot
+from bot.claude.claude_ai_session import ClaudeAiSession
 from bot.chatgpt.chat_gpt_session import ChatGPTSession
 from bot.openai.open_ai_image import OpenAIImage
 from bot.session_manager import SessionManager
@@ -15,7 +16,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
         super().__init__()
         self.client = anthropic.Anthropic(api_key=conf().get("claude_api_key"))
         self.model = conf().get("model")
-        self.sessions = SessionManager(ChatGPTSession, model=conf().get("model") or "gpt-3.5-turbo")
+        self.sessions = SessionManager(ClaudeAiSession, model=conf().get("model") or "gpt-3.5-turbo")
         self.system_prompt = conf().get("character_desc")
         self.claude_api_cookie = conf().get("claude_api_cookie")
         self.proxy = conf().get("proxy")
@@ -53,7 +54,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
                 return Reply(ReplyType.ERROR, self.error)"""
 
             session = self.sessions.session_query(query, session_id)
-            query_lists = session.messages[1:]
+            query_lists = session.messages
             """con_uuid = self.conversation_share_check(session_id)"""
 
            # model = conf().get("model") or "gpt-3.5-turbo"
