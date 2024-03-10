@@ -90,7 +90,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
                 #只要图片列表中有内容，就将文字请求补充进去
                 if image_content != []:
                     image_content.append(text_content)
-                    content = image_content
+                    content = image_content.copy()
                 else:
                     content = [text_content]
             elif item.get('role') == 'assistant':
