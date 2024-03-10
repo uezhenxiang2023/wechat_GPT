@@ -184,10 +184,7 @@ class ChatChannel(Channel):
         reply = e_context["reply"]
         if not e_context.is_pass():
             logger.debug("[WX] ready to handle context: type={}, content={}".format(context.type, context.content))
-            if context.type == ContextType.TEXT or context.type == ContextType.IMAGE or context.type == ContextType.IMAGE_CREATE or ContextType.FILE:  # 文字、图片和文件消息
-                context["channel"] = e_context["channel"]
-                reply = super().build_reply_content(context.content, context)
-            elif context.type == ContextType.VOICE:  # 语音消息
+            if context.type == ContextType.VOICE:  # 语音消息
                 cmsg = context["msg"]
                 cmsg.prepare()
                 file_path = context.content
@@ -214,6 +211,9 @@ class ChatChannel(Channel):
                         reply = self._generate_reply(new_context)
                     else:
                         return
+            elif context.type == ContextType.TEXT or context.type == ContextType.IMAGE or context.type == ContextType.IMAGE_CREATE or ContextType.FILE:  # 文字、图片和文件消息
+                context["channel"] = e_context["channel"]
+                reply = super().build_reply_content(context.content, context)
             elif context.type == ContextType.IMAGE:  # 图片消息，当前仅做下载保存到本地的逻辑
                 memory.USER_IMAGE_CACHE[context["session_id"]] = {
                     "path": context.content,
