@@ -64,6 +64,9 @@ class OpenAIAssistantBot(Bot, OpenAIImage, OpenAIVision):
                 else:
                     reply = Reply(ReplyType.ERROR, retstring)
                 return reply
+            
+            elif context.type == ContextType.FILE:
+                return self.assistant_file(context)
 
     def reply_text(self, query, context, retry_count=0):
         try:
