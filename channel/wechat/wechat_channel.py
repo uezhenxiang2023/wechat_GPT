@@ -26,7 +26,7 @@ from lib import itchat
 from lib.itchat.content import *
 
 
-@itchat.msg_register([TEXT, VOICE, PICTURE, NOTE, ATTACHMENT, SHARING])
+@itchat.msg_register([TEXT, VOICE, PICTURE, VIDEO, NOTE, ATTACHMENT, SHARING])
 def handler_single_msg(msg):
     try:
         cmsg = WechatMessage(msg, False)
@@ -152,6 +152,10 @@ class WechatChannel(ChatChannel):
             logger.debug("[WX]receive voice msg: {}".format(cmsg.content))
         elif cmsg.ctype == ContextType.IMAGE:
             logger.debug("[WX]receive image msg: {}".format(cmsg.content))
+        elif cmsg.ctype == ContextType.VIDEO:
+            logger.debug("[WX]receive video msg: {}".format(cmsg.content))
+        elif cmsg.ctype == ContextType.SHARING:
+            logger.debug("[WX]receive url msg: {}".format(cmsg.content))
         elif cmsg.ctype == ContextType.PATPAT:
             logger.debug("[WX]receive patpat msg: {}".format(cmsg.content))
         elif cmsg.ctype == ContextType.FILE:
