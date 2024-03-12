@@ -9,7 +9,7 @@ from bridge.context import *
 from bridge.reply import *
 from channel.channel import Channel
 from common.dequeue import Dequeue
-from common import memory
+from common import memory, const
 from plugins import *
 
 try:
@@ -211,7 +211,11 @@ class ChatChannel(Channel):
                         reply = self._generate_reply(new_context)
                     else:
                         return
-            elif context.type == ContextType.TEXT or context.type == ContextType.IMAGE or context.type == ContextType.IMAGE_CREATE or ContextType.FILE:  # 文字、图片和文件消息
+            elif (context.type == ContextType.TEXT or 
+                  context.type == ContextType.FILE or 
+                  context.type == ContextType.IMAGE_CREATE or 
+                  (context.type == ContextType.IMAGE and conf().get('model') in [const.CLAUDE_3_OPUT, const.CLAUDE_3_SONNET])):
+                # 文字、图片和文件消息
                 context["channel"] = e_context["channel"]
                 reply = super().build_reply_content(context.content, context)
             elif context.type == ContextType.IMAGE:  # 图片消息，当前仅做下载保存到本地的逻辑
