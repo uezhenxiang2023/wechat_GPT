@@ -18,10 +18,12 @@ GPT4_VISION_PREVIEW = "gpt-4-vision-preview"
 WHISPER_1 = "whisper-1"
 TTS_1 = "tts-1"
 TTS_1_HD = "tts-1-hd"
+CLAUDE_3_HAIKU = "claude-3-haiku-20240307"
 CLAUDE_3_SONNET = "claude-3-sonnet-20240229"
-CLAUDE_3_OPUT = "claude-3-opus-20240229"
+CLAUDE_3_OPUS = "claude-3-opus-20240229"
 CLAUDE_21 = "claude-2.1"
 CLAUDE_20 = "claude-2.0"
+CLAUDE_3_LIST = [CLAUDE_3_HAIKU, CLAUDE_3_SONNET, CLAUDE_3_OPUS]
 
 MODEL_LIST = [
     "gpt-3.5-turbo",
@@ -36,8 +38,9 @@ MODEL_LIST = [
     QWEN, 
     GEMINI,
     OPEN_AI_ASSISTANT,
+    CLAUDE_3_HAIKU,
     CLAUDE_3_SONNET,
-    CLAUDE_3_OPUT,
+    CLAUDE_3_OPUS,
     CLAUDE_21,
     CLAUDE_20
     ]
