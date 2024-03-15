@@ -1,6 +1,7 @@
 import time
 import anthropic
 import base64
+from pypdf import PdfReader
 from bot.bot import Bot
 from bot.claude.claude_ai_session import ClaudeAiSession
 from bot.openai.open_ai_image import OpenAIImage
@@ -8,6 +9,7 @@ from bot.session_manager import SessionManager
 from bridge.context import Context, ContextType
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common import memory
 from config import conf
 
 
@@ -24,7 +26,9 @@ class ClaudeAIBot(Bot, OpenAIImage):
     def reply(self, query, context: Context = None) -> Reply:
         if context.type == ContextType.IMAGE:
             return self.claude_vision(query, context)
-        if context.type == ContextType.TEXT:
+        elif context.type == ContextType.FILE:
+            return self._file_cache(query, context)
+        elif context.type == ContextType.TEXT:
             return self._chat(query, context)
         elif context.type == ContextType.IMAGE_CREATE:
             ok, res = self.create_img(query, 0)
@@ -52,6 +56,12 @@ class ClaudeAIBot(Bot, OpenAIImage):
             return Reply(ReplyType.ERROR, "请再问我一次吧")
 
         try:
+            file_cache = memory.USER_FILE_CACHE.get(session_id)
+            if file_cache:
+                file_prompt = self.read_file(file_cache)
+                system_prompt = self.system_prompt + file_prompt
+            else:
+                system_prompt = self.system_prompt
             session = self.sessions.session_query(query, session_id)
             logger.info(f"[CLAUDEAI] query={query}")
             claude_message = self._convert_to_claude_messages(session.messages)
@@ -60,7 +70,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
                 model=self.model,
                 max_tokens=1000,
                 temperature=0.0,
-                system=self.system_prompt,
+                system=system_prompt,
                 messages=claude_message
             )
             reply_content = response.content[0].text
@@ -101,6 +111,28 @@ class ClaudeAIBot(Bot, OpenAIImage):
             res.append({'role': role, 'content': content})
         return res
     
+    def _file_cache(self, query, context):
+        memory.USER_FILE_CACHE[context['session_id']] = {
+            "path": context.content,
+            "msg": context.get("msg")
+        }
+        logger.info("[CLAUDE] file={} is assigned to assistant".format(context.content))
+        return None
+    
+    def read_file(self,file_cache):
+        msg = file_cache.get("msg")
+        path = file_cache.get("path")
+        msg.prepare()
+        reader = PdfReader(path)
+        number_of_pages = len(reader.pages)
+        texts = ''.join([page.extract_text() for page in reader.pages])
+        total_characters = len(texts)
+        file_prompt = f'''answer question according to the following information:\n
+                Number_of_pages: {number_of_pages}\n
+                Total_Characters: {total_characters}\n
+                Detail_Conent: <paper>{texts}</paper>'''
+        return file_prompt
+
     def claude_vision(self, query, context):
         session_id = context.kwargs["session_id"]
         msg = context.kwargs["msg"]
