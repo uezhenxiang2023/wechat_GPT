@@ -1,6 +1,7 @@
 import time
 import anthropic
 import base64
+import re
 from pypdf import PdfReader
 from bot.bot import Bot
 from bot.claude.claude_ai_session import ClaudeAiSession
@@ -127,9 +128,27 @@ class ClaudeAIBot(Bot, OpenAIImage):
         number_of_pages = len(reader.pages)
         texts = ''.join([page.extract_text() for page in reader.pages])
         total_characters = len(texts)
+        line_list = texts.splitlines()
+        # 统计每一场的字数
+        paragraph = ""
+        sc_count = 0
+        counter_dict ={}
+        # 定义场次描述规则 
+        pattern = r"第.*场"
+        for i, v in enumerate(line_list):
+            # 只要每行的前3～7个字，符合场次描述规则
+            if any(re.match(pattern, v[:n]) is not None for n in (3, 4, 5, 6, 7)):
+                counter_dict[f"第{sc_count}场"] = f'{len(paragraph)}字'
+                sc_count += 1
+                paragraph = ""
+            paragraph += v.strip()
+        # 循环结束后，捕获最后一场戏的字数
+        counter_dict[f"第{sc_count}场"] = f'{len(paragraph)}字'
+        del counter_dict["第0场"]
         file_prompt = f'''answer question according to the following information:\n
                 Number_of_pages: {number_of_pages}\n
                 Total_Characters: {total_characters}\n
+                Scene_Characters: {counter_dict}\n
                 Detail_Conent: <paper>{texts}</paper>'''
         return file_prompt
 
