@@ -60,7 +60,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
             file_cache = memory.USER_FILE_CACHE.get(session_id)
             if file_cache:
                 file_prompt = self.read_file(file_cache)
-                system_prompt = self.system_prompt + file_prompt
+                system_prompt = file_prompt + self.system_prompt
             else:
                 system_prompt = self.system_prompt
             session = self.sessions.session_query(query, session_id)
