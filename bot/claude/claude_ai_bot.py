@@ -2,6 +2,7 @@ import time
 import anthropic
 import base64
 import re
+import docx
 from pypdf import PdfReader
 from bot.bot import Bot
 from bot.claude.claude_ai_session import ClaudeAiSession
@@ -60,7 +61,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
             file_cache = memory.USER_FILE_CACHE.get(session_id)
             if file_cache:
                 file_prompt = self.read_file(file_cache)
-                system_prompt = self.system_prompt + file_prompt
+                system_prompt = file_prompt + self.system_prompt
             else:
                 system_prompt = self.system_prompt
             session = self.sessions.session_query(query, session_id)
@@ -124,9 +125,14 @@ class ClaudeAIBot(Bot, OpenAIImage):
         msg = file_cache.get("msg")
         path = file_cache.get("path")
         msg.prepare()
-        reader = PdfReader(path)
-        number_of_pages = len(reader.pages)
-        texts = ''.join([page.extract_text() for page in reader.pages])
+        if path[-5:] == '.docx':
+            reader = docx.Document(path)
+            texts = ''.join([(para.text + '\n') for para in reader.paragraphs])
+            number_of_pages = int(len(texts)/600) + 1
+        elif path[-4:] == '.pdf':
+            reader = PdfReader(path)
+            number_of_pages = len(reader.pages)
+            texts = ''.join([page.extract_text() for page in reader.pages])
         total_characters = len(texts)
         line_list = texts.splitlines()
         # 统计每一场的字数
@@ -134,7 +140,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
         sc_count = 0
         counter_dict ={}
         # 定义场次描述规则 
-        pattern = r"第.*场"
+        pattern = r"第.*场|场景.*"
         for i, v in enumerate(line_list):
             # 只要每行的前3～7个字，符合场次描述规则
             if any(re.match(pattern, v[:n]) is not None for n in (3, 4, 5, 6, 7)):
