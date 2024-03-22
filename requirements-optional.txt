@@ -36,3 +36,6 @@ broadscope_bailian
 
 # google
 google-generativeai
+
+# RAG based .docx file
+python-docx
