@@ -7,5 +7,5 @@ chardet>=5.1.0
 Pillow
 pre-commit
 web.py
-elevenlabs
+elevenlabs==1.0.3
 anthropic
