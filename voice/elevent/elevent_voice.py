@@ -28,7 +28,5 @@ class ElevenLabsVoice(Voice):
         )
         fileName = TmpDir().path() + "reply-" + str(int(time.time())) + "-" + str(hash(text) & 0x7FFFFFFF) + ".mp3"
         save(audio, fileName)
-        """with open(fileName, "wb") as f:
-            f.write(audio)"""
         logger.info("[ElevenLabs] textToVoice text={} voice file name={}".format(text, fileName))
         return Reply(ReplyType.VOICE, fileName)
