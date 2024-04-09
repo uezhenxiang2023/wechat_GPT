@@ -13,6 +13,7 @@ from bridge.reply import Reply, ReplyType
 from common.log import logger
 from common import memory
 from config import conf
+from PIL import Image
 
 
 class ClaudeAIBot(Bot, OpenAIImage):
@@ -151,11 +152,24 @@ class ClaudeAIBot(Bot, OpenAIImage):
         # 循环结束后，捕获最后一场戏的字数
         counter_dict[f"第{sc_count}场"] = f'{len(paragraph)}字'
         del counter_dict["第0场"]
-        file_prompt = f'''answer question according to the following information:\n
-                Number_of_pages: {number_of_pages}\n
-                Total_Characters: {total_characters}\n
-                Scene_Characters: {counter_dict}\n
-                Detail_Conent: <paper>{texts}</paper>'''
+        file_prompt = f'''\
+        Here are some information for you to reference for your task:\n
+        <ScreenPlay>\n
+        <Number_of_Pages>
+        {number_of_pages}
+        </Number_of_Pages>\n
+        <Total_Characters>
+        {len(texts)}
+        </Total_Characters>\n
+        <Scene_Characters>
+        {counter_dict}
+        </Scene_Characters>\n
+        <Detail_Conent>
+        {texts}
+        </Detail_Conent>\n
+        </ScreenPlay>
+        Please just response with the exact result,that means excluding any friendly preamble before providing the requested output.
+        '''
         return file_prompt
 
     def claude_vision(self, query, context):
@@ -164,12 +178,21 @@ class ClaudeAIBot(Bot, OpenAIImage):
         img_path = context.content
         msg.prepare()
         logger.info(f"[CLAUDI] query with images, path={img_path}")
+        img = Image.open(img_path)
+        # check if the image has an alpha channel
+        if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
+            # Convert the image to RGB mode,whick removes the alpha channel
+            img = img.convert('RGB')
+            # Save the converted image
+            img_path_no_alpha = img_path[:len(img_path)-3] + 'jpg'
+            img.save(img_path_no_alpha)
+            # Update img_path with the path to the converted image
+            img_path = img_path_no_alpha
 
         with open(img_path, "rb") as image_file:
             binary_data = image_file.read()
             base_64_encoded_data = base64.b64encode(binary_data)
             base64_string = base_64_encoded_data.decode('utf-8')
-
         image_query = {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64_string}}
         self.sessions.session_query(image_query, session_id)
         #return Reply(ReplyType.TEXT, f"[CLAUDI] query with images, path={img_path}")
