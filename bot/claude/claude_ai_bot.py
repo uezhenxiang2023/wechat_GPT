@@ -84,8 +84,10 @@ class ClaudeAIBot(Bot, OpenAIImage):
         except Exception as e:
             logger.exception(e)
             # retry
-            time.sleep(2)
+            time.sleep(5)
             logger.warn(f"[CLAUDE] do retry, times={retry_count}")
+            # Pop last role message avoiding the same two adjacent role messages during retrying.
+            session.messages.pop()
             return self._chat(query, context, retry_count + 1)
         
     def _convert_to_claude_messages(self, messages: list):
@@ -159,7 +161,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
         {number_of_pages}
         </Number_of_Pages>\n
         <Total_Characters>
-        {len(texts)}
+        {total_characters}
         </Total_Characters>\n
         <Scene_Characters>
         {counter_dict}
