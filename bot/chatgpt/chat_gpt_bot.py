@@ -18,6 +18,7 @@ from common.log import logger
 from common.token_bucket import TokenBucket
 from common import memory,utils,const
 from config import conf, load_config
+from PIL import Image
 
 client = OpenAI(api_key=conf().get("open_ai_api_key")) #Instantiate a client according to latest openai SDK
 
@@ -76,7 +77,10 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             # if context.get('stream'):
             #     # reply in stream
             #     return self.reply_text_stream(query, new_query, session_id)
-
+            if self.args['model'] == const.GPT4_TURBO and query[:8] == 'https://':
+                #and any(query[n:] in ['jpg', 'png', 'webp', 'gif'] for n in (-3, -4))
+                return self.gpt4_turbo_vision(query, context, session)
+            
             reply_content = self.reply_text(session_id,session, api_key, args=new_args)
             logger.debug(
                 "[CHATGPT] new_query={}, session_id={}, reply_cont={}, completion_tokens={}".format(
@@ -104,6 +108,8 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             else:
                 reply = Reply(ReplyType.ERROR, retstring)
             return reply
+        elif context.type == ContextType.IMAGE and model == const.GPT4_TURBO:
+            return self.gpt4_turbo_vision(query, context)
         else:
             reply = Reply(ReplyType.ERROR, "Bot不支持处理{}类型的消息".format(context.type))
             return reply
@@ -122,13 +128,18 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             # if api_key == None, the default openai.api_key will be used
             if args is None:
                 args = self.args
+            # Image recongnition and vision completion with gpt-4-vision-preview
+            if args['model'] != const.GPT4_TURBO:  
+                vision_res = self.do_vision_completion_if_need(session_id,session.messages[-1]['content'])
+                if vision_res:
+                    return vision_res
+            if type(session.messages[-2]['content']).__name__ == 'dict':
+                messages = self._convert_to_gpt4_turbo_messages(session.messages)
+                self.sessions.clear_session(session_id)
+            else:
+                messages = session.messages
 
-            # Image recongnition and vision completion    
-            vision_res = self.do_vision_completion_if_need(session_id,session.messages[-1]['content'])
-            if vision_res:
-                return vision_res
-            
-            response = client.chat.completions.create(messages=session.messages, **args)
+            response = client.chat.completions.create(messages=messages, **args)
             # logger.debug("[CHATGPT] response={}".format(response))
             # logger.info("[ChatGPT] reply={}, total_tokens={}".format(response.choices[0]['message']['content'], response["usage"]["total_tokens"]))
             return {
@@ -169,6 +180,62 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
                 return self.reply_text(session_id,session, api_key, args, retry_count + 1)
             else:
                 return result
+            
+    def gpt4_turbo_vision(self, query, context, session: ChatGPTSession):
+        session_id = context.kwargs["session_id"]
+        msg = context.kwargs["msg"]
+        img_path = context.content
+        logger.info(f"[GPT4_TURBO] query with images, path={img_path}")
+        # Image URL request
+        if query[:8] == 'https://':
+            image_prompt = img_path
+            image_type = 'image_url'
+            # Clear raw url in user content
+            session.messages.pop()
+        # Image base64 encoded requese
+        else:
+            msg.prepare()
+            img = Image.open(img_path)
+            # check if the image has an alpha channel
+            if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
+                # Convert the image to RGB mode,whick removes the alpha channel
+                img = img.convert('RGB')
+                # Save the converted image
+                img_path_no_alpha = img_path[:len(img_path)-3] + 'jpg'
+                img.save(img_path_no_alpha)
+                # Update img_path with the path to the converted image
+                img_path = img_path_no_alpha
+
+            with open(img_path, "rb") as image_file:
+                binary_data = image_file.read()
+                base_64_encoded_data = base64.b64encode(binary_data)
+                base64_string = base_64_encoded_data.decode('utf-8')
+                image_prompt = base64_string
+                image_type = '' # pending OpenAI Update API
+        image_query = {"type": image_type, image_type: {"url": image_prompt}}
+        self.sessions.session_query(image_query, session_id)
+    
+    def _convert_to_gpt4_turbo_messages(self, messages: list):
+        res = []
+        system_content = messages.pop(0)
+        res.append(system_content)
+        image_content = []
+        text_content = {'type': 'text', 'text': messages[-1]['content']}
+        for item in messages:
+            if item.get('role') == 'user':
+                #如果user内容是图片,构建图片列表
+                if type(item.get('content')).__name__ == 'dict':
+                    image_content.append(item['content'])
+                    continue
+                if type(item.get('content')).__name__ == 'str':
+                    continue
+            elif item.get('role') == 'assistant':
+                continue
+        #将图片识别的文字请求补充进去
+        image_content.append(text_content)
+        content = image_content.copy()
+        res.append({'role': 'user', 'content': content})
+        return res
 
 
 class AzureChatGPTBot(ChatGPTBot):
