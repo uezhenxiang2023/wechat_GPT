@@ -473,5 +473,5 @@ class Godcmd(Plugin):
 
     def model_mapping(self, model) -> str:
         if model == "gpt-4-turbo":
-            return const.GPT4_TURBO_PREVIEW
+            return const.GPT4_TURBO
         return model
