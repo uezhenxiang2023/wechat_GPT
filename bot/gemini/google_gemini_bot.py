@@ -52,7 +52,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     file_cache = memory.USER_FILE_CACHE.get(session_id)
                     if file_cache:
                         file_prompt = self.read_file(file_cache)
-                        system_prompt = file_prompt + self.system_prompt
+                        system_prompt = self.system_prompt + file_prompt
                     else:
                         system_prompt = self.system_prompt
 
@@ -97,8 +97,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 logger.warn(f"[Gemini] Unsupported message type, type={context.type}")
                 return Reply(ReplyType.ERROR, f"[Gemini] Unsupported message type, type={context.type}")
         except Exception as e:
-            logger.error("[Gemini] fetch reply error, may contain unsafe content")
-            logger.error(e)
+            logger.error("[Gemini] fetch reply error, {}".format(e))
 
     def _convert_to_gemini_messages(self, messages: list):
         res = []
@@ -180,7 +179,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         counter_dict[f"第{sc_count}场"] = f'{len(paragraph)}字'
         del counter_dict["第0场"]
         file_prompt = f'''\
-        Here are some information for you to reference for your task:\n
+        \nHere are some information for you to reference for your task:\n
         Number_of_Pages:{number_of_pages}\n
         Total_Characters:{total_characters}\n
         Scene_Characters:{counter_dict}\n
