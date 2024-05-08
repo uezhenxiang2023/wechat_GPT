@@ -26,47 +26,56 @@ class OpenAIAssistantBot(Bot, OpenAIImage, OpenAIVision):
         super().__init__()
         self.user_card_lists = []
         self.assistant_id = conf().get("OpenAI_Assistant_ID")
+        self.vector_store_id = conf().get("OpenAI_Vector_Stores_ID")
+        client.beta.assistants.update(
+            assistant_id=self.assistant_id,
+            tool_resources={
+                'file_search':{
+                    'vector_store_ids': [self.vector_store_id]
+                }
+            }
+        )
 
     def reply(self, query, context=None):            
         # acquire reply content
-        if context and context.type:
-            if context.type == ContextType.TEXT:
-                # Image recongnition and vision completion    
-                vision_res = self.do_vision_completion_if_need(context.kwargs["session_id"],query)
-                if vision_res:
-                    bot_type = "[GPT-4-TURBO]"
-                    logger.info(f"{bot_type} query={query}")
-                    content = vision_res
-                else:
-                    bot_type = "[OPENAI_ASSISTANT]"
-                    logger.info(f"{bot_type} query={query}")
-                    content = self.reply_text(query,context)
-                    if "image" in content and content["image"]:
-                        reply_img = Reply(ReplyType.IMAGE, content["image"])
-                        logger.info(f"{bot_type} reply={reply_img}")
-                        receiver = context["receiver"]
-                        image_storage = reply_img.content
-                        image_storage.seek(0)
-                        itchat.send_image(image_storage, toUserName=receiver)
-                        logger.info("[WX] sendImage, receiver={}".format(receiver))
-                        #return reply_img
+        if context.type == ContextType.TEXT:
+            # Image recongnition and vision completion    
+            vision_res = self.do_vision_completion_if_need(context.kwargs["session_id"],query)
+            if vision_res:
+                bot_type = "[GPT-4-TURBO]"
+                logger.info(f"{bot_type} query={query}")
+                content = vision_res
+            else:
+                bot_type = "[OPENAI_ASSISTANT]"
+                logger.info(f"{bot_type} query={query}")
+                content = self.reply_text(query,context)
+                if "image" in content and content["image"]:
+                    reply_img = Reply(ReplyType.IMAGE, content["image"])
+                    logger.info(f"{bot_type} reply={reply_img}")
+                    receiver = context["receiver"]
+                    image_storage = reply_img.content
+                    image_storage.seek(0)
+                    itchat.send_image(image_storage, toUserName=receiver)
+                    logger.info("[WX] sendImage, receiver={}".format(receiver))
+                    #return reply_img
 
-                reply_content = content["content"]
-                reply_txt = Reply(ReplyType.TEXT, reply_content)
-                logger.info(f"{bot_type} reply={reply_txt}")
-                return reply_txt
-            
-            elif context.type == ContextType.IMAGE_CREATE:
-                ok, retstring = self.create_img(query, 0)
-                reply = None
-                if ok:
-                    reply = Reply(ReplyType.IMAGE_URL, retstring)
-                else:
-                    reply = Reply(ReplyType.ERROR, retstring)
-                return reply
-            
-            elif context.type == ContextType.FILE:
-                return self.assistant_file(context)
+            reply_content = content["content"]
+            reply_txt = Reply(ReplyType.TEXT, reply_content)
+            logger.info(f"{bot_type} reply={reply_txt}")
+            return reply_txt        
+        elif context.type == ContextType.IMAGE_CREATE:
+            ok, retstring = self.create_img(query, 0)
+            reply = None
+            if ok:
+                reply = Reply(ReplyType.IMAGE_URL, retstring)
+            else:
+                reply = Reply(ReplyType.ERROR, retstring)
+            return reply      
+        elif context.type == ContextType.FILE:
+            return self.assistant_file(context)
+        else:
+            reply = Reply(ReplyType.ERROR, "Bot不支持处理{}类型的消息".format(context.type))
+            return reply
 
     def reply_text(self, query, context, retry_count=0):
         try:
@@ -108,23 +117,29 @@ class OpenAIAssistantBot(Bot, OpenAIImage, OpenAIVision):
         filename = path[len('tmp/'):]
         msg = context.kwargs['msg']
         file_list = client.files.list(purpose='assistants')
+        vs_file_list = client.beta.vector_stores.files.list(vector_store_id=self.vector_store_id)
         file = None
+        vs_file = None
 
         for item in file_list:
             if filename == item.filename:
                 file = client.files.retrieve(file_id=item.id)
                 break
-
         if file is None:
             msg.prepare()
             file = client.files.create(
                         file=open(path,'rb'),
                         purpose='assistants'
                     )
-        client.beta.assistants.update(
-            assistant_id=self.assistant_id,
-            file_ids=[file.id]
-        )
+        for vs_item in vs_file_list:
+            if file.id == vs_item.id:
+                vs_file = vs_item.id
+                break
+        if vs_file is None:
+            client.beta.vector_stores.files.create(
+                vector_store_id=self.vector_store_id,
+                file_id=file.id
+            )
         logger.info("[OPENAI_ASSISTANT] file={} is assigned to assistant".format(context.content))
         return None
     

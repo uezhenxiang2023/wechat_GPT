@@ -39,7 +39,7 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
         self.args = {
             "model": conf().get("model") or "gpt-3.5-turbo",  # 对话模型的名称
             "temperature": conf().get("temperature", 0.9),  # 值在[0,1]之间，越大表示回复越具有不确定性
-            # "max_tokens":4096,  # 回复最大的字符数
+            "max_tokens":4096,  # 回复最大的字符数
             "top_p": conf().get("top_p", 1),
             "frequency_penalty": conf().get("frequency_penalty", 0.0),  # [-2,2]之间，该值越大则更倾向于产生不同的内容
             "presence_penalty": conf().get("presence_penalty", 0.0),  # [-2,2]之间，该值越大则更倾向于产生不同的内容
@@ -108,8 +108,10 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             else:
                 reply = Reply(ReplyType.ERROR, retstring)
             return reply
-        elif context.type == ContextType.IMAGE and model == const.GPT4_TURBO:
-            return self.gpt4_turbo_vision(query, context)
+        elif context.type == ContextType.IMAGE and self.args['model'] == const.GPT4_TURBO:
+            session_id = context["session_id"]
+            session = self.sessions.session_query(query, session_id)
+            return self.gpt4_turbo_vision(query, context, session)
         else:
             reply = Reply(ReplyType.ERROR, "Bot不支持处理{}类型的消息".format(context.type))
             return reply
@@ -139,14 +141,25 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             else:
                 messages = session.messages
 
-            response = client.chat.completions.create(messages=messages, **args)
+            # Vision request by base64
+            content_type = type(messages[-1].get('content')).__name__ 
+            if content_type == 'list' and \
+                messages[-1]['content'][0]['image_url']['url'][:8] != 'https://':
+                response = self.base64_image_request(messages)
+                return {
+                    "total_tokens": response.json()['usage']['total_tokens'],
+                    "completion_tokens": response.json()['usage']['completion_tokens'],
+                    "content": response.json()['choices'][0]['message']['content']
+                }
+            else:
+                response = client.chat.completions.create(messages=messages, **args)
             # logger.debug("[CHATGPT] response={}".format(response))
             # logger.info("[ChatGPT] reply={}, total_tokens={}".format(response.choices[0]['message']['content'], response["usage"]["total_tokens"]))
-            return {
-                "total_tokens": response.usage.total_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "content": response.choices[0].message.content,
-            }
+                return {
+                    "total_tokens": response.usage.total_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "content": response.choices[0].message.content,
+                }
         except Exception as e:
             need_retry = retry_count < 2
             result = {"completion_tokens": 0, "content": "我现在有点累了，等会再来吧"}
@@ -189,10 +202,9 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
         # Image URL request
         if query[:8] == 'https://':
             image_prompt = img_path
-            image_type = 'image_url'
             # Clear raw url in user content
             session.messages.pop()
-        # Image base64 encoded requese
+        # Image base64 encoded request
         else:
             msg.prepare()
             img = Image.open(img_path)
@@ -210,9 +222,8 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
                 binary_data = image_file.read()
                 base_64_encoded_data = base64.b64encode(binary_data)
                 base64_string = base_64_encoded_data.decode('utf-8')
-                image_prompt = base64_string
-                image_type = '' # pending OpenAI Update API
-        image_query = {"type": image_type, image_type: {"url": image_prompt}}
+                image_prompt = f'data:image/jpeg; base64, {base64_string}'
+        image_query = {"type": 'image_url', 'image_url': {"url": image_prompt}}
         self.sessions.session_query(image_query, session_id)
     
     def _convert_to_gpt4_turbo_messages(self, messages: list):
@@ -236,6 +247,19 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
         content = image_content.copy()
         res.append({'role': 'user', 'content': content})
         return res
+    
+    def base64_image_request(self,messages:list):
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {client.api_key}"
+        }
+        payload = {
+            'model': self.args['model'],
+            'max_tokens': self.args['max_tokens'],
+            'messages': messages
+        }
+        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+        return response
 
 
 class AzureChatGPTBot(ChatGPTBot):
