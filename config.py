@@ -158,7 +158,8 @@ available_setting = {
     "linkai_api_base": "https://api.link-ai.chat",  # linkAI服务地址，若国内无法访问或延迟较高可改为 https://api.link-ai.tech
 
     "OpenAI_RAG": False, # Freedom of Retrieval Augmented Generation
-    "OpenAI_Assistant_ID": "" # Assistant ID in openai platform  
+    "OpenAI_Assistant_ID": "" ,# Assistant ID in openai platform
+    "OpenAI_Vector_Stores_ID": "" # Vector Stores in openai API  
 }
 
 
