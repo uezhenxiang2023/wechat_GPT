@@ -77,7 +77,7 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             # if context.get('stream'):
             #     # reply in stream
             #     return self.reply_text_stream(query, new_query, session_id)
-            if self.args['model'] == const.GPT4_TURBO and query[:8] == 'https://':
+            if self.args['model'] in const.GPT4_MULTIMODEL_LIST and query[:8] == 'https://':
                 #and any(query[n:] in ['jpg', 'png', 'webp', 'gif'] for n in (-3, -4))
                 return self.gpt4_turbo_vision(query, context, session)
             
@@ -108,7 +108,7 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             else:
                 reply = Reply(ReplyType.ERROR, retstring)
             return reply
-        elif context.type == ContextType.IMAGE and self.args['model'] == const.GPT4_TURBO:
+        elif context.type == ContextType.IMAGE and self.args['model'] in const.GPT4_MULTIMODEL_LIST:
             session_id = context["session_id"]
             session = self.sessions.session_query(query, session_id)
             return self.gpt4_turbo_vision(query, context, session)
@@ -131,7 +131,7 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             if args is None:
                 args = self.args
             # Image recongnition and vision completion with gpt-4-vision-preview
-            if args['model'] != const.GPT4_TURBO:  
+            if args['model'] not in const.GPT4_MULTIMODEL_LIST:  
                 vision_res = self.do_vision_completion_if_need(session_id,session.messages[-1]['content'])
                 if vision_res:
                     return vision_res
