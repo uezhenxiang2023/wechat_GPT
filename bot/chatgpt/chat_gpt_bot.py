@@ -45,11 +45,11 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             "presence_penalty": conf().get("presence_penalty", 0.0),  # [-2,2]之间，该值越大则更倾向于产生不同的内容
             "timeout": conf().get("request_timeout", None),  # 重试超时时间，在这个时间内，将会自动重试
         }
-
+        self.model = self.args.get('model').upper()
     def reply(self, query, context=None):
         # acquire reply content
         if context.type == ContextType.TEXT:
-            logger.info("[CHATGPT] query={}".format(query))
+            logger.info("[{}] query={}".format(self.model, query))
 
             session_id = context["session_id"]
             reply = None
@@ -79,11 +79,12 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             #     return self.reply_text_stream(query, new_query, session_id)
             if self.args['model'] in const.GPT4_MULTIMODEL_LIST and query[:8] == 'https://':
                 #and any(query[n:] in ['jpg', 'png', 'webp', 'gif'] for n in (-3, -4))
-                return self.gpt4_turbo_vision(query, context, session)
+                return self.gpt4_vision(query, context, session)
             
             reply_content = self.reply_text(session_id,session, api_key, args=new_args)
             logger.debug(
-                "[CHATGPT] new_query={}, session_id={}, reply_cont={}, completion_tokens={}".format(
+                "[{}] new_query={}, session_id={}, reply_cont={}, completion_tokens={}".format(
+                    self.model,
                     session.messages,
                     session_id,
                     reply_content["content"],
@@ -97,7 +98,7 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
                 reply = Reply(ReplyType.TEXT, reply_content["content"])
             else:
                 reply = Reply(ReplyType.ERROR, reply_content["content"])
-                logger.debug("[CHATGPT] reply {} used 0 tokens.".format(reply_content))
+                logger.debug("[{}] reply {} used 0 tokens.".format(self.model, reply_content))
             return reply
 
         elif context.type == ContextType.IMAGE_CREATE:
@@ -108,12 +109,13 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             else:
                 reply = Reply(ReplyType.ERROR, retstring)
             return reply
-        elif context.type == ContextType.IMAGE and self.args['model'] in const.GPT4_MULTIMODEL_LIST:
-            session_id = context["session_id"]
-            session = self.sessions.session_query(query, session_id)
-            return self.gpt4_turbo_vision(query, context, session)
+        elif context.type == ContextType.IMAGE:
+            if self.args['model'] in const.GPT4_MULTIMODEL_LIST:
+                session_id = context["session_id"]
+                session = self.sessions.session_query(query, session_id)
+                return self.gpt4_vision(query, context, session)
         else:
-            reply = Reply(ReplyType.ERROR, "Bot不支持处理{}类型的消息".format(context.type))
+            reply = Reply(ReplyType.ERROR, "[{}]不支持处理{}类型的消息".format(self.model, context.type))
             return reply
 
     def reply_text(self,session_id:str, session: ChatGPTSession, api_key=None, args=None, retry_count=0) -> dict:
@@ -131,7 +133,7 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             if args is None:
                 args = self.args
             # Image recongnition and vision completion with gpt-4-vision-preview
-            if args['model'] not in const.GPT4_MULTIMODEL_LIST:  
+            if args['model'] == const.GPT4_VISION_PREVIEW:  
                 vision_res = self.do_vision_completion_if_need(session_id,session.messages[-1]['content'])
                 if vision_res:
                     return vision_res
@@ -164,41 +166,41 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             need_retry = retry_count < 2
             result = {"completion_tokens": 0, "content": "我现在有点累了，等会再来吧"}
             if isinstance(e, openai.RateLimitError):
-                logger.warn("[CHATGPT] RateLimitError: {}".format(e))
+                logger.warn("[{}] RateLimitError: {}".format(self.model, e))
                 result["content"] = "提问太快啦，请休息一下再问我吧"
                 if need_retry:
                     time.sleep(20)
             elif isinstance(e, openai.Timeout):
-                logger.warn("[CHATGPT] Timeout: {}".format(e))
+                logger.warn("[{}] Timeout: {}".format(self.model, e))
                 result["content"] = "我没有收到你的消息"
                 if need_retry:
                     time.sleep(5)
             elif isinstance(e, openai.APIError):
-                logger.warn("[CHATGPT] Bad Gateway: {}".format(e))
+                logger.warn("[{}] Bad Gateway: {}".format(self.model, e))
                 result["content"] = "请再问我一次"
                 if need_retry:
                     time.sleep(10)
             elif isinstance(e, openai.APIConnectionError):
-                logger.warn("[CHATGPT] APIConnectionError: {}".format(e))
+                logger.warn("[{}] APIConnectionError: {}".format(self.model, e))
                 result["content"] = "我连接不到你的网络"
                 if need_retry:
                     time.sleep(5)
             else:
-                logger.exception("[CHATGPT] Exception: {}".format(e))
+                logger.exception("[{}] Exception: {}".format(self.model, e))
                 need_retry = False
                 self.sessions.clear_session(session.session_id)
 
             if need_retry:
-                logger.warn("[CHATGPT] 第{}次重试".format(retry_count + 1))
+                logger.warn("[{}] 第{}次重试".format(self.model, retry_count + 1))
                 return self.reply_text(session_id,session, api_key, args, retry_count + 1)
             else:
                 return result
             
-    def gpt4_turbo_vision(self, query, context, session: ChatGPTSession):
+    def gpt4_vision(self, query, context, session: ChatGPTSession):
         session_id = context.kwargs["session_id"]
         msg = context.kwargs["msg"]
         img_path = context.content
-        logger.info(f"[GPT4_TURBO] query with images, path={img_path}")
+        logger.info(f"[{self.model}] query with images, path={img_path}")
         # Image URL request
         if query[:8] == 'https://':
             image_prompt = img_path
