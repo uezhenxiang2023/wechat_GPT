@@ -8,12 +8,16 @@ from openai import OpenAI
 from bot.bot import Bot
 from bot.openai.open_ai_image import OpenAIImage
 from bot.openai.open_ai_vision import OpenAIVision
+from bot.session_manager import SessionManager
+from bot.chatgpt.chat_gpt_session import ChatGPTSession
+from bot.chatgpt.chat_gpt_bot import ChatGPTBot
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common.log import logger
 from config import conf
 from lib import itchat
 from common.tmp_dir import TmpDir
+from common import const, memory
 
 client = OpenAI(api_key=conf().get("open_ai_api_key")) # Instantiate a client according to latest openai SDK
 
@@ -21,7 +25,7 @@ user_session = dict()
 
 
 # OpenAI的Assistant对话模型API (可用)
-class OpenAIAssistantBot(Bot, OpenAIImage, OpenAIVision):
+class OpenAIAssistantBot(ChatGPTBot):
     def __init__(self):
         super().__init__()
         self.user_card_lists = []
@@ -35,18 +39,28 @@ class OpenAIAssistantBot(Bot, OpenAIImage, OpenAIVision):
                 }
             }
         )
+        self.assistant = client.beta.assistants.retrieve(assistant_id=self.assistant_id)
+        self.assistant_model = self.assistant.model
+        self.sessions = SessionManager(ChatGPTSession, model=conf().get("model") or "gpt-3.5-turbo")
 
     def reply(self, query, context=None):            
         # acquire reply content
         if context.type == ContextType.TEXT:
-            # Image recongnition and vision completion    
-            vision_res = self.do_vision_completion_if_need(context.kwargs["session_id"],query)
-            if vision_res:
-                bot_type = "[GPT-4-TURBO]"
-                logger.info(f"{bot_type} query={query}")
-                content = vision_res
+            # Image recongnition and vision completion with gpt-4-vision-preview
+            if self.assistant_model == const.GPT4_VISION_PREVIEW:
+                img_cache = memory.USER_IMAGE_CACHE.get(context.kwargs["session_id"])
+                if img_cache:    
+                    vision_res = self.do_vision_completion_if_need(context.kwargs["session_id"],query)
+                    bot_type = "[GPT-4-VISION-PREVIEW]"
+                    logger.info(f"{bot_type} query={query}")
+                    content = vision_res
+                else:
+                    error_message = "OPENAI_ASSISTANT[{}]仅支持处理图片类型的消息，请先上传图片，或为OPENAI_ASSISTANT切换其他模型。"
+                    logger.error(error_message.format(self.assistant_model.upper()))
+                    reply = Reply(ReplyType.ERROR, error_message.format(self.assistant_model.upper()))
+                    return reply
             else:
-                bot_type = "[OPENAI_ASSISTANT]"
+                bot_type = "OPENAI_ASSISTANT[{}]".format(self.assistant_model.upper())
                 logger.info(f"{bot_type} query={query}")
                 content = self.reply_text(query,context)
                 if "image" in content and content["image"]:
@@ -73,8 +87,24 @@ class OpenAIAssistantBot(Bot, OpenAIImage, OpenAIVision):
             return reply      
         elif context.type == ContextType.FILE:
             return self.assistant_file(context)
+        elif context.type == ContextType.IMAGE:
+            if self.assistant_model in const.GPT4_MULTIMODEL_LIST:
+                session_id = context["session_id"]
+                session = self.sessions.session_query(query, session_id)
+                return self.gpt4_vision(query, context, session)
+            elif self.assistant_model == const.GPT4_VISION_PREVIEW:
+                memory.USER_IMAGE_CACHE[context["session_id"]] = {
+                    "path": context.content,
+                    "msg": context.get("msg")
+                }
+                logger.info("Wait for [GPT-4-VISION-PREVIEW] query with images")
+                return None
+            else:
+                logger.error("OPENAI_ASSISTANT[{}]不支持处理{}类型的消息".format(self.assistant_model.upper(), context.type))
+                reply = Reply(ReplyType.ERROR, "OPENAI_ASSISTANT[{}]不支持处理{}类型的消息".format(self.assistant_model.upper(), context.type))
+                return reply
         else:
-            reply = Reply(ReplyType.ERROR, "Bot不支持处理{}类型的消息".format(context.type))
+            reply = Reply(ReplyType.ERROR, "OPENAI_ASSISTANT[{}]不支持处理{}类型的消息".format(self.assistant_model.upper(), context.type))
             return reply
 
     def reply_text(self, query, context, retry_count=0):
