@@ -16,6 +16,8 @@ GPT4 = "gpt-4"
 GPT4_TURBO_PREVIEW = "gpt-4-turbo-preview"
 GPT4_VISION_PREVIEW = "gpt-4-vision-preview"
 GPT4_TURBO = 'gpt-4-turbo'
+GPT4_OMNI = 'gpt-4o'
+GPT4_MULTIMODEL_LIST = [GPT4_TURBO,GPT4_OMNI]
 WHISPER_1 = "whisper-1"
 TTS_1 = "tts-1"
 TTS_1_HD = "tts-1-hd"
@@ -37,9 +39,11 @@ MODEL_LIST = [
     GPT4, 
     "wenxin", 
     "wenxin-4", 
-    "xunfei",  
+    "xunfei",
+    GPT4_OMNI,  
     GPT4_TURBO, 
-    GPT4_TURBO_PREVIEW, 
+    GPT4_TURBO_PREVIEW,
+    GPT4_VISION_PREVIEW, 
     QWEN, 
     GEMINI,
     OPEN_AI_ASSISTANT,

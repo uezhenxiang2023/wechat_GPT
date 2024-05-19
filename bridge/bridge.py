@@ -19,6 +19,7 @@ class Bridge(object):
             "translate": conf().get("translate", "baidu"),
         }
         model_type = conf().get("model") or const.GPT35
+        self.model = model_type.upper()
         if model_type in ["text-davinci-003"]:
             self.btype["chat"] = const.OPEN_AI
         if conf().get("use_azure_chatgpt", False):
@@ -48,7 +49,7 @@ class Bridge(object):
 
     def get_bot(self, typename):
         if self.bots.get(typename) is None:
-            logger.info("create bot {} for {}".format(self.btype[typename], typename))
+            logger.info("create bot {}[{}] for {}".format(self.btype[typename], self.model, typename))
             if typename == "text_to_voice":
                 self.bots[typename] = create_voice(self.btype[typename])
             elif typename == "voice_to_text":
