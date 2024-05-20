@@ -1,13 +1,9 @@
 # encoding:utf-8
-
 import time, io
 
 import openai
 
 from openai import OpenAI
-from bot.bot import Bot
-from bot.openai.open_ai_image import OpenAIImage
-from bot.openai.open_ai_vision import OpenAIVision
 from bot.session_manager import SessionManager
 from bot.chatgpt.chat_gpt_session import ChatGPTSession
 from bot.chatgpt.chat_gpt_bot import ChatGPTBot
@@ -18,6 +14,7 @@ from config import conf
 from lib import itchat
 from common.tmp_dir import TmpDir
 from common import const, memory
+from PIL import Image
 
 client = OpenAI(api_key=conf().get("open_ai_api_key")) # Instantiate a client according to latest openai SDK
 
@@ -46,6 +43,9 @@ class OpenAIAssistantBot(ChatGPTBot):
     def reply(self, query, context=None):            
         # acquire reply content
         if context.type == ContextType.TEXT:
+            if self.assistant_model in const.GPT4_MULTIMODEL_LIST and query[:8] == 'https://':
+                session = self.sessions.session_query(query, context["session_id"])
+                return self.assistant_vision(query, context, session)
             # Image recongnition and vision completion with gpt-4-vision-preview
             if self.assistant_model == const.GPT4_VISION_PREVIEW:
                 img_cache = memory.USER_IMAGE_CACHE.get(context.kwargs["session_id"])
@@ -91,7 +91,7 @@ class OpenAIAssistantBot(ChatGPTBot):
             if self.assistant_model in const.GPT4_MULTIMODEL_LIST:
                 session_id = context["session_id"]
                 session = self.sessions.session_query(query, session_id)
-                return self.gpt4_vision(query, context, session)
+                return self.assistant_vision(query, context, session)
             elif self.assistant_model == const.GPT4_VISION_PREVIEW:
                 memory.USER_IMAGE_CACHE[context["session_id"]] = {
                     "path": context.content,
@@ -198,11 +198,11 @@ class OpenAIAssistantBot(ChatGPTBot):
             time.sleep(0.5)
         return run
 
-    def submit_message(self,assistant_id,thread,user_message):
+    def submit_message(self,assistant_id,thread,user_messages):
         client.beta.threads.messages.create(
             thread_id=thread.id,
-            role='user',
-            content=user_message
+            role=user_messages.get('role'),
+            content=user_messages.get('content')
         )
         return client.beta.threads.runs.create(
             thread_id=thread.id,
@@ -238,8 +238,66 @@ class OpenAIAssistantBot(ChatGPTBot):
                     logger.info("[WX] sendFile, receiver={}".format(context['receiver']))
         return image_storage, assistant_message 
     
-    def run(self,user_input,context):
+    def run(self,query,context):
         thread = self.get_threadID(context)
-        run = self.submit_message(self.assistant_id,thread,user_input)
+        session_id = context["session_id"]
+        session = self.sessions.session_query(query, session_id)
+        user_messages = self._convert_to_assistant_messages(session.messages)
+        self.sessions.clear_session(session_id)
+        run = self.submit_message(self.assistant_id,thread,user_messages)
         run = self.wait_on_run(run,thread)
         return thread,run
+    
+    def assistant_vision(self, query, context, session: ChatGPTSession):
+        session_id = context.kwargs["session_id"]
+        msg = context.kwargs["msg"]
+        img_path = context.content
+        logger.info(f"OPENAI_ASSISTANT[{self.assistant_model}] query with images, path={img_path}")
+        # Image URL request
+        if query[:8] == 'https://':
+            image_prompt = img_path
+            image_query = {"type": 'image_url', 'image_url': {"url": image_prompt}}
+            # Clear raw url in user content
+            session.messages.pop()
+        # Image base64 encoded request
+        else:
+            msg.prepare()
+            img = Image.open(img_path)
+            # check if the image has an alpha channel
+            if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
+                # Convert the image to RGB mode,whick removes the alpha channel
+                img = img.convert('RGB')
+                # Save the converted image
+                img_path_no_alpha = img_path[:len(img_path)-3] + 'jpg'
+                img.save(img_path_no_alpha)
+                # Update img_path with the path to the converted image
+                img_path = img_path_no_alpha
+
+            with open(img_path, "rb") as image_file:
+                file = client.files.create(
+                    file=image_file,
+                    purpose='vision'
+                )
+                image_prompt = file.id
+            image_query = {"type": 'image_file', 'image_file': {"file_id": image_prompt}}
+        self.sessions.session_query(image_query, session_id)
+
+    def _convert_to_assistant_messages(self, messages: list):
+        #res = []
+        image_content = []
+        text_content = {'type': 'text', 'text': messages[-1]['content']}
+        for item in messages:
+            if item.get('role') == 'user':
+                #如果user内容是图片,构建图片列表
+                if type(item.get('content')).__name__ == 'dict':
+                    image_content.append(item['content'])
+                    continue
+                if type(item.get('content')).__name__ == 'str':
+                    continue
+            elif item.get('role') == 'assistant':
+                continue
+        #将图片识别的文字请求补充进去
+        image_content.append(text_content)
+        content = image_content.copy()
+        res = {'role': 'user', 'content': content}
+        return res
