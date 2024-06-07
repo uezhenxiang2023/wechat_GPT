@@ -19,7 +19,9 @@ from common import const, memory
 from config import conf
 from bot.baidu.baidu_wenxin_session import BaiduWenxinSession
 from bot.gemini.google_genimi_vision import GeminiVision
+from PIL import Image
 
+genai.configure(api_key=conf().get('gemini_api_key'),transport='rest')
 
 # OpenAI对话模型API (可用)
 class GoogleGeminiBot(Bot,GeminiVision):
@@ -28,6 +30,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         super().__init__()
         self.api_key = conf().get("gemini_api_key")
         self.model = conf().get('model')
+        self.Model_ID = self.model.upper()
         self.system_prompt = conf().get("character_desc")
         # 复用文心的token计算方式
         self.sessions = SessionManager(BaiduWenxinSession, model=self.model or "gpt-3.5-turbo")
@@ -36,8 +39,15 @@ class GoogleGeminiBot(Bot,GeminiVision):
         try:
             if context.type == ContextType.FILE:
                 return self._file_cache(query, context)
+            elif context.type == ContextType.IMAGE:
+                if self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEMINI_15_PRO_LIST:
+                    session_id = context["session_id"]
+                    session = self.sessions.session_query(query, session_id)
+                    return self.gemini_15_vision(query, context, session)
+                if self.model in const.GEMINI_1_PRO_LIST:
+                    return None
             elif context.type == ContextType.TEXT:
-                logger.info(f"[Gemini] query={query}")
+                logger.info(f"[{self.Model_ID}] query={query}")
                 session_id = context["session_id"]
                 session = self.sessions.session_query(query, session_id)
                 gemini_messages = self._convert_to_gemini_messages(self._filter_messages(session.messages))
@@ -48,7 +58,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     vision_res = self.do_vision_completion_if_need(session_id,query) # Image recongnition and vision completion
                     if vision_res:
                         return vision_res
-                elif self.model in const.GEMINI_15_PRO_LIST:
+                elif self.model in const.GEMINI_15_PRO_LIST or self.model in const.GEMINI_15_FLASH_LIST:
                     file_cache = memory.USER_FILE_CACHE.get(session_id)
                     if file_cache:
                         file_prompt = self.read_file(file_cache)
@@ -56,7 +66,6 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     else:
                         system_prompt = self.system_prompt
 
-                genai.configure(api_key=self.api_key,transport='rest')
                 generation_config = {
                 "temperature": 0.4,
                 "top_p": 1,
@@ -91,13 +100,13 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 response = model.generate_content(gemini_messages)
                 reply_text = response.text
                 self.sessions.session_reply(reply_text, session_id)
-                logger.info(f"[Gemini] reply={reply_text}")
+                logger.info(f"[{self.Model_ID}] reply={reply_text}")
                 return Reply(ReplyType.TEXT, reply_text)
             else:
-                logger.warn(f"[Gemini] Unsupported message type, type={context.type}")
+                logger.warn(f"[{self.Model_ID}] Unsupported message type, type={context.type}")
                 return Reply(ReplyType.ERROR, f"[Gemini] Unsupported message type, type={context.type}")
         except Exception as e:
-            logger.error("[Gemini] fetch reply error, {}".format(e))
+            logger.error("[{}] fetch reply error, {}".format(self.Model_ID, e))
 
     def _convert_to_gemini_messages(self, messages: list):
         res = []
@@ -187,3 +196,70 @@ class GoogleGeminiBot(Bot,GeminiVision):
         Please find quotes relevant to the question before answering.Just response with the exact result,that means excluding any friendly preamble before providing the requested output.
         '''
         return file_prompt
+    
+    def gemini_15_vision(self, query, context, session: BaiduWenxinSession):
+        session_id = context.kwargs["session_id"]
+        msg = context.kwargs["msg"]
+        img_path = context.content
+        logger.info(f"[{self.model}] query with images, path={img_path}")
+        # Image URL request
+        if query[:8] == 'https://':
+            image_prompt = img_path
+            # Clear raw url in user content
+            session.messages.pop()
+        # Image base64 encoded request
+        else:
+            msg.prepare()
+            img = Image.open(img_path)
+            # check if the image has an alpha channel
+            if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
+                # Convert the image to RGB mode,whick removes the alpha channel
+                img = img.convert('RGB')
+                # Save the converted image
+                img_path_no_alpha = img_path[:len(img_path)-3] + 'jpg'
+                img.save(img_path_no_alpha)
+                # Update img_path with the path to the converted image
+                img_path = img_path_no_alpha
+
+        type_position = img_path.index('.') + 1
+        mime_type = img_path[type_position:]
+        if mime_type in const.IMAGE:
+            type_id = 'image'
+        elif mime_type in const.AUDIO:
+            type_id = 'audio'
+        elif mime_type in const.VIDEO:
+            type_id = 'video'
+        media_file = self.upload_to_gemini(img_path, mime_type=f'{type_id}/{mime_type}')
+        self.sessions.session_query(media_file, session_id)
+    
+    def upload_to_gemini(self, path, mime_type=None):
+        """Uploads the given file to Gemini.
+
+        https://ai.google.dev/gemini-api/docs/prompting_with_media
+        """
+        file = genai.upload_file(path, mime_type=mime_type,)
+        print(f"Uploaded file '{file.display_name}' as: {file.uri}")
+        return file
+    
+    def wait_for_files_active(self, files):
+        """Waits for the given files to be active.
+
+        Some files uploaded to the Gemini API need to be processed before they can be
+        used as prompt inputs. The status can be seen by querying the file's "state"
+        field.
+
+        This implementation uses a simple blocking polling loop. Production code
+        should probably employ a more sophisticated approach.
+        """
+        print("Waiting for file processing...")
+        for name in (file.name for file in files):
+            file = genai.get_file(name)
+            while file.state.name == "PROCESSING":
+                print(".", end="", flush=True)
+                time.sleep(10)
+                file = genai.get_file(name)
+            if file.state.name != "ACTIVE":
+                raise Exception(f"File {file.name} failed to process")
+        print("...all files ready")
+        print()
+         
