@@ -45,20 +45,26 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     session = self.sessions.session_query(query, session_id)
                     return self.gemini_15_vision(query, context, session)
                 if self.model in const.GEMINI_1_PRO_LIST:
+                    memory.USER_IMAGE_CACHE[context["session_id"]] = {
+                    "path": context.content,
+                    "msg": context.get("msg")
+                    }
+                    logger.info(f"{context.content} cached to memory")
                     return None
             elif context.type == ContextType.TEXT:
                 logger.info(f"[{self.Model_ID}] query={query}")
                 session_id = context["session_id"]
                 session = self.sessions.session_query(query, session_id)
-                gemini_messages = self._convert_to_gemini_messages(self._filter_messages(session.messages))
 
                 # Set up the model
                 if self.model in const.GEMINI_1_PRO_LIST:
+                    gemini_messages = self._convert_to_gemini_1_messages(self._filter_gemini_1_messages(session.messages))
                     system_prompt = None
                     vision_res = self.do_vision_completion_if_need(session_id,query) # Image recongnition and vision completion
                     if vision_res:
                         return vision_res
                 elif self.model in const.GEMINI_15_PRO_LIST or self.model in const.GEMINI_15_FLASH_LIST:
+                    gemini_messages = self._convert_to_gemini_15_messages(session.messages)
                     file_cache = memory.USER_FILE_CACHE.get(session_id)
                     if file_cache:
                         file_prompt = self.read_file(file_cache)
@@ -97,6 +103,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     safety_settings=safety_settings,
                     system_instruction=system_prompt
                 )
+
                 response = model.generate_content(gemini_messages)
                 reply_text = response.text
                 self.sessions.session_reply(reply_text, session_id)
@@ -104,11 +111,11 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 return Reply(ReplyType.TEXT, reply_text)
             else:
                 logger.warn(f"[{self.Model_ID}] Unsupported message type, type={context.type}")
-                return Reply(ReplyType.ERROR, f"[Gemini] Unsupported message type, type={context.type}")
+                return Reply(ReplyType.ERROR, f"[{self.Model_ID}] Unsupported message type, type={context.type}")
         except Exception as e:
             logger.error("[{}] fetch reply error, {}".format(self.Model_ID, e))
 
-    def _convert_to_gemini_messages(self, messages: list):
+    def _convert_to_gemini_1_messages(self, messages: list):
         res = []
         for msg in messages:
             if msg.get("role") == "user":
@@ -123,7 +130,43 @@ class GoogleGeminiBot(Bot,GeminiVision):
             })
         return res
 
-    def _filter_messages(self, messages: list):
+    def _convert_to_gemini_15_messages(self, messages: list):
+        res = []
+        image_parts = []
+        user_parts = []
+        assistant_parts = []
+        for msg in messages:
+            msg_role = msg.get('role')
+            msg_content = msg.get('content')
+            msg_type = type(msg_content).__name__  #识别消息内容的类型
+            if msg.get("role") == "user":
+                if msg_type == 'File':
+                    image_parts.append(msg_content)
+                    continue
+                if msg_type == 'str':
+                    if image_parts != []:
+                        image_parts.append(msg_content)
+                        user_parts = image_parts
+                        parts = user_parts
+                        image_parts = []
+                    elif image_parts == []:
+                        parts = [msg_content]
+                role = "user"
+
+            elif msg_role == "assistant":
+                assistant_parts = [msg_content]
+                parts = assistant_parts
+                role = "model"
+            else:
+                continue
+            #res.extend(parts)
+            res.append({
+                "role": role,
+                "parts": parts
+            })
+        return res
+
+    def _filter_gemini_1_messages(self, messages: list):
         res = []
         turn = "user"
         for i in range(len(messages) - 1, -1, -1):
@@ -205,8 +248,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         # Image URL request
         if query[:8] == 'https://':
             image_prompt = img_path
-            # Clear raw url in user content
-            session.messages.pop()
+
         # Image base64 encoded request
         else:
             msg.prepare()
@@ -221,6 +263,8 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 # Update img_path with the path to the converted image
                 img_path = img_path_no_alpha
 
+        # Clear original image in user content avoiding duplicated same file
+        session.messages.pop()
         type_position = img_path.index('.') + 1
         mime_type = img_path[type_position:]
         if mime_type in const.IMAGE:
