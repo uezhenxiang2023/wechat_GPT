@@ -212,12 +212,19 @@ class ChatChannel(Channel):
                     else:
                         return
             elif (context.type == ContextType.TEXT or 
-                  context.type == ContextType.FILE or 
+                  context.type == ContextType.FILE or
+                  context.type == ContextType.VIDEO or 
                   context.type == ContextType.IMAGE_CREATE or 
-                  (context.type == ContextType.IMAGE and (conf().get('model') in const.CLAUDE_3_LIST or conf().get('model') in const.GPT4_MULTIMODEL_LIST\
-                                                          or conf().get('model') in const.GEMINI_1_PRO_LIST  
-                                                          or conf().get('model') in const.GEMINI_15_FLASH_LIST or conf().get('model') in const.GEMINI_15_PRO_LIST\
-                                                          or conf().get('model') == const.OPEN_AI_ASSISTANT))):
+                  (
+                    (context.type == ContextType.IMAGE or context.type == ContextType.VOICE) and 
+                    (conf().get('model') in const.CLAUDE_3_LIST or
+                    conf().get('model') in const.GPT4_MULTIMODEL_LIST or
+                    conf().get('model') in const.GEMINI_1_PRO_LIST or
+                    conf().get('model') in const.GEMINI_15_FLASH_LIST or
+                    conf().get('model') in const.GEMINI_15_PRO_LIST
+                    or conf().get('model') == const.OPEN_AI_ASSISTANT)
+                   )
+                  ):
                 # 文字、图片和文件消息
                 context["channel"] = e_context["channel"]
                 reply = super().build_reply_content(context.content, context)
