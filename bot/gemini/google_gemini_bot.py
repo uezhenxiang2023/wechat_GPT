@@ -6,6 +6,7 @@ Google gemini bot
 """
 # encoding:utf-8
 
+import time
 import re
 import docx
 from pypdf import PdfReader
