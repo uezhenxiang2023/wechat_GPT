@@ -38,12 +38,18 @@ class GoogleGeminiBot(Bot,GeminiVision):
     def reply(self, query, context: Context = None) -> Reply:
         try:
             if context.type == ContextType.FILE:
-                return self._file_cache(query, context)
+                mime_type = context.content[(context.content.index('.') + 1):]
+                if mime_type in const.AUDIO or mime_type in const.VIDEO:
+                    session_id = context["session_id"]
+                    session = self.sessions.session_query(query, session_id)
+                    return self.gemini_15_media(query, context, session)
+                else:
+                    return self._file_cache(query, context)
             elif context.type == ContextType.IMAGE:
                 if self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEMINI_15_PRO_LIST:
                     session_id = context["session_id"]
                     session = self.sessions.session_query(query, session_id)
-                    return self.gemini_15_vision(query, context, session)
+                    return self.gemini_15_media(query, context, session)
                 if self.model in const.GEMINI_1_PRO_LIST:
                     memory.USER_IMAGE_CACHE[context["session_id"]] = {
                     "path": context.content,
@@ -51,6 +57,10 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     }
                     logger.info(f"{context.content} cached to memory")
                     return None
+            elif context.type == ContextType.VIDEO:
+                session_id = context["session_id"]
+                session = self.sessions.session_query(query, session_id)
+                return self.gemini_15_media(query, context, session)
             elif context.type == ContextType.TEXT:
                 logger.info(f"[{self.Model_ID}] query={query}")
                 session_id = context["session_id"]
@@ -132,7 +142,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
 
     def _convert_to_gemini_15_messages(self, messages: list):
         res = []
-        image_parts = []
+        media_parts = []
         user_parts = []
         assistant_parts = []
         for msg in messages:
@@ -141,15 +151,15 @@ class GoogleGeminiBot(Bot,GeminiVision):
             msg_type = type(msg_content).__name__  #识别消息内容的类型
             if msg.get("role") == "user":
                 if msg_type == 'File':
-                    image_parts.append(msg_content)
+                    media_parts.append(msg_content)
                     continue
                 if msg_type == 'str':
-                    if image_parts != []:
-                        image_parts.append(msg_content)
-                        user_parts = image_parts
+                    if media_parts != []:
+                        media_parts.append(msg_content)
+                        user_parts = media_parts
                         parts = user_parts
-                        image_parts = []
-                    elif image_parts == []:
+                        media_parts = []
+                    elif media_parts == []:
                         parts = [msg_content]
                 role = "user"
 
@@ -159,7 +169,6 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 role = "model"
             else:
                 continue
-            #res.extend(parts)
             res.append({
                 "role": role,
                 "parts": parts
@@ -240,40 +249,41 @@ class GoogleGeminiBot(Bot,GeminiVision):
         '''
         return file_prompt
     
-    def gemini_15_vision(self, query, context, session: BaiduWenxinSession):
+    def gemini_15_media(self, query, context, session: BaiduWenxinSession):
         session_id = context.kwargs["session_id"]
         msg = context.kwargs["msg"]
-        img_path = context.content
-        logger.info(f"[{self.model}] query with images, path={img_path}")
-        # Image URL request
-        if query[:8] == 'https://':
-            image_prompt = img_path
-
-        # Image base64 encoded request
-        else:
-            msg.prepare()
-            img = Image.open(img_path)
-            # check if the image has an alpha channel
-            if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
-                # Convert the image to RGB mode,whick removes the alpha channel
-                img = img.convert('RGB')
-                # Save the converted image
-                img_path_no_alpha = img_path[:len(img_path)-3] + 'jpg'
-                img.save(img_path_no_alpha)
-                # Update img_path with the path to the converted image
-                img_path = img_path_no_alpha
-
-        # Clear original image in user content avoiding duplicated same file
-        session.messages.pop()
-        type_position = img_path.index('.') + 1
-        mime_type = img_path[type_position:]
+        media_path = context.content
+        logger.info(f"[{self.model}] query with media, path={media_path}")
+        type_position = media_path.index('.') + 1
+        mime_type = media_path[type_position:]
         if mime_type in const.IMAGE:
             type_id = 'image'
+            # Image URL request
+            if query[:8] == 'https://':
+                image_prompt = media_path
+
+            # Image base64 encoded request
+            else:
+                msg.prepare()
+                img = Image.open(media_path)
+                # check if the image has an alpha channel
+                if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
+                    # Convert the image to RGB mode,whick removes the alpha channel
+                    img = img.convert('RGB')
+                    # Save the converted image
+                    img_path_no_alpha = media_path[:len(media_path)-3] + 'jpg'
+                    img.save(img_path_no_alpha)
+                    # Update img_path with the path to the converted image
+                    media_path = img_path_no_alpha
         elif mime_type in const.AUDIO:
+            msg.prepare()
             type_id = 'audio'
         elif mime_type in const.VIDEO:
+            msg.prepare()
             type_id = 'video'
-        media_file = self.upload_to_gemini(img_path, mime_type=f'{type_id}/{mime_type}')
+        # Clear original media file in user content avoiding duplicated commitment
+        session.messages.pop()
+        media_file = self.upload_to_gemini(media_path, mime_type=f'{type_id}/{mime_type}')
         self.sessions.session_query(media_file, session_id)
     
     def upload_to_gemini(self, path, mime_type=None):
@@ -281,11 +291,12 @@ class GoogleGeminiBot(Bot,GeminiVision):
 
         https://ai.google.dev/gemini-api/docs/prompting_with_media
         """
-        file = genai.upload_file(path, mime_type=mime_type,)
+        file = genai.upload_file(path, mime_type=mime_type)
+        self.wait_for_files_active(file)
         print(f"Uploaded file '{file.display_name}' as: {file.uri}")
         return file
     
-    def wait_for_files_active(self, files):
+    def wait_for_files_active(self, media_file):
         """Waits for the given files to be active.
 
         Some files uploaded to the Gemini API need to be processed before they can be
@@ -296,14 +307,14 @@ class GoogleGeminiBot(Bot,GeminiVision):
         should probably employ a more sophisticated approach.
         """
         print("Waiting for file processing...")
-        for name in (file.name for file in files):
+        name =media_file.name
+        file = genai.get_file(name)
+        while file.state.name == "PROCESSING":
+            print(".", end="", flush=True)
+            time.sleep(10)
             file = genai.get_file(name)
-            while file.state.name == "PROCESSING":
-                print(".", end="", flush=True)
-                time.sleep(10)
-                file = genai.get_file(name)
-            if file.state.name != "ACTIVE":
-                raise Exception(f"File {file.name} failed to process")
+        if file.state.name != "ACTIVE":
+            raise Exception(f"File {file.name} failed to process")
         print("...all files ready")
         print()
          
