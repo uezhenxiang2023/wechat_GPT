@@ -4,16 +4,17 @@ from bot.session_manager import SessionManager
 from bridge.reply import Reply,ReplyType
 from bot.baidu.baidu_wenxin_session import BaiduWenxinSession
 from common.log import logger
-from common import memory
+from common import memory,const
 from config import conf
 import PIL.Image
 
 
-# GOOGLE_GEMINI提供的图像识别接口
+# GOOGLE_GEMINI_1.0_PRO 提供的图像识别接口
 class GeminiVision(object):
     def __init__(self):
         super().__init__()
         self.api_key=conf().get('gemini_api_key')
+        self.MODEL_ID = const.GEMINI_1_PRO_VISION_LATEST.upper()
         # 复用文心的token计算方式
         self.sessions = SessionManager(BaiduWenxinSession,model=conf().get('model') or 'gpt=3.5-turbo')
 
@@ -24,13 +25,13 @@ class GeminiVision(object):
             response, err = self.vision_completion(query, img_cache)
             memory.USER_IMAGE_CACHE[session_id] = None
             if err:
-                logger.error(f"[GEMINI] fetch reply error, {err}")
-                reply_text = f'获取gemini-pro-vision多模态响应时出错,{err}'
+                logger.error(f"[{self.MODEL_ID}] fetch reply error, {err}")
+                reply_text = f'获取{self.MODEL_ID}多模态响应时出错,{err}'
                 return Reply(ReplyType.TEXT, reply_text)
             else:
                 reply_text = response.text
                 self.sessions.session_reply(reply_text, session_id)
-                logger.info(f"[GEMINI] reply={reply_text}")
+                logger.info(f"[{self.MODEL_ID}] reply={reply_text}")
                 return Reply(ReplyType.TEXT, reply_text)
         return None
 
@@ -38,7 +39,7 @@ class GeminiVision(object):
         msg = img_cache.get("msg")
         path = img_cache.get("path")
         msg.prepare()
-        logger.info(f"[GEMINI] query with images, path={path}")
+        logger.info(f"[{self.MODEL_ID}] query with images, path={path}")
         
         try:
             genai.configure(api_key=self.api_key,transport='rest')
@@ -70,7 +71,7 @@ class GeminiVision(object):
             },
             ]
             model = genai.GenerativeModel(
-                model_name='gemini-pro-vision',
+                model_name=const.GEMINI_1_PRO_VISION_LATEST,
                 generation_config=generation_config,
                 safety_settings=safety_settings
             )
