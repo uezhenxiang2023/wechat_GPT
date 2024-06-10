@@ -73,3 +73,6 @@ DINGTALK = "dingtalk"
 IMAGE = ['png', 'jpeg', 'webp', 'heic', 'heif']
 AUDIO = ['wav', 'mp3', 'aiff', 'aac', 'ogg', 'flac']
 VIDEO = ['mp4', 'mpeg', 'mov', 'avi', 'x-flv', 'mpg', 'webm', 'wmv', '3gpp']
+DOCUMENT = ['pdf', 'docx']
+SPREADSHEET = ['csv', 'xlsx']
+PRESENTATION = ['ppt', 'pptx']
