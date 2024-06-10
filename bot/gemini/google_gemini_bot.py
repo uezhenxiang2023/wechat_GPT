@@ -40,11 +40,13 @@ class GoogleGeminiBot(Bot,GeminiVision):
         try:
             if context.type == ContextType.FILE:
                 mime_type = context.content[(context.content.index('.') + 1):]
-                if mime_type in const.AUDIO or mime_type in const.VIDEO:
+                if mime_type in const.AUDIO or mime_type in const.VIDEO or\
+                   mime_type in const.SPREADSHEET or\
+                   mime_type in const.PRESENTATION:
                     session_id = context["session_id"]
                     session = self.sessions.session_query(query, session_id)
                     return self.gemini_15_media(query, context, session)
-                else:
+                elif mime_type in const.DOCUMENT:
                     return self._file_cache(query, context)
             elif context.type == ContextType.IMAGE:
                 if self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEMINI_15_PRO_LIST:
@@ -195,7 +197,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
             "path": context.content,
             "msg": context.get("msg")
         }
-        logger.info("[GEMINI] file={} is assigned to assistant".format(context.content))
+        logger.info("[{}] file={} is cached for assistant".format(self.Model_ID, context.content))
         return None
     
     def read_file(self,file_cache):
@@ -282,6 +284,12 @@ class GoogleGeminiBot(Bot,GeminiVision):
         elif mime_type in const.VIDEO:
             msg.prepare()
             type_id = 'video'
+        elif mime_type in const.SPREADSHEET:
+            type_id = 'application'
+            mime_type = 'vnd.google-apps.spreadsheet'
+        elif mime_type in const.PRESENTATION:
+            type_id = 'application'
+            mime_type = 'vnd.google-apps.presentation'
         # Clear original media file in user content avoiding duplicated commitment
         session.messages.pop()
         media_file = self.upload_to_gemini(media_path, mime_type=f'{type_id}/{mime_type}')
