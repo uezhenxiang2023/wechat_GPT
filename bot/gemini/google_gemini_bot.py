@@ -39,15 +39,9 @@ class GoogleGeminiBot(Bot,GeminiVision):
     def reply(self, query, context: Context = None) -> Reply:
         try:
             if context.type == ContextType.FILE:
-                mime_type = context.content[(context.content.index('.') + 1):]
-                if mime_type in const.AUDIO or mime_type in const.VIDEO or\
-                   mime_type in const.SPREADSHEET or\
-                   mime_type in const.PRESENTATION:
-                    session_id = context["session_id"]
-                    session = self.sessions.session_query(query, session_id)
-                    return self.gemini_15_media(query, context, session)
-                elif mime_type in const.DOCUMENT:
-                    return self._file_cache(query, context)
+                session_id = context["session_id"]
+                session = self.sessions.session_query(query, session_id)
+                return self.gemini_15_media(query, context, session)
             elif context.type == ContextType.IMAGE:
                 if self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEMINI_15_PRO_LIST:
                     session_id = context["session_id"]
@@ -127,6 +121,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 return Reply(ReplyType.ERROR, f"[{self.Model_ID}] Unsupported message type, type={context.type}")
         except Exception as e:
             logger.error("[{}] fetch reply error, {}".format(self.Model_ID, e))
+            return Reply(ReplyType.ERROR, f"[{self.Model_ID}] {e}")
 
     def _convert_to_gemini_1_messages(self, messages: list):
         res = []
@@ -284,10 +279,17 @@ class GoogleGeminiBot(Bot,GeminiVision):
         elif mime_type in const.VIDEO:
             msg.prepare()
             type_id = 'video'
-        elif mime_type in const.SPREADSHEET:
+        elif mime_type == const.PDF:
+            msg.prepare()
             type_id = 'application'
-            mime_type = 'vnd.google-apps.spreadsheet'
+        elif mime_type in const.DOCUMENT:
+            msg.prepare()
+            type_id = 'text'
+        elif mime_type in const.SPREADSHEET:
+            msg.prepare()
+            type_id = 'text'
         elif mime_type in const.PRESENTATION:
+            msg.prepare()
             type_id = 'application'
             mime_type = 'vnd.google-apps.presentation'
         # Clear original media file in user content avoiding duplicated commitment
