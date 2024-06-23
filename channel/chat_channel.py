@@ -218,6 +218,7 @@ class ChatChannel(Channel):
                   (
                     (context.type == ContextType.IMAGE or context.type == ContextType.VOICE) and 
                     (conf().get('model') in const.CLAUDE_3_LIST or
+                     conf().get('model') in const.CLAUDE_35_LIST or
                     conf().get('model') in const.GPT4_MULTIMODEL_LIST or
                     conf().get('model') in const.GEMINI_1_PRO_LIST or
                     conf().get('model') in const.GEMINI_15_FLASH_LIST or

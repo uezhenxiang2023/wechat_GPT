@@ -21,6 +21,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
         super().__init__()
         self.client = anthropic.Anthropic(api_key=conf().get("claude_api_key"))
         self.model = conf().get("model")
+        self.MODEL_ID = self.model.upper()
         self.sessions = SessionManager(ClaudeAiSession, model=conf().get("model") or "gpt-3.5-turbo")
         self.system_prompt = conf().get("character_desc")
         self.claude_api_cookie = conf().get("claude_api_cookie")
@@ -55,7 +56,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
         session_id = context["session_id"]
         if retry_count >= 2:
             # exit from retry 2 times
-            logger.warn("[CLAUDEAI] failed after maximum number of retry times")
+            logger.warn(f"[{self.MODEL_ID}] failed after maximum number of retry times")
             return Reply(ReplyType.ERROR, "请再问我一次吧")
 
         try:
@@ -66,7 +67,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
             else:
                 system_prompt = self.system_prompt
             session = self.sessions.session_query(query, session_id)
-            logger.info(f"[CLAUDEAI] query={query}")
+            logger.info(f"[{self.MODEL_ID}] query={query}")
             claude_message = self._convert_to_claude_messages(session.messages)
 
             response = self.client.messages.create(
@@ -77,7 +78,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
                 messages=claude_message
             )
             reply_content = response.content[0].text
-            logger.info(f"[CLAUDE] reply={reply_content}, total_tokens=invisible")
+            logger.info(f"[{self.MODEL_ID}] reply={reply_content}, total_tokens=invisible")
             self.sessions.session_reply(reply_content, session_id, 100)
             return Reply(ReplyType.TEXT, reply_content)
 
@@ -85,7 +86,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
             logger.exception(e)
             # retry
             time.sleep(5)
-            logger.warn(f"[CLAUDE] do retry, times={retry_count}")
+            logger.warn(f"[{self.MODEL_ID}] do retry, times={retry_count}")
             # Pop last role message avoiding the same two adjacent role messages during retrying.
             session.messages.pop()
             return self._chat(query, context, retry_count + 1)
@@ -121,7 +122,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
             "path": context.content,
             "msg": context.get("msg")
         }
-        logger.info("[CLAUDE] file={} is assigned to assistant".format(context.content))
+        logger.info("file={} is assigned to {}".format(context.content, self.MODEL_ID))
         return None
     
     def read_file(self,file_cache):
@@ -179,7 +180,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
         msg = context.kwargs["msg"]
         img_path = context.content
         msg.prepare()
-        logger.info(f"[CLAUDI] query with images, path={img_path}")
+        logger.info(f"[{self.MODEL_ID}] query with images, path={img_path}")
         img = Image.open(img_path)
         # check if the image has an alpha channel
         if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
