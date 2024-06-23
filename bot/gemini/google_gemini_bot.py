@@ -252,7 +252,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         msg = context.kwargs["msg"]
         media_path = context.content
         logger.info(f"[{self.model}] query with media, path={media_path}")
-        type_position = media_path.index('.') + 1
+        type_position = media_path.index('.', -6) + 1
         mime_type = media_path[type_position:]
         if mime_type in const.IMAGE:
             type_id = 'image'
