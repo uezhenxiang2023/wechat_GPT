@@ -86,7 +86,7 @@ class OpenAIAssistantBot(ChatGPTBot):
                 reply = Reply(ReplyType.ERROR, retstring)
             return reply      
         elif context.type == ContextType.FILE:
-            return self.assistant_file(context)
+            return self._file_cache(context)
         elif context.type == ContextType.IMAGE:
             if self.assistant_model in const.GPT4_MULTIMODEL_LIST:
                 session_id = context["session_id"]
@@ -141,6 +141,14 @@ class OpenAIAssistantBot(ChatGPTBot):
                 return self.reply_text(query, retry_count + 1)
             else:
                 return result
+    
+    def _file_cache(self, context):
+        memory.USER_FILE_CACHE[context['session_id']] = {
+            "path": context.content,
+            "msg": context.get("msg")
+        }
+        logger.info("file={} is cached".format(context.content))
+        return None
     
     def assistant_file(self,context):
         path = context.content
@@ -198,11 +206,31 @@ class OpenAIAssistantBot(ChatGPTBot):
             time.sleep(0.5)
         return run
 
-    def submit_message(self,assistant_id,thread,user_messages):
+    def submit_message(self,assistant_id,thread,user_messages,session_id):
+        file_cache = memory.USER_FILE_CACHE.get(session_id)
+        file = None
+        if file_cache:
+            path = file_cache.get("path")
+            file_name = path[len('tmp/'):]
+            msg = file_cache.get("msg")
+            file_list = client.files.list(purpose='assistants')
+            for item in file_list:
+                if file_name == item.filename:
+                    file = client.files.retrieve(file_id=item.id)
+                    break
+            if file is None:
+                msg.prepare()
+                file = client.files.create(
+                            file=open(path,'rb'),
+                            purpose='assistants'
+                        )
+            memory.USER_FILE_CACHE[session_id] = None
+        attachment = [{'file_id': file.id, 'tools': [{'type': 'file_search'}, {'type': 'code_interpreter'}]}] if file else []
         client.beta.threads.messages.create(
             thread_id=thread.id,
             role=user_messages.get('role'),
-            content=user_messages.get('content')
+            content=user_messages.get('content'),
+            attachments=attachment
         )
         return client.beta.threads.runs.create(
             thread_id=thread.id,
@@ -244,7 +272,7 @@ class OpenAIAssistantBot(ChatGPTBot):
         session = self.sessions.session_query(query, session_id)
         user_messages = self._convert_to_assistant_messages(session.messages)
         self.sessions.clear_session(session_id)
-        run = self.submit_message(self.assistant_id,thread,user_messages)
+        run = self.submit_message(self.assistant_id,thread,user_messages,session_id)
         run = self.wait_on_run(run,thread)
         return thread,run
     

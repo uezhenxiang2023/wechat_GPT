@@ -15,6 +15,8 @@ from common import const
 import datetime, random
 
 client = OpenAI(api_key=conf().get("open_ai_api_key"))
+ASR_MODEL = conf().get("voice_to_text_model")
+TTS_MODEL = conf().get("text_to_voice_model")
 
 class OpenaiVoice(Voice):
 
@@ -22,10 +24,10 @@ class OpenaiVoice(Voice):
         logger.debug("[Openai] voice file name={}".format(voice_file))
         try:
             file = open(voice_file, "rb")
-            result = client.audio.transcriptions.create(model="whisper-1", file=file)
+            result = client.audio.transcriptions.create(model=ASR_MODEL, file=file)
             text = result.text
             reply = Reply(ReplyType.TEXT, text)
-            logger.info("[Openai] voiceToText text={} voice file name={}".format(text, voice_file))
+            logger.info("OpenAI[{}] voiceToText text={} voice file name={}".format(ASR_MODEL, text, voice_file))
         except Exception as e:
             reply = Reply(ReplyType.ERROR, "我暂时还无法听清您的语音，请稍后再试吧~")
         finally:
@@ -34,23 +36,15 @@ class OpenaiVoice(Voice):
 
     def textToVoice(self, text):
         try:
-            api_base = conf().get("open_ai_api_base") or "https://api.openai.com/v1"
-            url = f'{api_base}/audio/speech'
-            headers = {
-                'Authorization': 'Bearer ' + conf().get("open_ai_api_key"),
-                'Content-Type': 'application/json'
-            }
-            data = {
-                'model': conf().get("text_to_voice_model") or const.TTS_1,
-                'input': text,
-                'voice': conf().get("tts_voice_id") or "alloy"
-            }
-            response = requests.post(url, headers=headers, json=data)
+            response = client.audio.speech.create(
+                model=TTS_MODEL,
+                voice=conf().get("tts_voice_id"),
+                input=text
+            )
             file_name = "tmp/" + datetime.datetime.now().strftime('%Y%m%d%H%M%S') + str(random.randint(0, 1000)) + ".mp3"
-            logger.debug(f"[OPENAI] text_to_Voice file_name={file_name}, input={text}")
-            with open(file_name, 'wb') as f:
-                f.write(response.content)
-            logger.info(f"[OPENAI] text_to_Voice success")
+            logger.debug(f"[OpenAI] text_to_Voice file_name={file_name}, input={text}")
+            response.write_to_file(file_name)
+            logger.info(f"OpenAI[{TTS_MODEL}] text_to_Voice success")
             reply = Reply(ReplyType.VOICE, file_name)
         except Exception as e:
             logger.error(e)

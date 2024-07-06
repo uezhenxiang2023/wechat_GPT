@@ -49,12 +49,15 @@ class Bridge(object):
 
     def get_bot(self, typename):
         if self.bots.get(typename) is None:
-            logger.info("create bot {}[{}] for {}".format(self.btype[typename], self.model, typename))
+            #logger.info("create bot {}[{}] for {}".format(self.btype[typename], self.model, typename))
             if typename == "text_to_voice":
+                logger.info("create bot {}[{}] for {}".format(self.btype[typename], conf().get("text_to_voice_model"), typename))
                 self.bots[typename] = create_voice(self.btype[typename])
             elif typename == "voice_to_text":
+                logger.info("create bot {}[{}] for {}".format(self.btype[typename], conf().get("voice_to_text_model"), typename))
                 self.bots[typename] = create_voice(self.btype[typename])
             elif typename == "chat":
+                logger.info("create bot {}[{}] for {}".format(self.btype[typename], self.model, typename))
                 self.bots[typename] = create_bot(self.btype[typename])
             elif typename == "translate":
                 self.bots[typename] = create_translator(self.btype[typename])
