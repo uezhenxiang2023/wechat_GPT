@@ -209,10 +209,14 @@ class OpenAIAssistantBot(ChatGPTBot):
     def submit_message(self,assistant_id,thread,user_messages,session_id):
         file_cache = memory.USER_FILE_CACHE.get(session_id)
         file = None
+        tools = [{'type': 'file_search'},{'type': 'code_interpreter'}]
         if file_cache:
             path = file_cache.get("path")
             file_name = path[len('tmp/'):]
             msg = file_cache.get("msg")
+            type_position = path.index('.', -6) + 1
+            mime_type = path[type_position:]
+            tools = [tools[1]] if mime_type == 'xlsx' else tools
             file_list = client.files.list(purpose='assistants')
             for item in file_list:
                 if file_name == item.filename:
@@ -225,7 +229,7 @@ class OpenAIAssistantBot(ChatGPTBot):
                             purpose='assistants'
                         )
             memory.USER_FILE_CACHE[session_id] = None
-        attachment = [{'file_id': file.id, 'tools': [{'type': 'file_search'}, {'type': 'code_interpreter'}]}] if file else []
+        attachment = [{'file_id': file.id, 'tools': tools}] if file else []
         client.beta.threads.messages.create(
             thread_id=thread.id,
             role=user_messages.get('role'),
