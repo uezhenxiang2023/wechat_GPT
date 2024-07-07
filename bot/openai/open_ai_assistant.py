@@ -224,6 +224,7 @@ class OpenAIAssistantBot(ChatGPTBot):
                     break
             if file is None:
                 msg.prepare()
+                path = path[:type_position] + mime_type.lower() if mime_type == 'PDF' else path
                 file = client.files.create(
                             file=open(path,'rb'),
                             purpose='assistants'
