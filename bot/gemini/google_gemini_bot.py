@@ -47,7 +47,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 else:
                     return self._file_cache(query, context)
             elif context.type == ContextType.IMAGE:
-                if self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEMINI_15_PRO_LIST:
+                if self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEMINI_15_PRO_LIST or self.model in const.GEMINI_2_FLASH_LIST:
                     session_id = context["session_id"]
                     session = self.sessions.session_query(query, session_id)
                     return self.gemini_15_media(query, context, session)
@@ -74,7 +74,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     vision_res = self.do_vision_completion_if_need(session_id,query) # Image recongnition and vision completion
                     if vision_res:
                         return vision_res
-                elif self.model in const.GEMINI_15_PRO_LIST or self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEINI_2_FLASH_LIST:
+                elif self.model in const.GEMINI_15_PRO_LIST or self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEMINI_2_FLASH_LIST:
                     gemini_messages = self._convert_to_gemini_15_messages(session.messages)
                     file_cache = memory.USER_FILE_CACHE.get(session_id)
                     if file_cache:
@@ -155,7 +155,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 if msg_type == 'File':
                     media_parts.append(msg_content)
                     continue
-                if msg_type == 'str':
+                if msg_type in ['str','JpegImageFile']:
                     if media_parts != []:
                         media_parts.append(msg_content)
                         user_parts = media_parts
@@ -262,12 +262,13 @@ class GoogleGeminiBot(Bot,GeminiVision):
             type_id = 'image'
             # Image URL request
             if query[:8] == 'https://':
-                image_prompt = media_path
+                media_file = media_path
 
             # Image base64 encoded request
             else:
                 msg.prepare()
                 img = Image.open(media_path)
+                media_file = img
                 # check if the image has an alpha channel
                 if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
                     # Convert the image to RGB mode,whick removes the alpha channel
@@ -276,7 +277,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     img_path_no_alpha = media_path[:len(media_path)-3] + 'jpg'
                     img.save(img_path_no_alpha)
                     # Update img_path with the path to the converted image
-                    media_path = img_path_no_alpha
+                    media_file = img_path_no_alpha
         elif mime_type in const.AUDIO:
             msg.prepare()
             type_id = 'audio'
@@ -298,7 +299,8 @@ class GoogleGeminiBot(Bot,GeminiVision):
             mime_type = 'vnd.google-apps.presentation'
         # Clear original media file in user content avoiding duplicated commitment
         session.messages.pop()
-        media_file = self.upload_to_gemini(media_path, mime_type=f'{type_id}/{mime_type}')
+        if type_id != 'image':
+            media_file = self.upload_to_gemini(media_path, mime_type=f'{type_id}/{mime_type}')
         self.sessions.session_query(media_file, session_id)
     
     def upload_to_gemini(self, path, mime_type=None):
