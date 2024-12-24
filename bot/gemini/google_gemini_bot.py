@@ -39,9 +39,13 @@ class GoogleGeminiBot(Bot,GeminiVision):
     def reply(self, query, context: Context = None) -> Reply:
         try:
             if context.type == ContextType.FILE:
-                session_id = context["session_id"]
-                session = self.sessions.session_query(query, session_id)
-                return self.gemini_15_media(query, context, session)
+                mime_type = context.content[(context.content.index('.') + 1):]
+                if mime_type in const.AUDIO or mime_type in const.VIDEO:
+                    session_id = context["session_id"]
+                    session = self.sessions.session_query(query, session_id)
+                    return self.gemini_15_media(query, context, session)
+                else:
+                    return self._file_cache(query, context)
             elif context.type == ContextType.IMAGE:
                 if self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEMINI_15_PRO_LIST:
                     session_id = context["session_id"]
@@ -70,7 +74,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     vision_res = self.do_vision_completion_if_need(session_id,query) # Image recongnition and vision completion
                     if vision_res:
                         return vision_res
-                elif self.model in const.GEMINI_15_PRO_LIST or self.model in const.GEMINI_15_FLASH_LIST:
+                elif self.model in const.GEMINI_15_PRO_LIST or self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEINI_2_FLASH_LIST:
                     gemini_messages = self._convert_to_gemini_15_messages(session.messages)
                     file_cache = memory.USER_FILE_CACHE.get(session_id)
                     if file_cache:
