@@ -6,6 +6,7 @@ Google gemini bot
 """
 # encoding:utf-8
 
+import base64
 import time
 import re
 import docx
@@ -39,8 +40,8 @@ class GoogleGeminiBot(Bot,GeminiVision):
     def reply(self, query, context: Context = None) -> Reply:
         try:
             if context.type == ContextType.FILE:
-                mime_type = context.content[(context.content.index('.') + 1):]
-                if mime_type in const.AUDIO or mime_type in const.VIDEO:
+                mime_type = context.content[(context.content.rindex('.') + 1):]
+                if mime_type in const.AUDIO or mime_type in const.VIDEO or mime_type == const.PDF:
                     session_id = context["session_id"]
                     session = self.sessions.session_query(query, session_id)
                     return self.gemini_15_media(query, context, session)
@@ -155,7 +156,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 if msg_type == 'File':
                     media_parts.append(msg_content)
                     continue
-                if msg_type in ['str','JpegImageFile']:
+                if msg_type in ['str','JpegImageFile','dict']:
                     if media_parts != []:
                         media_parts.append(msg_content)
                         user_parts = media_parts
@@ -286,7 +287,16 @@ class GoogleGeminiBot(Bot,GeminiVision):
             type_id = 'video'
         elif mime_type == const.PDF:
             msg.prepare()
+            # Read and b64enbode the PDF file smaller than 20MB
+            with open(media_path, 'rb') as file:
+                pdf_data = file.read()
+                pdf_b64 = base64.b64encode(pdf_data).decode('utf-8')
             type_id = 'application'
+            
+            media_file = {
+                'mime_type': f'{type_id}/{mime_type}',
+                'data': pdf_b64
+            }
         elif mime_type in const.DOCUMENT:
             msg.prepare()
             type_id = 'text'
@@ -299,7 +309,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
             mime_type = 'vnd.google-apps.presentation'
         # Clear original media file in user content avoiding duplicated commitment
         session.messages.pop()
-        if type_id != 'image':
+        if mime_type not in  ['image','pdf']:
             media_file = self.upload_to_gemini(media_path, mime_type=f'{type_id}/{mime_type}')
         self.sessions.session_query(media_file, session_id)
     
