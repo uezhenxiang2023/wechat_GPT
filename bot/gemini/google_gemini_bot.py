@@ -7,12 +7,15 @@ Google gemini bot
 # encoding:utf-8
 
 import base64
+import json
+import os
 import time
 import re
 import docx
 from pypdf import PdfReader
 from bot.bot import Bot
 import google.generativeai as genai
+from google.ai.generativelanguage_v1beta.types import content
 from bot.session_manager import SessionManager
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
@@ -34,6 +37,9 @@ class GoogleGeminiBot(Bot,GeminiVision):
         self.model = conf().get('model')
         self.Model_ID = self.model.upper()
         self.system_prompt = conf().get("character_desc")
+        self.function_call_dicts = {
+                    "script_pre_breakdown": self.script_pre_breakdown
+                }
         # 复用文心的token计算方式
         self.sessions = SessionManager(BaiduWenxinSession, model=self.model or "gpt-3.5-turbo")
 
@@ -45,14 +51,16 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     session_id = context["session_id"]
                     session = self.sessions.session_query(query, session_id)
                     return self.gemini_15_media(query, context, session)
-                else:
-                    return self._file_cache(query, context)
+                elif mime_type in ['docx','doc']:
+                    self._file_cache(context)
+                    doc_cache = memory.USER_FILE_CACHE.get(context['session_id'])
+                    return self._file_download(doc_cache)
             elif context.type == ContextType.IMAGE:
                 if self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEMINI_15_PRO_LIST or self.model in const.GEMINI_2_FLASH_LIST:
                     session_id = context["session_id"]
                     session = self.sessions.session_query(query, session_id)
                     return self.gemini_15_media(query, context, session)
-                if self.model in const.GEMINI_1_PRO_LIST:
+                elif self.model in const.GEMINI_1_PRO_LIST:
                     memory.USER_IMAGE_CACHE[context["session_id"]] = {
                     "path": context.content,
                     "msg": context.get("msg")
@@ -77,12 +85,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         return vision_res
                 elif self.model in const.GEMINI_15_PRO_LIST or self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEMINI_2_FLASH_LIST:
                     gemini_messages = self._convert_to_gemini_15_messages(session.messages)
-                    file_cache = memory.USER_FILE_CACHE.get(session_id)
-                    if file_cache:
-                        file_prompt = self.read_file(file_cache)
-                        system_prompt = self.system_prompt + file_prompt
-                    else:
-                        system_prompt = self.system_prompt
+                    system_prompt = self.system_prompt
 
                 generation_config = {
                 "temperature": 0.4,
@@ -113,10 +116,74 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     model_name=self.model,
                     generation_config=generation_config,
                     safety_settings=safety_settings,
-                    system_instruction=system_prompt
+                    system_instruction=system_prompt,
+                    tools = [
+                        genai.protos.Tool(
+                            function_declarations = [
+                                genai.protos.FunctionDeclaration(
+                                    name = "script_pre_breakdown",
+                                    description = "根据输入的名称找到剧本文件，准确统计剧本总页数，总字数，每场戏的字数。",
+                                    parameters = content.Schema(
+                                        type = content.Type.OBJECT,
+                                        enum = [],
+                                        required = ["script_name"],
+                                        properties = {
+                                            "script_name": content.Schema(
+                                                type = content.Type.STRING,
+                                                description = "剧本名称",
+                                            ),
+                                        },
+                                    ),
+                                ),
+                            ],
+                        ),
+                ],
+                tool_config={'function_calling_config': 'AUTO'}
                 )
 
                 response = model.generate_content(gemini_messages)
+                # check function_call status
+                for part in response.parts:
+                    if fn := part.function_call:
+                        fn_name = fn.name
+                        script_name = fn.args.get("script_name")
+                        reply_text = {
+                            "functionCall": {
+                                "name": fn_name,
+                                "args": {
+                                    "script_name": script_name
+                                }
+                            }
+                        }
+                        # 将reply_text转换为字符串
+                        reply_text_str = json.dumps(reply_text)
+                        # add function call to session as model/assistant message
+                        self.sessions.session_reply(reply_text_str, session_id)
+
+                        # call function
+                        function_call = self.function_call_dicts.get(fn_name)
+                        function_response_raw = function_call(script_name)
+                        function_response = {
+                            "functionResponse": {
+                                "name": fn_name,
+                                "response": {
+                                    "name": fn_name,
+                                    "content": {
+                                        "script_name": script_name,
+                                        "pre_breakdown_information": function_response_raw
+                                    }
+                                }
+                            }
+                        }
+                        # 将function_response转换为字符串
+                        function_response_str = json.dumps(function_response)
+                        # add function response to session as user message
+                        self.sessions.session_query(function_response_str, session_id)
+
+                        # new turn of model request with function response
+                        gemini_messages = self._convert_to_gemini_15_messages(session.messages)
+                        response = model.generate_content(gemini_messages)
+
                 reply_text = response.text
                 self.sessions.session_reply(reply_text, session_id)
                 logger.info(f"[{self.Model_ID}] reply={reply_text}")
@@ -192,7 +259,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 turn = "user"
         return res
     
-    def _file_cache(self, query, context):
+    def _file_cache(self, context):
         memory.USER_FILE_CACHE[context['session_id']] = {
             "path": context.content,
             "msg": context.get("msg")
@@ -200,10 +267,23 @@ class GoogleGeminiBot(Bot,GeminiVision):
         logger.info("[{}] file={} is cached for assistant".format(self.Model_ID, context.content))
         return None
     
-    def read_file(self,file_cache):
+    def _file_download(self, file_cache):
         msg = file_cache.get("msg")
         path = file_cache.get("path")
         msg.prepare()
+        logger.info("[{}] file={} is downloaded locally".format(self.Model_ID, path))
+        return None
+
+    def script_pre_breakdown(self,file_name):
+        """
+        Locate the script file according to input file_name then pre-process the script accurately count the total number of script pages, total number of words, and the number of words in each scene.
+        """
+        # 遍历./tmp目录下的文件,如果文件名中含有file_name,则将其路径赋值给path
+        for root, dirs, files in os.walk('./tmp'):
+            for file in files:
+                if file_name in file:
+                    path = os.path.join(root, file)
+
         if path[-5:] == '.docx':
             reader = docx.Document(path)
             texts = ''
@@ -235,22 +315,20 @@ class GoogleGeminiBot(Bot,GeminiVision):
         for i, v in enumerate(line_list):
             # 只要每行的前3～7个字，符合场次描述规则
             if any(re.match(pattern, v[:n]) is not None for n in (2, 3, 4, 5, 6, 7)):
-                counter_dict[f"第{sc_count}场"] = f'{len(paragraph)}字'
+                counter_dict[f"scene{sc_count}"] = f'{len(paragraph)}'
                 sc_count += 1
                 paragraph = ""
             paragraph += v.strip()
         # 循环结束后，捕获最后一场戏的字数
-        counter_dict[f"第{sc_count}场"] = f'{len(paragraph)}字'
-        del counter_dict["第0场"]
-        file_prompt = f'''\
-        \nHere are some information for you to reference for your task:\n
-        Number_of_Pages:{number_of_pages}\n
-        Total_Characters:{total_characters}\n
-        Scene_Characters:{counter_dict}\n
-        {texts}\n
-        Please find quotes relevant to the question before answering.Just response with the exact result,that means excluding any friendly preamble before providing the requested output.
-        '''
-        return file_prompt
+        counter_dict[f"scene{sc_count}"] = f'{len(paragraph)}'
+        del counter_dict["scene0"]
+
+        basic_info = {
+            'total_pages':number_of_pages,
+            'total_characters':total_characters,
+            'scene_characters':counter_dict
+        }
+        return basic_info
     
     def gemini_15_media(self, query, context, session: BaiduWenxinSession):
         session_id = context.kwargs["session_id"]
