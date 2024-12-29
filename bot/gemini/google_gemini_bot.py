@@ -122,7 +122,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                             function_declarations = [
                                 genai.protos.FunctionDeclaration(
                                     name = "script_pre_breakdown",
-                                    description = "根据输入的名称找到剧本文件，准确统计剧本总页数，总字数，每场戏的字数。",
+                                    description = "根据输入的剧本名称找到剧本文件，准确统计剧本总页数，总字数，每场戏的字数。",
                                     parameters = content.Schema(
                                         type = content.Type.OBJECT,
                                         enum = [],
@@ -146,32 +146,31 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 for part in response.parts:
                     if fn := part.function_call:
                         fn_name = fn.name
-                        script_name = fn.args.get("script_name")
-                        reply_text = {
+                        fn_args = {}
+                        for k, v in fn.args.items():
+                            fn_args[k] = v
+                        function_call_reply = {
                             "functionCall": {
                                 "name": fn_name,
-                                "args": {
-                                    "script_name": script_name
-                                }
+                                "args": fn_args
                             }
                         }
                         # 将reply_text转换为字符串
-                        reply_text_str = json.dumps(reply_text)
+                        function_call_str = json.dumps(function_call_reply)
                         # add function call to session as model/assistant message
-                        self.sessions.session_reply(reply_text_str, session_id)
+                        self.sessions.session_reply(function_call_str, session_id)
 
                         # call function
                         function_call = self.function_call_dicts.get(fn_name)
-                        function_response_raw = function_call(script_name)
+                        # 从fn_args中获取function_call的参数
+                        function_response_raw = function_call(**fn_args)
+                        fn_args.update(function_response_info = function_response_raw)
                         function_response = {
                             "functionResponse": {
                                 "name": fn_name,
                                 "response": {
                                     "name": fn_name,
-                                    "content": {
-                                        "script_name": script_name,
-                                        "pre_breakdown_information": function_response_raw
-                                    }
+                                    "content": fn_args
                                 }
                             }
                         }
@@ -274,14 +273,11 @@ class GoogleGeminiBot(Bot,GeminiVision):
         logger.info("[{}] file={} is downloaded locally".format(self.Model_ID, path))
         return None
 
-    def script_pre_breakdown(self,file_name):
-        """
-        Locate the script file according to input file_name then pre-process the script accurately count the total number of script pages, total number of words, and the number of words in each scene.
-        """
-        # 遍历./tmp目录下的文件,如果文件名中含有file_name,则将其路径赋值给path
+    def script_pre_breakdown(self, *, script_name):
+        # 遍历./tmp目录下的文件,如果文件名中含有script_name,则将其路径赋值给path
         for root, dirs, files in os.walk('./tmp'):
             for file in files:
-                if file_name in file:
+                if script_name in file:
                     path = os.path.join(root, file)
 
         if path[-5:] == '.docx':
