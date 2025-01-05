@@ -38,7 +38,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         self.Model_ID = self.model.upper()
         self.system_prompt = conf().get("character_desc")
         self.function_call_dicts = {
-                    "script_pre_breakdown": self.script_pre_breakdown
+                    "screenplay_scenes_breakdown": self.screenplay_scenes_breakdown
                 }
         # 复用文心的token计算方式
         self.sessions = SessionManager(BaiduWenxinSession, model=self.model or "gpt-3.5-turbo")
@@ -121,24 +121,50 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         genai.protos.Tool(
                             function_declarations = [
                                 genai.protos.FunctionDeclaration(
-                                    name = "script_pre_breakdown",
-                                    description = "根据输入的剧本名称找到剧本文件，准确统计剧本总页数，总字数，每场戏的字数。",
+                                    name = "screenplay_scenes_breakdown",
+                                    description = "第一步先拆解剧本场景，提取场号、场景、内外、日夜等基础信息，形成场景列表；第二步根据输入的剧本名称找到剧本文件，准确统计剧本总页数，总字数，每场戏的字数，补充到场景列表中。",
                                     parameters = content.Schema(
                                         type = content.Type.OBJECT,
                                         enum = [],
-                                        required = ["script_name"],
+                                        required = ["screenplay_title"],
                                         properties = {
-                                            "script_name": content.Schema(
+                                            "screenplay_title": content.Schema(
                                                 type = content.Type.STRING,
                                                 description = "剧本名称",
+                                            ),
+                                            "scenes_list": content.Schema(
+                                                type = content.Type.ARRAY,
+                                                items = content.Schema(
+                                                    type = content.Type.OBJECT,
+                                                    properties = {
+                                                        "id": content.Schema(
+                                                            type = content.Type.INTEGER,
+                                                            description = "场号",
+                                                        ),
+                                                        "location": content.Schema(
+                                                            type = content.Type.STRING,
+                                                            description = "场景名称",
+                                                        ),
+                                                        "daynight": content.Schema(
+                                                            type = content.Type.STRING,
+                                                            description = "日景还是夜景",
+                                                            enum = ["日","夜"]
+                                                        ),
+                                                        "envirement": content.Schema(
+                                                            type = content.Type.STRING,
+                                                            description = "室内环境还是室外环境",
+                                                            enum = ["内","外"]
+                                                        ),
+                                                    },
+                                                ),
                                             ),
                                         },
                                     ),
                                 ),
                             ],
                         ),
-                ],
-                tool_config={'function_calling_config': 'AUTO'}
+                    ],
+                    tool_config={'function_calling_config': 'AUTO'}
                 )
 
                 response = model.generate_content(gemini_messages)
@@ -273,11 +299,11 @@ class GoogleGeminiBot(Bot,GeminiVision):
         logger.info("[{}] file={} is downloaded locally".format(self.Model_ID, path))
         return None
 
-    def script_pre_breakdown(self, *, script_name):
-        # 遍历./tmp目录下的文件,如果文件名中含有script_name,则将其路径赋值给path
+    def screenplay_scenes_breakdown(self, *, screenplay_title: str = None, scenes_list: list = []):
+        # 遍历./tmp目录下的文件,如果文件名中含有screenplay_title,则将其路径赋值给path
         for root, dirs, files in os.walk('./tmp'):
             for file in files:
-                if script_name in file:
+                if screenplay_title in file:
                     path = os.path.join(root, file)
 
         if path[-5:] == '.docx':
