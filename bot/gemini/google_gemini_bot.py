@@ -171,10 +171,9 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 # check function_call status
                 for part in response.parts:
                     if fn := part.function_call:
-                        fn_name = fn.name
-                        fn_args = {}
-                        for k, v in fn.args.items():
-                            fn_args[k] = v
+                        fn_dict = type(fn).to_dict(fn)
+                        fn_name = fn_dict.get('name')
+                        fn_args = fn_dict.get('args')
                         function_call_reply = {
                             "functionCall": {
                                 "name": fn_name,
@@ -189,8 +188,8 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         # call function
                         function_call = self.function_call_dicts.get(fn_name)
                         # 从fn_args中获取function_call的参数
-                        function_response_raw = function_call(**fn_args)
-                        fn_args.update(function_response_info = function_response_raw)
+                        api_response = function_call(**fn_args)
+                        fn_args.update(**api_response)
                         function_response = {
                             "functionResponse": {
                                 "name": fn_name,
@@ -327,7 +326,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
             number_of_pages = len(reader.pages)
             texts = ''.join([page.extract_text() for page in reader.pages])
             line_list = texts.splitlines()
-        total_characters = len(texts)
+        total_words = len(texts)
         # 统计每一场的字数
         paragraph = ""
         sc_count = 0
@@ -345,12 +344,15 @@ class GoogleGeminiBot(Bot,GeminiVision):
         counter_dict[f"scene{sc_count}"] = f'{len(paragraph)}'
         del counter_dict["scene0"]
 
-        basic_info = {
+        for i, v in enumerate(scenes_list):
+            v.update(word_count = counter_dict[f"scene{i+1}"])
+
+        api_response = {
             'total_pages':number_of_pages,
-            'total_characters':total_characters,
-            'scene_characters':counter_dict
+            'total_words':total_words,
+            'scenes_list':scenes_list
         }
-        return basic_info
+        return api_response
     
     def gemini_15_media(self, query, context, session: BaiduWenxinSession):
         session_id = context.kwargs["session_id"]
