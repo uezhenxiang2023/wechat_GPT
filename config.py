@@ -160,7 +160,10 @@ available_setting = {
 
     "OpenAI_RAG": False, # Freedom of Retrieval Augmented Generation
     "OpenAI_Assistant_ID": "" ,# Assistant ID in openai platform
-    "OpenAI_Vector_Stores_ID": "" # Vector Stores in openai API  
+    "OpenAI_Vector_Stores_ID": "" ,# Vector Stores in openai API
+
+    # web channel配置
+    "web_port": 9899,  # web channel的端口
 }
 
 
