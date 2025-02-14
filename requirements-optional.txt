@@ -40,3 +40,6 @@ google-generativeai
 # RAG based documents file
 python-docx
 pypdf
+
+# Telegram 
+python-telegram-bot==13.12

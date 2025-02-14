@@ -2,6 +2,7 @@
 .idea
 .vscode
 .venv
+.venv_*
 .vs
 .wechaty/
 __pycache__/

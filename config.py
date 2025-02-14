@@ -164,6 +164,10 @@ available_setting = {
 
     # web channel配置
     "web_port": 9899,  # web channel的端口
+
+    # telegram channel配置
+    "telegram_bot_token": "",  # telegram bot token
+    "telegram_proxy_url": "",  # telegram bot proxy url
 }
 
 
