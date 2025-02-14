@@ -14,8 +14,10 @@ import re
 import docx
 from pypdf import PdfReader
 from bot.bot import Bot
-import google.generativeai as genai
+import google.generativeai as generativeai
 from google.ai.generativelanguage_v1beta.types import content
+from google import genai
+from google.genai.types import Tool,GenerateContentConfig,GoogleSearch
 from bot.session_manager import SessionManager
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
@@ -26,7 +28,6 @@ from bot.baidu.baidu_wenxin_session import BaiduWenxinSession
 from bot.gemini.google_genimi_vision import GeminiVision
 from PIL import Image
 
-genai.configure(api_key=conf().get('gemini_api_key'),transport='rest')
 
 # OpenAI对话模型API (可用)
 class GoogleGeminiBot(Bot,GeminiVision):
@@ -38,10 +39,42 @@ class GoogleGeminiBot(Bot,GeminiVision):
         self.Model_ID = self.model.upper()
         self.system_prompt = conf().get("character_desc")
         self.function_call_dicts = {
-                    "screenplay_scenes_breakdown": self.screenplay_scenes_breakdown
-                }
+            "screenplay_scenes_breakdown": self.screenplay_scenes_breakdown
+        }
         # 复用文心的token计算方式
         self.sessions = SessionManager(BaiduWenxinSession, model=self.model or "gpt-3.5-turbo")
+        
+        # Initialize a client according to old generativeai SDK
+        generativeai.configure(api_key=self.api_key,transport='rest')
+        self.generation_config = {
+            "temperature": 0.4,
+            "top_p": 1,
+            "top_k": 1,
+            "max_output_tokens": 2048,
+        }
+        self.safety_settings = [
+            {
+                "category": "HARM_CATEGORY_HARASSMENT",
+                "threshold": "BLOCK_NONE"
+            },
+            {
+                "category": "HARM_CATEGORY_HATE_SPEECH",
+                "threshold": "BLOCK_NONE"
+            },
+            {
+                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "threshold": "BLOCK_NONE"
+            },
+            {
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "threshold": "BLOCK_NONE"
+            },
+        ]
+        self.tool_config={'function_calling_config': 'AUTO'}
+
+        # Initialize a client according to new genai SDK
+        self.client = genai.Client(api_key=self.api_key)
+        self.google_search_tool = Tool(google_search=GoogleSearch())
 
     def reply(self, query, context: Context = None) -> Reply:
         try:
@@ -87,133 +120,120 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     gemini_messages = self._convert_to_gemini_15_messages(session.messages)
                     system_prompt = self.system_prompt
 
-                generation_config = {
-                "temperature": 0.4,
-                "top_p": 1,
-                "top_k": 1,
-                "max_output_tokens": 2048,
-                }
-
-                safety_settings = [
-                {
-                    "category": "HARM_CATEGORY_HARASSMENT",
-                    "threshold": "BLOCK_NONE"
-                },
-                {
-                    "category": "HARM_CATEGORY_HATE_SPEECH",
-                    "threshold": "BLOCK_NONE"
-                },
-                {
-                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                    "threshold": "BLOCK_NONE"
-                },
-                {
-                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                    "threshold": "BLOCK_NONE"
-                },
-                ]
-                model = genai.GenerativeModel(
-                    model_name=self.model,
-                    generation_config=generation_config,
-                    safety_settings=safety_settings,
-                    system_instruction=system_prompt,
-                    tools = [
-                        genai.protos.Tool(
-                            function_declarations = [
-                                genai.protos.FunctionDeclaration(
-                                    name = "screenplay_scenes_breakdown",
-                                    description = "第一步先拆解剧本场景，提取场号、场景、内外、日夜等基础信息，形成场景列表；第二步根据输入的剧本名称找到剧本文件，准确统计剧本总页数，总字数，每场戏的字数，补充到场景列表中。",
-                                    parameters = content.Schema(
-                                        type = content.Type.OBJECT,
-                                        enum = [],
-                                        required = ["screenplay_title"],
-                                        properties = {
-                                            "screenplay_title": content.Schema(
-                                                type = content.Type.STRING,
-                                                description = "剧本名称",
-                                            ),
-                                            "scenes_list": content.Schema(
-                                                type = content.Type.ARRAY,
-                                                items = content.Schema(
-                                                    type = content.Type.OBJECT,
-                                                    properties = {
-                                                        "id": content.Schema(
-                                                            type = content.Type.INTEGER,
-                                                            description = "场号",
-                                                        ),
-                                                        "location": content.Schema(
-                                                            type = content.Type.STRING,
-                                                            description = "场景名称",
-                                                        ),
-                                                        "daynight": content.Schema(
-                                                            type = content.Type.STRING,
-                                                            description = "日景还是夜景",
-                                                            enum = ["日","夜"]
-                                                        ),
-                                                        "envirement": content.Schema(
-                                                            type = content.Type.STRING,
-                                                            description = "室内环境还是室外环境",
-                                                            enum = ["内","外"]
-                                                        ),
-                                                    },
+                if self.model in const.GEMINI_GENAI_SDK:
+                    response = self.client.models.generate_content(
+                        model = self.model,
+                        contents = query,
+                        config=GenerateContentConfig(
+                            system_instruction=self.system_prompt,
+                            safety_settings=self.safety_settings,
+                            tools=[self.google_search_tool],
+                            response_modalities=['TEXT'],
+                            **self.generation_config
+                        )
+                    )
+                elif self.model not in const.GEMINI_GENAI_SDK:
+                    model = generativeai.GenerativeModel(
+                        model_name=self.model,
+                        generation_config=self.generation_config,
+                        safety_settings=self.safety_settings,
+                        system_instruction=system_prompt,
+                        tools = [
+                            generativeai.protos.Tool(
+                                function_declarations = [
+                                    generativeai.protos.FunctionDeclaration(
+                                        name = "screenplay_scenes_breakdown",
+                                        description = "第一步先拆解剧本场景，提取场号、场景、内外、日夜等基础信息，形成场景列表；第二步根据输入的剧本名称找到剧本文件，准确统计剧本总页数，总字数，每场戏的字数，补充到场景列表中。",
+                                        parameters = content.Schema(
+                                            type = content.Type.OBJECT,
+                                            enum = [],
+                                            required = ["screenplay_title"],
+                                            properties = {
+                                                "screenplay_title": content.Schema(
+                                                    type = content.Type.STRING,
+                                                    description = "剧本名称",
                                                 ),
-                                            ),
-                                        },
+                                                "scenes_list": content.Schema(
+                                                    type = content.Type.ARRAY,
+                                                    items = content.Schema(
+                                                        type = content.Type.OBJECT,
+                                                        properties = {
+                                                            "id": content.Schema(
+                                                                type = content.Type.INTEGER,
+                                                                description = "场号",
+                                                            ),
+                                                            "location": content.Schema(
+                                                                type = content.Type.STRING,
+                                                                description = "场景名称",
+                                                            ),
+                                                            "daynight": content.Schema(
+                                                                type = content.Type.STRING,
+                                                                description = "日景还是夜景",
+                                                                enum = ["日","夜"]
+                                                            ),
+                                                            "envirement": content.Schema(
+                                                                type = content.Type.STRING,
+                                                                description = "室内环境还是室外环境",
+                                                                enum = ["内","外"]
+                                                            ),
+                                                        },
+                                                    ),
+                                                ),
+                                            },
+                                        ),
                                     ),
-                                ),
-                            ],
-                        ),
-                    ],
-                    tool_config={'function_calling_config': 'AUTO'}
-                )
-
-                response = model.generate_content(gemini_messages)
-                # check function_call status
-                for part in response.parts:
-                    if fn := part.function_call:
-                        fn_dict = type(fn).to_dict(fn)
-                        fn_name = fn_dict.get('name')
-                        fn_args = fn_dict.get('args')
-                        function_call_reply = {
-                            "functionCall": {
-                                "name": fn_name,
-                                "args": fn_args
-                            }
-                        }
-                        # 将reply_text转换为字符串
-                        function_call_str = json.dumps(function_call_reply)
-                        # add function call to session as model/assistant message
-                        self.sessions.session_reply(function_call_str, session_id)
-
-                        # call function
-                        function_call = self.function_call_dicts.get(fn_name)
-                        # 从fn_args中获取function_call的参数
-                        api_response = function_call(**fn_args)
-                        fn_args.update(**api_response)
-                        function_response = {
-                            "functionResponse": {
-                                "name": fn_name,
-                                "response": {
+                                ],
+                            ),
+                        ],
+                        tool_config=self.tool_config
+                    )
+                    response = model.generate_content(gemini_messages)
+                    # check function_call status
+                    for part in response.parts:
+                        if fn := part.function_call:
+                            fn_dict = type(fn).to_dict(fn)
+                            fn_name = fn_dict.get('name')
+                            fn_args = fn_dict.get('args')
+                            function_call_reply = {
+                                "functionCall": {
                                     "name": fn_name,
-                                    "content": fn_args
+                                    "args": fn_args
                                 }
                             }
-                        }
-                        # 将function_response转换为字符串
-                        function_response_str = json.dumps(function_response)
-                        # add function response to session as user message
-                        self.sessions.session_query(function_response_str, session_id)
+                            # 将reply_text转换为字符串
+                            function_call_str = json.dumps(function_call_reply)
+                            # add function call to session as model/assistant message
+                            self.sessions.session_reply(function_call_str, session_id)
 
-                        # new turn of model request with function response
-                        gemini_messages = self._convert_to_gemini_15_messages(session.messages)
-                        response = model.generate_content(gemini_messages)
+                            # call function
+                            function_call = self.function_call_dicts.get(fn_name)
+                            # 从fn_args中获取function_call的参数
+                            api_response = function_call(**fn_args)
+                            fn_args.update(**api_response)
+                            function_response = {
+                                "functionResponse": {
+                                    "name": fn_name,
+                                    "response": {
+                                        "name": fn_name,
+                                        "content": fn_args
+                                    }
+                                }
+                            }
+                            # 将function_response转换为字符串
+                            function_response_str = json.dumps(function_response)
+                            # add function response to session as user message
+                            self.sessions.session_query(function_response_str, session_id)
+
+                            # new turn of model request with function response
+                            gemini_messages = self._convert_to_gemini_15_messages(session.messages)
+                            response = model.generate_content(gemini_messages)
 
                 reply_text = response.text
                 self.sessions.session_reply(reply_text, session_id)
                 logger.info(f"[{self.Model_ID}] reply={reply_text}")
                 return Reply(ReplyType.TEXT, reply_text)
             else:
-                logger.warn(f"[{self.Model_ID}] Unsupported message type, type={context.type}")
+                logger.warning(f"[{self.Model_ID}] Unsupported message type, type={context.type}")
                 return Reply(ReplyType.ERROR, f"[{self.Model_ID}] Unsupported message type, type={context.type}")
         except Exception as e:
             logger.error("[{}] fetch reply error, {}".format(self.Model_ID, e))
@@ -420,7 +440,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
 
         https://ai.google.dev/gemini-api/docs/prompting_with_media
         """
-        file = genai.upload_file(path, mime_type=mime_type)
+        file = generativeai.upload_file(path, mime_type=mime_type)
         self.wait_for_files_active(file)
         print(f"Uploaded file '{file.display_name}' as: {file.uri}")
         return file
@@ -437,11 +457,11 @@ class GoogleGeminiBot(Bot,GeminiVision):
         """
         print("Waiting for file processing...")
         name =media_file.name
-        file = genai.get_file(name)
+        file = generativeai.get_file(name)
         while file.state.name == "PROCESSING":
             print(".", end="", flush=True)
             time.sleep(10)
-            file = genai.get_file(name)
+            file = generativeai.get_file(name)
         if file.state.name != "ACTIVE":
             raise Exception(f"File {file.name} failed to process")
         print("...all files ready")

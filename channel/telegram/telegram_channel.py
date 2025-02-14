@@ -52,7 +52,7 @@ class TelegramChannel(ChatChannel):
         """
 
         # Print to console
-        print(f'{update.message.from_user.first_name} wrote {update.message.text}')
+        print(f'{update.message.from_user.first_name} wrote {update.message.text}\n[scream] is {self.screaming}')
 
         self.handler_single_msg(update.message)
 
