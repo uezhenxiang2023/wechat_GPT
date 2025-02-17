@@ -56,33 +56,36 @@ class TelegramChannel(ChatChannel):
 
         self.handler_single_msg(update.message)
 
-        """if self.screaming and update.message.text:
-            context.bot.send_message(
-                update.message.chat_id,
-                update.message.text.upper(),
-                # To preserve the markdown, we attach entities (bold, italic...)
-                entities=update.message.entities
-            )
-        else:
-            # This is equivalent to forwarding, without the sender's name
-            update.message.copy(update.message.chat_id)"""
-
-
     def scream(self, update: Update, context: CallbackContext) -> None:
         """
         This function handles the /scream command
         """
 
-        #global screaming
         self.screaming = True
+        """text = '京时间2025年2月15日，中国U20在U20亚洲杯小组赛中以5-2战胜吉尔吉斯斯坦U20。刘成宇首开纪录，王玉栋、毛伟杰和朱鹏宇（梅开二度）各入一球，帮助中国队取得大胜。吉尔吉斯斯坦队的乌马尔·马达米诺夫和伊里斯克尔迪·马达诺夫分别打入一球。'
+        #text = self.escape(text)
+        
+        title = 'mykhel-AC.com'
+        #title = self.escape(title)
+        uri = 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUBnsYuu47exMpwknPadJIxKH7qObA_WQIjY9ZYeyjBh2PQTdJD1GVXgO_ZJdrszG1TmKsxbwx__I0MclAhpbS2j3PrR9p0Agvl0GePubSqXla0TqRh2ScfiiCmMsOD3Hu08mw2nPg6FeY3TyiZk4CPrImU1dOOaDZorxZwh5ikJYslIsVLm7Un0ZE6Q1gj69u0mqHWcQdyX'
+        inline_url = f'1\.[{title}]({uri})\n2\.[{title}]({uri})'
+        # '~'for strikethrough, '_' for italic, '*' for bold, '__' for underline
+        text_marddown = f'{text}\n\n{inline_url}'
 
+        context.bot.send_message(
+            update.message.chat_id,
+            text_marddown,
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True
+            # To preserve the markdown, we attach entities (bold, italic...)
+            #entities=update.message.entities
+        )"""
 
     def whisper(self, update: Update, context: CallbackContext) -> None:
         """
         This function handles /whisper command
         """
 
-        #global screaming
         self.screaming = False
 
 
@@ -276,4 +279,4 @@ class TelegramChannel(ChatChannel):
         """
         updater = Updater(self.bot_token, request_kwargs={'proxy_url': self.proxy_url})
         bot = updater.bot
-        bot.send_message(chat_id = toUserName, text = reply_content)
+        bot.send_message(chat_id=toUserName, text=reply_content, parse_mode=ParseMode.MARKDOWN_V2)

@@ -75,6 +75,16 @@ class GoogleGeminiBot(Bot,GeminiVision):
         # Initialize a client according to new genai SDK
         self.client = genai.Client(api_key=self.api_key)
         self.google_search_tool = Tool(google_search=GoogleSearch())
+        self.chat = self.client.chats.create(
+            model=self.model,
+            config=GenerateContentConfig(
+                system_instruction=self.system_prompt,
+                safety_settings=self.safety_settings,
+                tools=[self.google_search_tool],
+                response_modalities=['TEXT'],
+                **self.generation_config
+            )
+        )
 
     def reply(self, query, context: Context = None) -> Reply:
         try:
@@ -121,17 +131,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     system_prompt = self.system_prompt
 
                 if self.model in const.GEMINI_GENAI_SDK:
-                    response = self.client.models.generate_content(
-                        model = self.model,
-                        contents = query,
-                        config=GenerateContentConfig(
-                            system_instruction=self.system_prompt,
-                            safety_settings=self.safety_settings,
-                            tools=[self.google_search_tool],
-                            response_modalities=['TEXT'],
-                            **self.generation_config
-                        )
-                    )
+                    response = self.chat.send_message(query)
                 elif self.model not in const.GEMINI_GENAI_SDK:
                     model = generativeai.GenerativeModel(
                         model_name=self.model,
@@ -228,7 +228,14 @@ class GoogleGeminiBot(Bot,GeminiVision):
                             gemini_messages = self._convert_to_gemini_15_messages(session.messages)
                             response = model.generate_content(gemini_messages)
 
-                reply_text = response.text
+                reply_text = self.get_reply_text(response)
+
+                # attach search sources from the Grounded response
+                if response.candidates[0].grounding_metadata.grounding_chunks:
+                    inline_url = self.get_search_sources(response)
+                    escaped_reply_text = self.escape(reply_text)
+                    reply_text = f'{escaped_reply_text}\n\n{inline_url}'
+
                 self.sessions.session_reply(reply_text, session_id)
                 logger.info(f"[{self.Model_ID}] reply={reply_text}")
                 return Reply(ReplyType.TEXT, reply_text)
@@ -238,6 +245,49 @@ class GoogleGeminiBot(Bot,GeminiVision):
         except Exception as e:
             logger.error("[{}] fetch reply error, {}".format(self.Model_ID, e))
             return Reply(ReplyType.ERROR, f"[{self.Model_ID}] {e}")
+
+    def get_reply_text(self, response):
+        parts = response.candidates[0].content.parts
+        text = ''
+        if parts is None:
+            finish_reason = response.candidates[0].finish_reason
+            print(f'{finish_reason=}')
+            return
+        for part in response.candidates[0].content.parts:
+            if part.text:
+                text += part.text
+            elif part.executable_code:
+                continue
+        return text
+    
+    def get_search_sources(self, response):
+        """
+        Get search sources from the response Grounded with Google Search
+        """
+        sources = []
+        ground_chunks = response.candidates[0].grounding_metadata.grounding_chunks
+        for i, ground_chunk in enumerate(ground_chunks):
+            title = ground_chunk.web.title
+            title = self.escape(title)
+            uri = ground_chunk.web.uri
+            source = f'{i+1}\.[{title}]({uri})'
+            sources.append(source)
+        inline_url = '\n'.join(sources)
+        return inline_url
+    
+    def escape(self, text):
+        """
+        for parsing entities successfully, escape characters  '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'
+        with a preceding character.
+        """
+        escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        escaped_text = ""
+        for char in text:
+            if char in escape_chars:
+                escaped_text += '\\' + char
+            else:
+                escaped_text += char
+        return escaped_text
 
     def _convert_to_gemini_1_messages(self, messages: list):
         res = []
