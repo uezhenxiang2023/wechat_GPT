@@ -16,6 +16,20 @@ from config import conf
 from telegram import Update, ForceReply, InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
 
+def escape(text):
+    """
+    for parsing entities successfully, escape characters  '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'
+    with a preceding character.
+    """
+    escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    escaped_text = ""
+    for char in text:
+        if char in escape_chars:
+            escaped_text += '\\' + char
+        else:
+            escaped_text += char
+    return escaped_text
+
 @singleton
 class TelegramChannel(ChatChannel):
     def __init__(self):
@@ -228,7 +242,7 @@ class TelegramChannel(ChatChannel):
             self.send_text(reply.content, toUserName=receiver)
             logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply, receiver))
         elif reply.type == ReplyType.ERROR or reply.type == ReplyType.INFO:
-            self.send(reply.content, toUserName=receiver)
+            self.send_text(escape(reply.content), toUserName=receiver)
             logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply, receiver))
         elif reply.type == ReplyType.VOICE:
             self.send_file(reply.content, toUserName=receiver)

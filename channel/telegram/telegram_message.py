@@ -4,12 +4,31 @@ from bridge.context import ContextType
 from channel.chat_message import ChatMessage
 from common.log import logger
 from common.tmp_dir import TmpDir
+from telegram.ext import Updater
+from config import conf
+
+def get_file(file_id):
+        """
+        Use this method to get basic information about a file and prepare it for downloading.
+        """
+        bot_token = conf().get("telegram_bot_token")
+        proxy_url = conf().get("telegram_proxy_url")
+        updater = Updater(bot_token, request_kwargs={'proxy_url': proxy_url})
+        bot = updater.bot
+        file = bot.get_file(file_id)
+        return file
+
+def get_file_name(file):
+    file_path = file.file_path
+    file_name_index = file_path.rfind("/")
+    file_name = file_path[file_name_index+1:]
+    return file_name
 
 class TelegramMessage(ChatMessage):
     def __init__(self, telegram_message, is_group=False):
         super().__init__(telegram_message)
         self.msg_id = telegram_message["message_id"]
-        #self.create_time = telegram_message["date"]
+        self.create_time = telegram_message["date"]
         self.is_group = is_group
 
         if telegram_message["text"]:
@@ -21,8 +40,10 @@ class TelegramMessage(ChatMessage):
             self._prepare_fn = lambda: telegram_message.download(self.content)
         elif telegram_message["photo"]:
             self.ctype = ContextType.IMAGE
-            self.content = TmpDir().path() + telegram_message["FileName"]  # content直接存临时目录路径
-            self._prepare_fn = lambda: telegram_message.download(self.content)
+            file_id = telegram_message.photo[3].file_id
+            file = get_file(file_id)
+            self.content = TmpDir().path() + get_file_name(file)  # content直接存临时目录路径
+            self._prepare_fn = lambda: file.download(self.content)
         elif telegram_message["video"]:
             self.ctype = ContextType.VIDEO
             self.content = TmpDir().path() + telegram_message["FileName"]  # content直接存临时目录路径
