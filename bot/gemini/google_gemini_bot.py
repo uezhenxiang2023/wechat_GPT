@@ -131,11 +131,13 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     gemini_messages = self._convert_to_gemini_15_messages(session.messages)
 
                 if self.model in const.GEMINI_GENAI_SDK:
-                    contents = []
-                    for message in gemini_messages:
-                        content = message["parts"][0]
-                        contents.append(content)   
-                    response = self.chat.send_message(contents)
+                    # 检查缓存中是否媒体文件
+                    file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+                    if file_cache:
+                        file_cache['files'].append(query)
+                        query = file_cache['files']
+                        memory.USER_IMAGE_CACHE.pop(session_id)  
+                    response = self.chat.send_message(query)
                 elif self.model not in const.GEMINI_GENAI_SDK:
                     model = generativeai.GenerativeModel(
                         model_name=self.model,
@@ -474,7 +476,21 @@ class GoogleGeminiBot(Bot,GeminiVision):
         if (mime_type not in const.IMAGE) and (mime_type != const.PDF):
             media_file = self.upload_to_gemini(media_path, mime_type=f'{type_id}/{mime_type}')
         self.sessions.session_query(media_file, session_id)
+        self.cache_media(media_path, media_file, context)
     
+    def cache_media(self, media_path, media_file, context):
+        session_id = context["session_id"]
+        if session_id not in memory.USER_IMAGE_CACHE:
+            memory.USER_IMAGE_CACHE[session_id] = {
+                "path": [media_path],
+                "files": [media_file]
+            }
+        else:
+            memory.USER_IMAGE_CACHE[session_id]["path"].append(media_path)
+            memory.USER_IMAGE_CACHE[session_id]["files"].append(media_file)
+        logger.info(f"{media_path} cached to memory")
+        return None
+
     def upload_to_gemini(self, path, mime_type=None):
         """Uploads the given file to Gemini.
 
