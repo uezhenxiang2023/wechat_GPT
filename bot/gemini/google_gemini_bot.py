@@ -27,6 +27,7 @@ from config import conf
 from bot.baidu.baidu_wenxin_session import BaiduWenxinSession
 from bot.gemini.google_genimi_vision import GeminiVision
 from PIL import Image
+from channel.telegram.telegram_channel import escape
 
 
 # OpenAI对话模型API (可用)
@@ -128,16 +129,19 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         return vision_res
                 elif self.model in const.GEMINI_15_PRO_LIST or self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEMINI_2_FLASH_LIST:
                     gemini_messages = self._convert_to_gemini_15_messages(session.messages)
-                    system_prompt = self.system_prompt
 
                 if self.model in const.GEMINI_GENAI_SDK:
-                    response = self.chat.send_message(query)
+                    contents = []
+                    for message in gemini_messages:
+                        content = message["parts"][0]
+                        contents.append(content)   
+                    response = self.chat.send_message(contents)
                 elif self.model not in const.GEMINI_GENAI_SDK:
                     model = generativeai.GenerativeModel(
                         model_name=self.model,
                         generation_config=self.generation_config,
                         safety_settings=self.safety_settings,
-                        system_instruction=system_prompt,
+                        system_instruction=self.system_prompt,
                         tools = [
                             generativeai.protos.Tool(
                                 function_declarations = [
@@ -228,13 +232,13 @@ class GoogleGeminiBot(Bot,GeminiVision):
                             gemini_messages = self._convert_to_gemini_15_messages(session.messages)
                             response = model.generate_content(gemini_messages)
 
-                reply_text = self.get_reply_text(response)
+                raw_reply_text = self.get_reply_text(response)
+                reply_text = escape(raw_reply_text)
 
                 # attach search sources from the Grounded response
                 if response.candidates[0].grounding_metadata.grounding_chunks:
                     inline_url = self.get_search_sources(response)
-                    escaped_reply_text = self.escape(reply_text)
-                    reply_text = f'{escaped_reply_text}\n\n{inline_url}'
+                    reply_text = f'{reply_text}\n\n{inline_url}'
 
                 self.sessions.session_reply(reply_text, session_id)
                 logger.info(f"[{self.Model_ID}] reply={reply_text}")
@@ -268,26 +272,12 @@ class GoogleGeminiBot(Bot,GeminiVision):
         ground_chunks = response.candidates[0].grounding_metadata.grounding_chunks
         for i, ground_chunk in enumerate(ground_chunks):
             title = ground_chunk.web.title
-            title = self.escape(title)
+            title = escape(title)
             uri = ground_chunk.web.uri
             source = f'{i+1}\.[{title}]({uri})'
             sources.append(source)
         inline_url = '\n'.join(sources)
         return inline_url
-    
-    def escape(self, text):
-        """
-        for parsing entities successfully, escape characters  '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'
-        with a preceding character.
-        """
-        escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-        escaped_text = ""
-        for char in text:
-            if char in escape_chars:
-                escaped_text += '\\' + char
-            else:
-                escaped_text += char
-        return escaped_text
 
     def _convert_to_gemini_1_messages(self, messages: list):
         res = []
@@ -429,7 +419,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         msg = context.kwargs["msg"]
         media_path = context.content
         logger.info(f"[{self.model}] query with media, path={media_path}")
-        type_position = media_path.index('.', -6) + 1
+        type_position = media_path.rfind('.') + 1
         mime_type = media_path[type_position:]
         if mime_type in const.IMAGE:
             type_id = 'image'
@@ -481,7 +471,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
             mime_type = 'vnd.google-apps.presentation'
         # Clear original media file in user content avoiding duplicated commitment
         session.messages.pop()
-        if mime_type not in  ['image','pdf']:
+        if (mime_type not in const.IMAGE) and (mime_type != const.PDF):
             media_file = self.upload_to_gemini(media_path, mime_type=f'{type_id}/{mime_type}')
         self.sessions.session_query(media_file, session_id)
     
