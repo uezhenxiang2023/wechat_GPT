@@ -77,8 +77,10 @@ class TelegramMessage(ChatMessage):
                 raise NotImplementedError("Unsupported note message: " + telegram_message["Content"])
         elif telegram_message["document"]:
             self.ctype = ContextType.FILE
-            self.content = TmpDir().path() + telegram_message["FileName"]  # content直接存临时目录路径
-            self._prepare_fn = lambda: telegram_message.download(self.content)
+            file_id = telegram_message.document.file_id
+            file = get_file(file_id)
+            self.content = TmpDir().path() + telegram_message["document"]["file_name"]  # content直接存临时目录路径
+            self._prepare_fn = lambda: file.download(self.content)
         elif telegram_message["SHARING"]:
             self.ctype = ContextType.SHARING
             self.content = telegram_message.get("Url")

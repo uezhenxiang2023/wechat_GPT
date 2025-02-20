@@ -17,7 +17,7 @@ from bot.bot import Bot
 import google.generativeai as generativeai
 from google.ai.generativelanguage_v1beta.types import content
 from google import genai
-from google.genai.types import Tool,GenerateContentConfig,GoogleSearch
+from google.genai.types import Tool,GenerateContentConfig,GoogleSearch,Part
 from bot.session_manager import SessionManager
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
@@ -134,10 +134,18 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     # 检查缓存中是否媒体文件
                     file_cache = memory.USER_IMAGE_CACHE.get(session_id)
                     if file_cache:
-                        file_cache['files'].append(query)
-                        query = file_cache['files']
+                        first_data = file_cache['files'][0]
+                        data_type = type(first_data).__name__
+                        if data_type == 'dict':
+                            file_content = [Part.from_bytes(**first_data)]
+                            file_content.append(query)
+                            query = file_content
+                        elif data_type == 'JpegImageFile':
+                            file_cache['files'].append(query)
+                            query = file_cache['files']
                         memory.USER_IMAGE_CACHE.pop(session_id)  
                     response = self.chat.send_message(query)
+
                 elif self.model not in const.GEMINI_GENAI_SDK:
                     model = generativeai.GenerativeModel(
                         model_name=self.model,
