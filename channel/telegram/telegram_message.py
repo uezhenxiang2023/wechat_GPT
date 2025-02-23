@@ -15,8 +15,11 @@ def get_file(file_id):
         proxy_url = conf().get("telegram_proxy_url")
         updater = Updater(bot_token, request_kwargs={'proxy_url': proxy_url})
         bot = updater.bot
-        file = bot.get_file(file_id)
-        return file
+        try:
+            file = bot.get_file(file_id)
+            return file, None
+        except Exception as e:
+            return None, e
 
 def get_file_name(file):
     file_path = file.file_path
@@ -30,6 +33,9 @@ class TelegramMessage(ChatMessage):
         self.msg_id = telegram_message["message_id"]
         self.create_time = telegram_message["date"]
         self.is_group = is_group
+        self.from_user_id = telegram_message["from_user"]["id"]
+        self.to_user_id = telegram_message["chat_id"]
+        self.other_user_id = self.to_user_id
 
         if telegram_message["text"]:
             self.ctype = ContextType.TEXT
@@ -41,9 +47,14 @@ class TelegramMessage(ChatMessage):
         elif telegram_message["photo"]:
             self.ctype = ContextType.IMAGE
             file_id = telegram_message.photo[3].file_id
-            file = get_file(file_id)
-            self.content = TmpDir().path() + get_file_name(file)  # content直接存临时目录路径
-            self._prepare_fn = lambda: file.download(self.content)
+            file, error = get_file(file_id)
+            if file:
+                self.content = TmpDir().path() + get_file_name(file)  # content直接存临时目录路径
+                self._prepare_fn = lambda: file.download(self.content)
+            if error:
+                error_reply = f"[TELEGRAMBOT] fetch get_file() error '{error}' ,because <{file_id}> is larger than 20MB, can't be downloaded" 
+                logger.error(error_reply)
+                raise NotImplementedError(error_reply)
         elif telegram_message["video"]:
             self.ctype = ContextType.VIDEO
             self.content = TmpDir().path() + telegram_message["FileName"]  # content直接存临时目录路径
@@ -78,19 +89,21 @@ class TelegramMessage(ChatMessage):
         elif telegram_message["document"]:
             self.ctype = ContextType.FILE
             file_id = telegram_message.document.file_id
-            file = get_file(file_id)
-            self.content = TmpDir().path() + telegram_message["document"]["file_name"]  # content直接存临时目录路径
-            self._prepare_fn = lambda: file.download(self.content)
+            file_name = telegram_message.document.file_name
+            file, error = get_file(file_id)
+            if file:
+                self.content = TmpDir().path() + file_name  # content直接存临时目录路径
+                self._prepare_fn = lambda: file.download(self.content)
+            elif error:
+                error_reply = f"[TELEGRAMBOT] fetch get_file() error '{error}' ,because <{file_name}> is larger than 20MB, can't be downloaded" 
+                logger.error(error_reply)
+                raise NotImplementedError(error_reply)
         elif telegram_message["SHARING"]:
             self.ctype = ContextType.SHARING
             self.content = telegram_message.get("Url")
 
         else:
             raise NotImplementedError("Unsupported message type: Type:{} MsgType:{}".format(telegram_message["Type"], telegram_message["MsgType"]))
-
-        self.from_user_id = telegram_message["from_user"]["id"]
-        self.to_user_id = telegram_message["chat_id"]
-        self.other_user_id = self.to_user_id
 
         """user_id = itchat.instance.storageClass.userName
         nickname = itchat.instance.storageClass.nickName

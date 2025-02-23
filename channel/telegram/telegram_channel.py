@@ -176,6 +176,8 @@ class TelegramChannel(ChatChannel):
             cmsg = TelegramMessage(msg, False)
         except NotImplementedError as e:
             logger.debug("[TELEGRAMBOT]single message {} skipped: {}".format(msg["MsgId"], e))
+            error_reply = escape(e.args[0])
+            self.send_text(error_reply, msg.chat_id)
             return None
         self.handle_single(cmsg)
         return None
