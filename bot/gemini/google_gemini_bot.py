@@ -188,11 +188,11 @@ class GoogleGeminiBot(Bot,GeminiVision):
         try:
             if context.type == ContextType.FILE:
                 mime_type = context.content[(context.content.rindex('.') + 1):]
-                if mime_type in const.AUDIO or mime_type in const.VIDEO or mime_type == const.PDF:
+                if mime_type in const.AUDIO or mime_type in const.VIDEO or mime_type in const.DOCUMENT or mime_type in const.TXT:
                     session_id = context["session_id"]
                     session = self.sessions.session_query(query, session_id)
                     return self.gemini_15_media(query, context, session)
-                elif mime_type in ['docx','doc']:
+                elif mime_type in const.DOCUMENT:
                     self._file_cache(context)
                     doc_cache = memory.USER_FILE_CACHE.get(context['session_id'])
                     return self._file_download(doc_cache)
@@ -234,10 +234,14 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         first_data = file_cache['files'][0]
                         data_type = type(first_data).__name__
                         if data_type == 'dict':
-                            file_content = [Part.from_bytes(**first_data)]
-                            file_content.append(query)
-                            query = file_content
-                        elif data_type == 'JpegImageFile':
+                            mime_type = first_data.get('mime_type')
+                            if mime_type in ['application/docx', 'application/doc']:
+                                query = query + '\n' + first_data.get('data')
+                            elif mime_type == 'application/pdf':
+                                file_content = [Part.from_bytes(**first_data)]
+                                file_content.append(query)
+                                query = file_content
+                        elif data_type in ['JpegImageFile','File']:
                             file_cache['files'].append(query)
                             query = file_cache['files']
                         memory.USER_IMAGE_CACHE.pop(session_id)  
@@ -511,31 +515,38 @@ class GoogleGeminiBot(Bot,GeminiVision):
         elif mime_type in const.VIDEO:
             msg.prepare()
             type_id = 'video'
-        elif mime_type == const.PDF:
-            msg.prepare()
-            # Read and b64enbode the PDF file smaller than 20MB
-            with open(media_path, 'rb') as file:
-                pdf_data = file.read()
-                pdf_b64 = base64.b64encode(pdf_data).decode('utf-8')
-            type_id = 'application'
-            
-            media_file = {
-                'mime_type': f'{type_id}/{mime_type}',
-                'data': pdf_b64
-            }
         elif mime_type in const.DOCUMENT:
             msg.prepare()
-            type_id = 'text'
-        elif mime_type in const.SPREADSHEET:
+            # Read and b64encode the PDF file smaller than 20MB
+            if mime_type == 'pdf':
+                with open(media_path, 'rb') as file:
+                    pdf_data = file.read()
+                    b64 = base64.b64encode(pdf_data).decode('utf-8')
+            elif mime_type == 'docx':
+                doc = docx.Document(media_path)
+                full_text = []
+                for paragraph in doc.paragraphs:
+                    full_text.append(paragraph.text)
+                docx_text = '\n'.join(full_text)
+                b64 = docx_text
+            type_id = 'application'
+            media_file = {
+                'mime_type': f'{type_id}/{mime_type}',
+                'data': b64
+            }
+        elif mime_type in const.SPREADSHEET or mime_type in const.TXT:
             msg.prepare()
             type_id = 'text'
         elif mime_type in const.PRESENTATION:
             msg.prepare()
             type_id = 'application'
             mime_type = 'vnd.google-apps.presentation'
+        elif mime_type in const.APPLICATION:
+            msg.prepare()
+            type_id = 'application'
         # Clear original media file in user content avoiding duplicated commitment
         session.messages.pop()
-        if (mime_type not in const.IMAGE) and (mime_type != const.PDF):
+        if (mime_type not in const.IMAGE) and (mime_type not in const.DOCUMENT):
             media_file = self.upload_to_gemini(media_path, mime_type=f'{type_id}/{mime_type}')
         self.sessions.session_query(media_file, session_id)
         self.cache_media(media_path, media_file, context)
@@ -558,7 +569,14 @@ class GoogleGeminiBot(Bot,GeminiVision):
 
         https://ai.google.dev/gemini-api/docs/prompting_with_media
         """
-        file = generativeai.upload_file(path, mime_type=mime_type)
+        file = self.client.files.upload(
+            file=path,
+            config=dict(
+                display_name=os.path.basename(path),
+                mime_type=mime_type
+            )
+        )
+        
         self.wait_for_files_active(file)
         print(f"Uploaded file '{file.display_name}' as: {file.uri}")
         return file
@@ -574,12 +592,12 @@ class GoogleGeminiBot(Bot,GeminiVision):
         should probably employ a more sophisticated approach.
         """
         print("Waiting for file processing...")
-        name =media_file.name
-        file = generativeai.get_file(name)
+        file_name =media_file.name
+        file = self.client.files.get(name=file_name)
         while file.state.name == "PROCESSING":
             print(".", end="", flush=True)
             time.sleep(10)
-            file = generativeai.get_file(name)
+            file = self.client.files.get(name=file_name)
         if file.state.name != "ACTIVE":
             raise Exception(f"File {file.name} failed to process")
         print("...all files ready")
