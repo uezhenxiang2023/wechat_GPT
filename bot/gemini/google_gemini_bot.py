@@ -17,7 +17,7 @@ from bot.bot import Bot
 import google.generativeai as generativeai
 from google.ai.generativelanguage_v1beta.types import content
 from google import genai
-from google.genai.types import Tool,GenerateContentConfig,GoogleSearch,Part
+from google.genai.types import Tool,GenerateContentConfig,GoogleSearch,Part,FunctionDeclaration
 from bot.session_manager import SessionManager
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
@@ -73,8 +73,105 @@ class GoogleGeminiBot(Bot,GeminiVision):
         ]
         self.tool_config={'function_calling_config': 'AUTO'}
 
+        self.generative_model = generativeai.GenerativeModel(
+                        model_name=self.model,
+                        generation_config=self.generation_config,
+                        safety_settings=self.safety_settings,
+                        system_instruction=self.system_prompt,
+                        tools = [
+                            generativeai.protos.Tool(
+                                function_declarations = [
+                                    generativeai.protos.FunctionDeclaration(
+                                        name = "screenplay_scenes_breakdown",
+                                        description = "第一步先拆解剧本场景，提取场号、场景、内外、日夜等基础信息，形成场景列表；第二步根据输入的剧本名称找到剧本文件，准确统计剧本总页数，总字数，每场戏的字数，补充到场景列表中。",
+                                        parameters = content.Schema(
+                                            type = content.Type.OBJECT,
+                                            enum = [],
+                                            required = ["screenplay_title","scenes_list"],
+                                            properties = {
+                                                "screenplay_title": content.Schema(
+                                                    type = content.Type.STRING,
+                                                    description = "剧本名称",
+                                                ),
+                                                "scenes_list": content.Schema(
+                                                    type = content.Type.ARRAY,
+                                                    items = content.Schema(
+                                                        type = content.Type.OBJECT,
+                                                        properties = {
+                                                            "id": content.Schema(
+                                                                type = content.Type.INTEGER,
+                                                                description = "场号",
+                                                            ),
+                                                            "location": content.Schema(
+                                                                type = content.Type.STRING,
+                                                                description = "场景名称",
+                                                            ),
+                                                            "daynight": content.Schema(
+                                                                type = content.Type.STRING,
+                                                                description = "日景还是夜景",
+                                                                enum = ["日","夜"]
+                                                            ),
+                                                            "envirement": content.Schema(
+                                                                type = content.Type.STRING,
+                                                                description = "室内环境还是室外环境",
+                                                                enum = ["内","外"]
+                                                            ),
+                                                        },
+                                                    ),
+                                                ),
+                                            },
+                                        ),
+                                    ),
+                                ],
+                            ),
+                        ],
+                        tool_config=self.tool_config
+                    )
+
         # Initialize a client according to new genai SDK
         self.client = genai.Client(api_key=self.api_key)
+
+         # schema for screenplay_scenes_breakdown need to be updated
+        """self.screenplay_scenes_breakdown_schema = FunctionDeclaration(
+            name="screenplay_scenes_breakdown",
+            description="第一步先拆解剧本场景，提取场号、场景、内外、日夜等基础信息，形成场景列表；第二步根据输入的剧本名称找到剧本文件，准确统计剧本总页数，总字数，每场戏的字数，补充到场景列表中。",
+            parameters=content.Schema(
+                type=content.Type.OBJECT,
+                enum=[],
+                required=["screenplay_title"],
+                properties={
+                    "screenplay_title": content.Schema(
+                        type=content.Type.STRING,
+                        description="剧本名称",
+                    ),
+                    "scenes_list": content.Schema(
+                        type=content.Type.ARRAY,
+                        items=content.Schema(
+                            type=content.Type.OBJECT,
+                            properties={
+                                "id": content.Schema(
+                                    type=content.Type.INTEGER,
+                                    description="场号",
+                                ),
+                                "location": content.Schema(
+                                    type=content.Type.STRING,
+                                    description="场景名称",
+                                ),
+                                "daynight": content.Schema(
+                                    type=content.Type.STRING,
+                                    description="日景还是夜景",
+                                ),
+                                "envirement": content.Schema(
+                                    type=content.Type.STRING,
+                                    description="室内环境还是室外环境",
+                                ),
+                            },
+                        ),
+                    ),
+                },
+            ),
+        )"""
+        #self.function_declarations = Tool(function_declarations=[self.screenplay_scenes_breakdown_schema])
         self.google_search_tool = Tool(google_search=GoogleSearch())
         self.chat = self.client.chats.create(
             model=self.model,
@@ -147,61 +244,13 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     response = self.chat.send_message(query)
 
                 elif self.model not in const.GEMINI_GENAI_SDK:
-                    model = generativeai.GenerativeModel(
-                        model_name=self.model,
-                        generation_config=self.generation_config,
-                        safety_settings=self.safety_settings,
-                        system_instruction=self.system_prompt,
-                        tools = [
-                            generativeai.protos.Tool(
-                                function_declarations = [
-                                    generativeai.protos.FunctionDeclaration(
-                                        name = "screenplay_scenes_breakdown",
-                                        description = "第一步先拆解剧本场景，提取场号、场景、内外、日夜等基础信息，形成场景列表；第二步根据输入的剧本名称找到剧本文件，准确统计剧本总页数，总字数，每场戏的字数，补充到场景列表中。",
-                                        parameters = content.Schema(
-                                            type = content.Type.OBJECT,
-                                            enum = [],
-                                            required = ["screenplay_title"],
-                                            properties = {
-                                                "screenplay_title": content.Schema(
-                                                    type = content.Type.STRING,
-                                                    description = "剧本名称",
-                                                ),
-                                                "scenes_list": content.Schema(
-                                                    type = content.Type.ARRAY,
-                                                    items = content.Schema(
-                                                        type = content.Type.OBJECT,
-                                                        properties = {
-                                                            "id": content.Schema(
-                                                                type = content.Type.INTEGER,
-                                                                description = "场号",
-                                                            ),
-                                                            "location": content.Schema(
-                                                                type = content.Type.STRING,
-                                                                description = "场景名称",
-                                                            ),
-                                                            "daynight": content.Schema(
-                                                                type = content.Type.STRING,
-                                                                description = "日景还是夜景",
-                                                                enum = ["日","夜"]
-                                                            ),
-                                                            "envirement": content.Schema(
-                                                                type = content.Type.STRING,
-                                                                description = "室内环境还是室外环境",
-                                                                enum = ["内","外"]
-                                                            ),
-                                                        },
-                                                    ),
-                                                ),
-                                            },
-                                        ),
-                                    ),
-                                ],
-                            ),
-                        ],
-                        tool_config=self.tool_config
+                    chat_session = self.generative_model.start_chat(
+                        # 消息队战中的最新数据抛出去，留给send_message方法，从query中拿
+                        history=gemini_messages[:-1],
+                        enable_automatic_function_calling=True
                     )
-                    response = model.generate_content(gemini_messages)
+                    response = chat_session.send_message(query)
+
                     # check function_call status
                     for part in response.parts:
                         if fn := part.function_call:
@@ -240,7 +289,12 @@ class GoogleGeminiBot(Bot,GeminiVision):
 
                             # new turn of model request with function response
                             gemini_messages = self._convert_to_gemini_15_messages(session.messages)
-                            response = model.generate_content(gemini_messages)
+                            chat_session = self.generative_model.start_chat(
+                            # 消息队战中的最新数据抛出去，留给send_message方法，从query中拿
+                                history=gemini_messages,
+                                enable_automatic_function_calling=True
+                            )
+                            response = chat_session.send_message(query)
 
                 raw_reply_text = self.get_reply_text(response)
                 reply_text = escape(raw_reply_text)

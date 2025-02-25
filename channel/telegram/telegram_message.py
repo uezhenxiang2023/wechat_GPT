@@ -46,7 +46,7 @@ class TelegramMessage(ChatMessage):
             self._prepare_fn = lambda: telegram_message.download(self.content)
         elif telegram_message["photo"]:
             self.ctype = ContextType.IMAGE
-            file_id = telegram_message.photo[3].file_id
+            file_id = telegram_message.photo[-1].file_id
             file, error = get_file(file_id)
             if file:
                 self.content = TmpDir().path() + get_file_name(file)  # content直接存临时目录路径
