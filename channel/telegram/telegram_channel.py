@@ -12,23 +12,15 @@ from channel.chat_message import ChatMessage
 from channel.telegram.telegram_message import TelegramMessage
 from common.singleton import singleton
 from config import conf
+import re
 
 from telegram import Update, ForceReply, InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
 
 def escape(text):
-    """
-    for parsing entities successfully, escape characters  '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'
-    with a preceding character.
-    """
-    escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-    escaped_text = ""
-    for char in text:
-        if char in escape_chars:
-            escaped_text += '\\' + char
-        else:
-            escaped_text += char
-    return escaped_text
+    """Escapes special characters for Telegram MarkdownV2."""
+    escape_chars = r'\*_[]()~`>#+-=|{}.!'
+    return re.sub(r'([' + re.escape(escape_chars) + r'])', r'\\\1', text)
 
 @singleton
 class TelegramChannel(ChatChannel):
@@ -76,8 +68,35 @@ class TelegramChannel(ChatChannel):
         """
 
         self.screaming = True
-        """text = '京时间2025年2月15日，中国U20在U20亚洲杯小组赛中以5-2战胜吉尔吉斯斯坦U20。刘成宇首开纪录，王玉栋、毛伟杰和朱鹏宇（梅开二度）各入一球，帮助中国队取得大胜。吉尔吉斯斯坦队的乌马尔·马达米诺夫和伊里斯克尔迪·马达诺夫分别打入一球。'
-        #text = self.escape(text)
+        """text = "好的，我们来举个例子说明一下：\n\n" \
+               "假设一家券商 A 借给盖茨 1000 股特斯拉股票进行做空，当时特斯拉的股价是 1000 美元/股。\n\n" \
+               "1.  **借券利息/费用：**\n" \
+               "    *   券商 A 可能会收取年化 2% 的借券利息。\n" \
+               "    *   借券期限假设为 6 个月。\n" \
+               "    *   那么，券商 A 收取的借券利息 = 1000 股 * 1000 美元/股 * 2% * (6/12) = 10000 美元。\n\n" \
+               "2.  **交易佣金：**\n" \
+               "    *   假设券商 A 收取的交易佣金为 0.1%。\n" \
+               "    *   盖茨卖出 1000 股特斯拉股票，券商 A 收取的佣金 = 1000 股 * 1000 美元/股 * 0.1% = 1000 美元。\n" \
+               "    *   假设特斯拉股价上涨到 1200 美元/股，盖茨买回 1000 股特斯拉股票，券商 A 收取的佣金 = 1000 股 * 1200 美元/股 * 0.1% = 1200 美元。\n" \
+               "    *   总交易佣金 = 1000 美元 + 1200 美元 = 2200 美元。\n\n" \
+               "3.  **提高交易活跃度：**\n" \
+               "    *   做空交易增加了市场的交易量，吸引了更多的投资者参与。\n" \
+               "    *   这可能导致券商 A 的整体交易量增加，从而带来更多的交易佣金收入。\n" \
+               "    *   假设由于做空交易的带动，券商 A 的其他交易佣金收入增加了 5000 美元。\n\n" \
+               "4.  **对冲风险：**\n" \
+               "    *   假设券商 A 本身持有 5000 股特斯拉股票。\n" \
+               "    *   由于盖茨做空特斯拉，如果特斯拉股价下跌，券商 A 可以通过做空交易来弥补一部分损失。\n" \
+               "    *   假设特斯拉股价下跌了 100 美元/股，盖茨盈利 1000 股 * 100 美元/股 = 100000 美元。\n" \
+               "    *   券商 A 由于持有 5000 股特斯拉股票，损失了 5000 股 * 100 美元/股 = 500000 美元。\n" \
+               "    *   但是，由于盖茨做空特斯拉，券商 A 可以通过做空交易来弥补一部分损失。\n\n" \
+               "**总结：**\n\n" \
+               "在这个例子中，券商 A 通过借券利息、交易佣金、提高交易活跃度和对冲风险等方式，总共赚取了：\n\n" \
+               "    *   借券利息：10000 美元\n" \
+               "    *   交易佣金：2200 美元\n" \
+               "    *   提高交易活跃度：5000 美元\n\n" \
+               "总收入 = 10000 美元 + 2200 美元 + 5000 美元 = 17200 美元\n\n" \
+               "当然，这只是一个简化的例子。实际情况可能更加复杂，券商的收入来源也可能更多。但是，这个例子可以帮助您更好地理解券商或机构如何从做空交易中获利。"
+        text = escape(text)
         
         title = 'mykhel-AC.com'
         #title = self.escape(title)
@@ -88,8 +107,8 @@ class TelegramChannel(ChatChannel):
 
         context.bot.send_message(
             update.message.chat_id,
-            text_marddown,
-            parse_mode=ParseMode.HTML,
+            text,
+            parse_mode=ParseMode.MARKDOWN_V2,
             disable_web_page_preview=True
             # To preserve the markdown, we attach entities (bold, italic...)
             #entities=update.message.entities
