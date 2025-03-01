@@ -17,7 +17,8 @@ from bot.bot import Bot
 import google.generativeai as generativeai
 from google.ai.generativelanguage_v1beta.types import content
 from google import genai
-from google.genai.types import Tool,GenerateContentConfig,GoogleSearch,Part,FunctionDeclaration
+from google.genai import types
+from google.genai.types import Tool,GenerateContentConfig,GoogleSearch,Part,FunctionDeclaration,Type
 from bot.session_manager import SessionManager
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
@@ -35,6 +36,20 @@ class GoogleGeminiBot(Bot,GeminiVision):
 
     def __init__(self):
         super().__init__()
+        # Add these imports at the top
+        import asyncio
+        import nest_asyncio
+        
+        # Initialize event loop
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # Allow nested event loops
+        nest_asyncio.apply()
+        
         self.api_key = conf().get("gemini_api_key")
         self.model = conf().get('model')
         self.Model_ID = self.model.upper()
@@ -132,37 +147,37 @@ class GoogleGeminiBot(Bot,GeminiVision):
         self.client = genai.Client(api_key=self.api_key)
 
          # schema for screenplay_scenes_breakdown need to be updated
-        """self.screenplay_scenes_breakdown_schema = FunctionDeclaration(
+        self.screenplay_scenes_breakdown_schema = FunctionDeclaration(
             name="screenplay_scenes_breakdown",
             description="第一步先拆解剧本场景，提取场号、场景、内外、日夜等基础信息，形成场景列表；第二步根据输入的剧本名称找到剧本文件，准确统计剧本总页数，总字数，每场戏的字数，补充到场景列表中。",
-            parameters=content.Schema(
-                type=content.Type.OBJECT,
+            parameters=types.Schema(
+                type=Type.OBJECT,
                 enum=[],
-                required=["screenplay_title"],
+                required=["screenplay_title","scenes_list"],
                 properties={
-                    "screenplay_title": content.Schema(
-                        type=content.Type.STRING,
+                    "screenplay_title": types.Schema(
+                        type=Type.STRING,
                         description="剧本名称",
                     ),
-                    "scenes_list": content.Schema(
-                        type=content.Type.ARRAY,
-                        items=content.Schema(
-                            type=content.Type.OBJECT,
+                    "scenes_list": types.Schema(
+                        type=Type.ARRAY,
+                        items=types.Schema(
+                            type=Type.OBJECT,
                             properties={
-                                "id": content.Schema(
-                                    type=content.Type.INTEGER,
+                                "id": types.Schema(
+                                    type=Type.INTEGER,
                                     description="场号",
                                 ),
-                                "location": content.Schema(
-                                    type=content.Type.STRING,
+                                "location": types.Schema(
+                                    type=Type.STRING,
                                     description="场景名称",
                                 ),
-                                "daynight": content.Schema(
-                                    type=content.Type.STRING,
+                                "daynight": types.Schema(
+                                    type=Type.STRING,
                                     description="日景还是夜景",
                                 ),
-                                "envirement": content.Schema(
-                                    type=content.Type.STRING,
+                                "envirement": types.Schema(
+                                    type=Type.STRING,
                                     description="室内环境还是室外环境",
                                 ),
                             },
@@ -170,15 +185,15 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     ),
                 },
             ),
-        )"""
-        #self.function_declarations = Tool(function_declarations=[self.screenplay_scenes_breakdown_schema])
+        )
+        self.function_declarations = Tool(function_declarations=[self.screenplay_scenes_breakdown_schema])
         self.google_search_tool = Tool(google_search=GoogleSearch())
         self.chat = self.client.chats.create(
             model=self.model,
             config=GenerateContentConfig(
                 system_instruction=self.system_prompt,
                 safety_settings=self.safety_settings,
-                tools=[self.google_search_tool],
+                tools=[self.function_declarations],
                 response_modalities=['TEXT'],
                 **self.generation_config
             )
@@ -249,64 +264,80 @@ class GoogleGeminiBot(Bot,GeminiVision):
 
                 elif self.model not in const.GEMINI_GENAI_SDK:
                     chat_session = self.generative_model.start_chat(
-                        # 消息队战中的最新数据抛出去，留给send_message方法，从query中拿
+                        # 消息堆栈中的最新数据抛出去，留给send_message方法，从query中拿
                         history=gemini_messages[:-1],
                         enable_automatic_function_calling=True
                     )
                     response = chat_session.send_message(query)
 
-                    # check function_call status
-                    for part in response.parts:
-                        if fn := part.function_call:
-                            fn_dict = type(fn).to_dict(fn)
-                            fn_name = fn_dict.get('name')
-                            fn_args = fn_dict.get('args')
-                            function_call_reply = {
-                                "functionCall": {
-                                    "name": fn_name,
-                                    "args": fn_args
-                                }
-                            }
-                            # 将reply_text转换为字符串
-                            function_call_str = json.dumps(function_call_reply)
-                            # add function call to session as model/assistant message
-                            self.sessions.session_reply(function_call_str, session_id)
+                # check function_call status
+                if hasattr(response, 'function_calls'):
+                    function_calls = response.function_calls if response.function_calls is not None else []
+                else:
+                    function_calls = response.parts
+                for part in function_calls:
+                    if hasattr(part, 'function_call'):
+                        fn = part.function_call
+                        fn_dict = type(fn).to_dict(fn)
+                        fn_name = fn_dict.get('name')
+                        fn_args = fn_dict.get('args')
+                    else:
+                        fn_name = part.name
+                        fn_args = part.args
+                    function_call_reply = {
+                        "functionCall": {
+                            "name": fn_name,
+                            "args": fn_args
+                        }
+                    }
+                    # 将reply_text转换为字符串
+                    function_call_str = json.dumps(function_call_reply)
+                    # add function call to session as model/assistant message
+                    self.sessions.session_reply(function_call_str, session_id)
 
-                            # call function
-                            function_call = self.function_call_dicts.get(fn_name)
-                            # 从fn_args中获取function_call的参数
-                            api_response = function_call(**fn_args)
-                            fn_args.update(**api_response)
-                            function_response = {
-                                "functionResponse": {
-                                    "name": fn_name,
-                                    "response": {
-                                        "name": fn_name,
-                                        "content": fn_args
-                                    }
-                                }
+                    # call function
+                    function_call = self.function_call_dicts.get(fn_name)
+                    # 从fn_args中获取function_call的参数
+                    api_response = function_call(**fn_args)
+                    fn_args.update(**api_response)
+                    function_response = {
+                        "functionResponse": {
+                            "name": fn_name,
+                            "response": {
+                                "name": fn_name,
+                                "content": fn_args
                             }
-                            # 将function_response转换为字符串
-                            function_response_str = json.dumps(function_response)
-                            # add function response to session as user message
-                            self.sessions.session_query(function_response_str, session_id)
-
-                            # new turn of model request with function response
-                            gemini_messages = self._convert_to_gemini_15_messages(session.messages)
-                            chat_session = self.generative_model.start_chat(
-                            # 消息队战中的最新数据抛出去，留给send_message方法，从query中拿
-                                history=gemini_messages,
-                                enable_automatic_function_calling=True
-                            )
-                            response = chat_session.send_message(query)
+                        }
+                    }
+                    # 将function_response转换为字符串
+                    function_response_str = json.dumps(function_response)
+                    # add function response to session as user message
+                    self.sessions.session_query(function_response_str, session_id)
+                    # function response 推到消息堆栈
+                    if self.model in const.GEMINI_GENAI_SDK:
+                        response = self.chat.send_message(function_response_str)
+                    else:
+                        # new turn of model request with function response
+                        gemini_messages = self._convert_to_gemini_15_messages(session.messages)
+                        chat_session = self.generative_model.start_chat(
+                        # 消息堆栈中的最新数据抛出去，留给send_message方法，从query中拿
+                            history=gemini_messages,
+                            enable_automatic_function_calling=True
+                        )
+                        response = chat_session.send_message(query)
 
                 raw_reply_text = self.get_reply_text(response)
                 reply_text = escape(raw_reply_text)
 
                 # attach search sources from the Grounded response
-                if response.candidates[0].grounding_metadata.grounding_chunks:
-                    inline_url = self.get_search_sources(response)
-                    reply_text = f'{reply_text}\n\n{inline_url}'
+                """if self.model in const.GEMINI_GENAI_SDK:
+                    grounding_metadata = response.candidates[0].grounding_metadata 
+                else:"""
+                if response.candidates[0].grounding_metadata:
+                    grounding_metadata = response.candidates[0].grounding_metadata.grounding_chunks
+                    if grounding_metadata:
+                        inline_url = self.get_search_sources(response)
+                        reply_text = f'{reply_text}\n\n{inline_url}'
 
                 self.sessions.session_reply(reply_text, session_id)
                 logger.info(f"[{self.Model_ID}] reply={reply_text}")
