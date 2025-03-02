@@ -3,6 +3,7 @@ import requests
 import logging
 import json
 import time
+import re
 from common.log import logger
 
 from bridge.context import ContextType, Context
@@ -12,15 +13,15 @@ from channel.chat_message import ChatMessage
 from channel.telegram.telegram_message import TelegramMessage
 from common.singleton import singleton
 from config import conf
-import re
+from channel.telegram.telegram_text_util import escape
 
 from telegram import Update, ForceReply, InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
 
-def escape(text):
-    """Escapes special characters for Telegram MarkdownV2."""
+"""def escape(text):
+    Escapes special characters for Telegram MarkdownV2.
     escape_chars = r'\*_[]()~`>#+-=|{}.!'
-    return re.sub(r'([' + re.escape(escape_chars) + r'])', r'\\\1', text)
+    return re.sub(r'([' + re.escape(escape_chars) + r'])', r'\\\1', text)"""
 
 @singleton
 class TelegramChannel(ChatChannel):
@@ -30,8 +31,8 @@ class TelegramChannel(ChatChannel):
         self.bot_token = conf().get("telegram_bot_token")
         self.proxy_url = conf().get("telegram_proxy_url")
 
-        # Store bot screaming status
-        self.screaming = False
+        # Store bot search status
+        self.searching = False
 
         # Pre-assign menu text
         self.FIRST_MENU = "<b>Menu 1</b>\n\nA beautiful menu with a shiny inline button."
@@ -58,68 +59,45 @@ class TelegramChannel(ChatChannel):
         """
 
         # Print to console
-        print(f'{update.message.from_user.first_name} wrote {update.message.text}\n[scream] is {self.screaming}')
+        print(f'{update.message.from_user.first_name} wrote {update.message.text}\n[search] is {self.searching}')
 
         self.handler_single_msg(update.message)
 
-    def scream(self, update: Update, context: CallbackContext) -> None:
+    def search(self, update: Update, context: CallbackContext) -> None:
         """
-        This function handles the /scream command
+        This function handles the /search command
         """
 
-        self.screaming = True
-        """text = "好的，我们来举个例子说明一下：\n\n" \
-               "假设一家券商 A 借给盖茨 1000 股特斯拉股票进行做空，当时特斯拉的股价是 1000 美元/股。\n\n" \
-               "1.  **借券利息/费用：**\n" \
-               "    *   券商 A 可能会收取年化 2% 的借券利息。\n" \
-               "    *   借券期限假设为 6 个月。\n" \
-               "    *   那么，券商 A 收取的借券利息 = 1000 股 * 1000 美元/股 * 2% * (6/12) = 10000 美元。\n\n" \
-               "2.  **交易佣金：**\n" \
-               "    *   假设券商 A 收取的交易佣金为 0.1%。\n" \
-               "    *   盖茨卖出 1000 股特斯拉股票，券商 A 收取的佣金 = 1000 股 * 1000 美元/股 * 0.1% = 1000 美元。\n" \
-               "    *   假设特斯拉股价上涨到 1200 美元/股，盖茨买回 1000 股特斯拉股票，券商 A 收取的佣金 = 1000 股 * 1200 美元/股 * 0.1% = 1200 美元。\n" \
-               "    *   总交易佣金 = 1000 美元 + 1200 美元 = 2200 美元。\n\n" \
-               "3.  **提高交易活跃度：**\n" \
-               "    *   做空交易增加了市场的交易量，吸引了更多的投资者参与。\n" \
-               "    *   这可能导致券商 A 的整体交易量增加，从而带来更多的交易佣金收入。\n" \
-               "    *   假设由于做空交易的带动，券商 A 的其他交易佣金收入增加了 5000 美元。\n\n" \
-               "4.  **对冲风险：**\n" \
-               "    *   假设券商 A 本身持有 5000 股特斯拉股票。\n" \
-               "    *   由于盖茨做空特斯拉，如果特斯拉股价下跌，券商 A 可以通过做空交易来弥补一部分损失。\n" \
-               "    *   假设特斯拉股价下跌了 100 美元/股，盖茨盈利 1000 股 * 100 美元/股 = 100000 美元。\n" \
-               "    *   券商 A 由于持有 5000 股特斯拉股票，损失了 5000 股 * 100 美元/股 = 500000 美元。\n" \
-               "    *   但是，由于盖茨做空特斯拉，券商 A 可以通过做空交易来弥补一部分损失。\n\n" \
-               "**总结：**\n\n" \
-               "在这个例子中，券商 A 通过借券利息、交易佣金、提高交易活跃度和对冲风险等方式，总共赚取了：\n\n" \
-               "    *   借券利息：10000 美元\n" \
-               "    *   交易佣金：2200 美元\n" \
-               "    *   提高交易活跃度：5000 美元\n\n" \
-               "总收入 = 10000 美元 + 2200 美元 + 5000 美元 = 17200 美元\n\n" \
-               "当然，这只是一个简化的例子。实际情况可能更加复杂，券商的收入来源也可能更多。但是，这个例子可以帮助您更好地理解券商或机构如何从做空交易中获利。"
+        if self.searching:
+            text = "联网功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
+        elif not self.searching:
+            text = "联网搜索功能已开启，需要我帮你查询点啥？"
+
         text = escape(text)
+        self.searching = not self.searching
         
-        title = 'mykhel-AC.com'
+        """title = 'mykhel-AC.com'
         #title = self.escape(title)
         uri = 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUBnsYuu47exMpwknPadJIxKH7qObA_WQIjY9ZYeyjBh2PQTdJD1GVXgO_ZJdrszG1TmKsxbwx__I0MclAhpbS2j3PrR9p0Agvl0GePubSqXla0TqRh2ScfiiCmMsOD3Hu08mw2nPg6FeY3TyiZk4CPrImU1dOOaDZorxZwh5ikJYslIsVLm7Un0ZE6Q1gj69u0mqHWcQdyX'
         inline_url = f'1\.[{title}]({uri})\n2\.[{title}]({uri})'
         # '~'for strikethrough, '_' for italic, '*' for bold, '__' for underline
-        text_marddown = f'{text}\n\n{inline_url}'
+        text_marddown = f'{text}\n\n{inline_url}'"""
 
         context.bot.send_message(
             update.message.chat_id,
             text,
             parse_mode=ParseMode.MARKDOWN_V2,
-            disable_web_page_preview=True
+            disable_web_page_preview=False
             # To preserve the markdown, we attach entities (bold, italic...)
             #entities=update.message.entities
-        )"""
+        )
 
     def whisper(self, update: Update, context: CallbackContext) -> None:
         """
         This function handles /whisper command
         """
 
-        self.screaming = False
+        #self.searching = False
 
 
     def menu(self, update: Update, context: CallbackContext) -> None:
@@ -171,7 +149,7 @@ class TelegramChannel(ChatChannel):
         dispatcher = updater.dispatcher
 
         # Register commands
-        dispatcher.add_handler(CommandHandler("scream", self.scream))
+        dispatcher.add_handler(CommandHandler("search", self.search))
         dispatcher.add_handler(CommandHandler("whisper", self.whisper))
         dispatcher.add_handler(CommandHandler("menu", self.menu))
 

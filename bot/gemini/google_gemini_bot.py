@@ -28,7 +28,8 @@ from config import conf
 from bot.baidu.baidu_wenxin_session import BaiduWenxinSession
 from bot.gemini.google_genimi_vision import GeminiVision
 from PIL import Image
-from channel.telegram.telegram_channel import escape
+from channel.telegram.telegram_text_util import escape
+from channel.telegram.telegram_channel import TelegramChannel
 
 
 # OpenAI对话模型API (可用)
@@ -198,6 +199,13 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 **self.generation_config
             )
         )
+        self.search_config = GenerateContentConfig(
+            system_instruction=self.system_prompt,
+            safety_settings=self.safety_settings,
+            tools=[self.google_search_tool],
+            response_modalities=['TEXT'],
+            **self.generation_config
+        )
 
     def reply(self, query, context: Context = None) -> Reply:
         try:
@@ -259,8 +267,11 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         elif data_type in ['JpegImageFile','File']:
                             file_cache['files'].append(query)
                             query = file_cache['files']
-                        memory.USER_IMAGE_CACHE.pop(session_id)  
-                    response = self.chat.send_message(query)
+                        memory.USER_IMAGE_CACHE.pop(session_id)
+                    if TelegramChannel().searching:
+                        response = self.chat.send_message(query,config=self.search_config)
+                    else:
+                        response = self.chat.send_message(query)
 
                 elif self.model not in const.GEMINI_GENAI_SDK:
                     chat_session = self.generative_model.start_chat(
