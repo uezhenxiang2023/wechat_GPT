@@ -285,7 +285,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 if hasattr(response, 'function_calls'):
                     function_calls = response.function_calls if response.function_calls is not None else []
                 else:
-                    function_calls = response.parts
+                    function_calls = response.parts if response.parts[0].function_call.args is not None else []
                 for part in function_calls:
                     if hasattr(part, 'function_call'):
                         fn = part.function_call
