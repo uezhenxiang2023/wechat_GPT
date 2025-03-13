@@ -12,6 +12,7 @@ import os
 import time
 import re
 import docx
+from io import BytesIO
 from pypdf import PdfReader
 from bot.bot import Bot
 import google.generativeai as generativeai
@@ -199,6 +200,14 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 **self.generation_config
             )
         )
+        self.image_chat = self.client.chats.create(
+            model='gemini-2.0-flash-exp',
+            config=GenerateContentConfig(
+                safety_settings=self.safety_settings,
+                response_modalities=['TEXT','Image'],
+                **self.generation_config
+            )
+        )
         self.search_config = GenerateContentConfig(
             system_instruction=self.system_prompt,
             safety_settings=self.safety_settings,
@@ -268,10 +277,13 @@ class GoogleGeminiBot(Bot,GeminiVision):
                             file_cache['files'].append(query)
                             query = file_cache['files']
                         memory.USER_IMAGE_CACHE.pop(session_id)
-                    if TelegramChannel().searching:
+                    if TelegramChannel().searching is True:
                         response = self.chat.send_message(query,config=self.search_config)
-                    else:
-                        response = self.chat.send_message(query)
+                    elif TelegramChannel().searching is False:
+                        if TelegramChannel().imaging is True:
+                            response = self.image_chat.send_message(query)
+                        elif TelegramChannel().imaging is False:
+                            response = self.chat.send_message(query)
 
                 elif self.model not in const.GEMINI_GENAI_SDK:
                     chat_session = self.generative_model.start_chat(
@@ -337,22 +349,23 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         )
                         response = chat_session.send_message(query)
 
-                raw_reply_text = self.get_reply_text(response)
-                reply_text = escape(raw_reply_text)
+                if TelegramChannel().imaging is True:
+                    self.get_reply_images(context, response)
+                    return None
+                elif TelegramChannel().imaging is False:
+                    raw_reply_contents = self.get_reply_text(response)
+                    reply_text = escape(raw_reply_contents)
 
-                # attach search sources from the Grounded response
-                """if self.model in const.GEMINI_GENAI_SDK:
-                    grounding_metadata = response.candidates[0].grounding_metadata 
-                else:"""
-                if response.candidates[0].grounding_metadata:
-                    grounding_metadata = response.candidates[0].grounding_metadata.grounding_chunks
-                    if grounding_metadata:
-                        inline_url = self.get_search_sources(response)
-                        reply_text = f'{reply_text}\n\n{inline_url}'
+                    # attach search sources from the Grounded response
+                    if response.candidates[0].grounding_metadata:
+                        grounding_metadata = response.candidates[0].grounding_metadata.grounding_chunks
+                        if grounding_metadata:
+                            inline_url = self.get_search_sources(response)
+                            reply_text = f'{reply_text}\n\n{inline_url}'
 
-                self.sessions.session_reply(reply_text, session_id)
-                logger.info(f"[{self.Model_ID}] reply={reply_text}")
-                return Reply(ReplyType.TEXT, reply_text)
+                    self.sessions.session_reply(reply_text, session_id)
+                    logger.info(f"[{self.Model_ID}] reply={reply_text}")
+                    return Reply(ReplyType.TEXT, reply_text)
             else:
                 logger.warning(f"[{self.Model_ID}] Unsupported message type, type={context.type}")
                 return Reply(ReplyType.ERROR, f"[{self.Model_ID}] Unsupported message type, type={context.type}")
@@ -362,17 +375,38 @@ class GoogleGeminiBot(Bot,GeminiVision):
 
     def get_reply_text(self, response):
         parts = response.candidates[0].content.parts
-        text = ''
+        texts = ''
         if parts is None:
             finish_reason = response.candidates[0].finish_reason
             print(f'{finish_reason=}')
             return
         for part in response.candidates[0].content.parts:
             if part.text:
-                text += part.text
+                texts += part.text
             elif part.executable_code:
                 continue
-        return text
+        return texts
+    
+    def get_reply_images(self, context, response):
+        parts = response.candidates[0].content.parts
+        if parts is None:
+            finish_reason = response.candidates[0].finish_reason
+            print(f'{finish_reason=}')
+            return
+        for part in response.candidates[0].content.parts:
+            if part.text:
+                reply_text = escape(part.text)
+                TelegramChannel().send_text(reply_text, context["receiver"])
+                logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(part.text, context["receiver"]))
+            elif part.inline_data:
+                image = BytesIO(part.inline_data.data)
+                logger.info(f"{self.Model_ID} reply={image}")
+                image.seek(0)
+                TelegramChannel().send_image(image, context["receiver"])
+                logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(image, context["receiver"]))
+            elif part.executable_code:
+                continue
+        return None
     
     def get_search_sources(self, response):
         """

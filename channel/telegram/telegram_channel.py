@@ -18,11 +18,6 @@ from channel.telegram.telegram_text_util import escape
 from telegram import Update, ForceReply, InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
 
-"""def escape(text):
-    Escapes special characters for Telegram MarkdownV2.
-    escape_chars = r'\*_[]()~`>#+-=|{}.!'
-    return re.sub(r'([' + re.escape(escape_chars) + r'])', r'\\\1', text)"""
-
 @singleton
 class TelegramChannel(ChatChannel):
     def __init__(self):
@@ -31,8 +26,9 @@ class TelegramChannel(ChatChannel):
         self.bot_token = conf().get("telegram_bot_token")
         self.proxy_url = conf().get("telegram_proxy_url")
 
-        # Store bot search status
+        # Store bot tool status
         self.searching = False
+        self.imaging = False
 
         # Pre-assign menu text
         self.FIRST_MENU = "<b>Menu 1</b>\n\nA beautiful menu with a shiny inline button."
@@ -92,12 +88,25 @@ class TelegramChannel(ChatChannel):
             #entities=update.message.entities
         )
 
-    def whisper(self, update: Update, context: CallbackContext) -> None:
+    def image(self, update: Update, context: CallbackContext) -> None:
         """
-        This function handles /whisper command
+        This function handles /image command
         """
 
-        #self.searching = False
+        if self.imaging:
+            text = "图片生成功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
+        elif not self.imaging:
+            text = "图片生成功能已开启，需要我帮你做点啥图？"
+
+        text = escape(text)
+        self.imaging = not self.imaging
+
+        context.bot.send_message(
+            update.message.chat_id,
+            text,
+            parse_mode=ParseMode.MARKDOWN_V2,
+            disable_web_page_preview=False
+        )
 
 
     def menu(self, update: Update, context: CallbackContext) -> None:
@@ -150,7 +159,7 @@ class TelegramChannel(ChatChannel):
 
         # Register commands
         dispatcher.add_handler(CommandHandler("search", self.search))
-        dispatcher.add_handler(CommandHandler("whisper", self.whisper))
+        dispatcher.add_handler(CommandHandler("image", self.image))
         dispatcher.add_handler(CommandHandler("menu", self.menu))
 
         # Register handler for inline buttons
@@ -293,3 +302,11 @@ class TelegramChannel(ChatChannel):
         updater = Updater(self.bot_token, request_kwargs={'proxy_url': self.proxy_url})
         bot = updater.bot
         bot.send_message(chat_id=toUserName, text=reply_content, parse_mode=ParseMode.MARKDOWN_V2)
+
+    def send_image(self, reply_content, toUserName):
+        """
+        This function sends a response text message back to the user.
+        """
+        updater = Updater(self.bot_token, request_kwargs={'proxy_url': self.proxy_url})
+        bot = updater.bot
+        bot.send_photo(chat_id=toUserName, photo=reply_content)

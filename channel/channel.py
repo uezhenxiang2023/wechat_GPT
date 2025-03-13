@@ -8,7 +8,7 @@ from bridge.reply import *
 
 
 class Channel(object):
-    NOT_SUPPORT_REPLYTYPE = [ReplyType.VOICE, ReplyType.IMAGE]
+    NOT_SUPPORT_REPLYTYPE = [ReplyType.VOICE]
 
     def startup(self):
         """
