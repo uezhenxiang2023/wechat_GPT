@@ -235,8 +235,10 @@ class ChatChannel(Channel):
                     "path": context.content,
                     "msg": context.get("msg")
                 }
-            elif context.type == ContextType.SHARING:  # 分享信息，当前无默认逻辑
-                pass
+            elif context.type == ContextType.SHARING and conf().get('model') in const.GEMINI_GENAI_SDK:  
+                # 分享信息
+                context["channel"] = e_context["channel"]
+                reply = super().build_reply_content(context.content, context)
             elif context.type == ContextType.FUNCTION or context.type == ContextType.FILE:  # 文件消息及函数调用等，当前无默认逻辑
                 pass
             elif context.type == ContextType.VIDEO:   # 视频消息，当前无默认逻辑

@@ -19,7 +19,7 @@ import google.generativeai as generativeai
 from google.ai.generativelanguage_v1beta.types import content
 from google import genai
 from google.genai import types
-from google.genai.types import Tool,GenerateContentConfig,GoogleSearch,Part,FunctionDeclaration,Type
+from google.genai.types import Tool,GenerateContentConfig,GoogleSearch,Part,FunctionDeclaration,Type,FileData
 from bot.session_manager import SessionManager
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
@@ -244,6 +244,10 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 session_id = context["session_id"]
                 session = self.sessions.session_query(query, session_id)
                 return self.gemini_15_media(query, context, session)
+            elif context.type == ContextType.SHARING:
+                session_id = context["session_id"]
+                session = self.sessions.session_query(query, session_id)
+                return self.gemini_15_media(query, context, session)
             elif context.type == ContextType.TEXT:
                 logger.info(f"[{self.Model_ID}] query={query}")
                 session_id = context["session_id"]
@@ -276,6 +280,14 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         elif data_type in ['JpegImageFile','File']:
                             file_cache['files'].append(query)
                             query = file_cache['files']
+                        elif data_type in ['FileData']:
+                            filedata = [
+                                {
+                                'fileData': first_data
+                            }
+                            ]
+                            filedata.append(query)
+                            query = filedata
                         memory.USER_IMAGE_CACHE.pop(session_id)
                     if TelegramChannel().searching is True:
                         response = self.chat.send_message(query,config=self.search_config)
@@ -563,67 +575,72 @@ class GoogleGeminiBot(Bot,GeminiVision):
         msg = context.kwargs["msg"]
         media_path = context.content
         logger.info(f"[{self.model}] query with media, path={media_path}")
-        type_position = media_path.rfind('.') + 1
-        mime_type = media_path[type_position:]
-        if mime_type in const.IMAGE:
-            type_id = 'image'
-            # Image URL request
-            if query[:8] == 'https://':
-                media_file = media_path
 
-            # Image base64 encoded request
-            else:
+        # Check if the url is a youtube link
+        if 'youtube' in media_path:
+            media_file = FileData(file_uri=media_path)
+        else:
+            type_position = media_path.rfind('.') + 1
+            mime_type = media_path[type_position:]
+            if mime_type in const.IMAGE:
+                type_id = 'image'
+                # Image URL request
+                if query[:8] == 'https://':
+                    media_file = media_path
+
+                # Image base64 encoded request
+                else:
+                    msg.prepare()
+                    img = Image.open(media_path)
+                    media_file = img
+                    # check if the image has an alpha channel
+                    if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
+                        # Convert the image to RGB mode,whick removes the alpha channel
+                        img = img.convert('RGB')
+                        # Save the converted image
+                        img_path_no_alpha = media_path[:len(media_path)-3] + 'jpg'
+                        img.save(img_path_no_alpha)
+                        # Update img_path with the path to the converted image
+                        media_file = img_path_no_alpha
+            elif mime_type in const.AUDIO:
                 msg.prepare()
-                img = Image.open(media_path)
-                media_file = img
-                # check if the image has an alpha channel
-                if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
-                    # Convert the image to RGB mode,whick removes the alpha channel
-                    img = img.convert('RGB')
-                    # Save the converted image
-                    img_path_no_alpha = media_path[:len(media_path)-3] + 'jpg'
-                    img.save(img_path_no_alpha)
-                    # Update img_path with the path to the converted image
-                    media_file = img_path_no_alpha
-        elif mime_type in const.AUDIO:
-            msg.prepare()
-            type_id = 'audio'
-        elif mime_type in const.VIDEO:
-            msg.prepare()
-            type_id = 'video'
-        elif mime_type in const.DOCUMENT:
-            msg.prepare()
-            # Read and b64encode the PDF file smaller than 20MB
-            if mime_type == 'pdf':
-                with open(media_path, 'rb') as file:
-                    pdf_data = file.read()
-                    b64 = base64.b64encode(pdf_data).decode('utf-8')
-            elif mime_type == 'docx':
-                doc = docx.Document(media_path)
-                full_text = []
-                for paragraph in doc.paragraphs:
-                    full_text.append(paragraph.text)
-                docx_text = '\n'.join(full_text)
-                b64 = docx_text
-            type_id = 'application'
-            media_file = {
-                'mime_type': f'{type_id}/{mime_type}',
-                'data': b64
-            }
-        elif mime_type in const.SPREADSHEET or mime_type in const.TXT:
-            msg.prepare()
-            type_id = 'text'
-        elif mime_type in const.PRESENTATION:
-            msg.prepare()
-            type_id = 'application'
-            mime_type = 'vnd.google-apps.presentation'
-        elif mime_type in const.APPLICATION:
-            msg.prepare()
-            type_id = 'application'
-        # Clear original media file in user content avoiding duplicated commitment
-        session.messages.pop()
-        if (mime_type not in const.IMAGE) and (mime_type not in const.DOCUMENT):
-            media_file = self.upload_to_gemini(media_path, mime_type=f'{type_id}/{mime_type}')
+                type_id = 'audio'
+            elif mime_type in const.VIDEO:
+                msg.prepare()
+                type_id = 'video'
+            elif mime_type in const.DOCUMENT:
+                msg.prepare()
+                # Read and b64encode the PDF file smaller than 20MB
+                if mime_type == 'pdf':
+                    with open(media_path, 'rb') as file:
+                        pdf_data = file.read()
+                        b64 = base64.b64encode(pdf_data).decode('utf-8')
+                elif mime_type == 'docx':
+                    doc = docx.Document(media_path)
+                    full_text = []
+                    for paragraph in doc.paragraphs:
+                        full_text.append(paragraph.text)
+                    docx_text = '\n'.join(full_text)
+                    b64 = docx_text
+                type_id = 'application'
+                media_file = {
+                    'mime_type': f'{type_id}/{mime_type}',
+                    'data': b64
+                }
+            elif mime_type in const.SPREADSHEET or mime_type in const.TXT:
+                msg.prepare()
+                type_id = 'text'
+            elif mime_type in const.PRESENTATION:
+                msg.prepare()
+                type_id = 'application'
+                mime_type = 'vnd.google-apps.presentation'
+            elif mime_type in const.APPLICATION:
+                msg.prepare()
+                type_id = 'application'
+            # Clear original media file in user content avoiding duplicated commitment
+            session.messages.pop()
+            if (mime_type not in const.IMAGE) and (mime_type not in const.DOCUMENT):
+                media_file = self.upload_to_gemini(media_path, mime_type=f'{type_id}/{mime_type}')
         self.sessions.session_query(media_file, session_id)
         self.cache_media(media_path, media_file, context)
     
@@ -637,7 +654,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         else:
             memory.USER_IMAGE_CACHE[session_id]["path"].append(media_path)
             memory.USER_IMAGE_CACHE[session_id]["files"].append(media_file)
-        logger.info(f"{media_path} cached to memory")
+        logger.info(f"[{self.model}] {media_path} cached to memory")
         return None
 
     def upload_to_gemini(self, path, mime_type=None):

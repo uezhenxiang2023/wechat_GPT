@@ -37,7 +37,7 @@ class TelegramMessage(ChatMessage):
         self.to_user_id = telegram_message["chat_id"]
         self.other_user_id = self.to_user_id
 
-        if telegram_message["text"]:
+        if telegram_message["text"] and 'https://' not in telegram_message["text_html"]:
             self.ctype = ContextType.TEXT
             self.content = telegram_message["text"]
         elif telegram_message["voice"]:
@@ -98,9 +98,9 @@ class TelegramMessage(ChatMessage):
                 error_reply = f"[TELEGRAMBOT] fetch get_file() error '{error}' ,because <{file_name}> is larger than 20MB, can't be downloaded" 
                 logger.error(error_reply)
                 raise NotImplementedError(error_reply)
-        elif telegram_message["SHARING"]:
+        elif 'https://' in telegram_message["text_html"]:
             self.ctype = ContextType.SHARING
-            self.content = telegram_message.get("Url")
+            self.content = telegram_message["text_html"]
 
         else:
             raise NotImplementedError("Unsupported message type: Type:{} MsgType:{}".format(telegram_message["Type"], telegram_message["MsgType"]))
