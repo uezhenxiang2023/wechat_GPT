@@ -224,6 +224,7 @@ class ChatChannel(Channel):
                     conf().get('model') in const.GEMINI_15_FLASH_LIST or
                     conf().get('model') in const.GEMINI_15_PRO_LIST or
                     conf().get('model') in const.GEMINI_2_FLASH_LIST or
+                    conf().get('model') in const.GEMINI_25_PRO_LIST or
                     conf().get('model') == const.OPEN_AI_ASSISTANT)
                    )
                   ):

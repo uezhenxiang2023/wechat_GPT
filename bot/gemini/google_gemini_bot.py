@@ -151,10 +151,9 @@ class GoogleGeminiBot(Bot,GeminiVision):
          # schema for screenplay_scenes_breakdown need to be updated
         self.screenplay_scenes_breakdown_schema = FunctionDeclaration(
             name="screenplay_scenes_breakdown",
-            description="第一步先拆解剧本场景，提取场号、场景、内外、日夜等基础信息，形成场景列表；第二步根据输入的剧本名称找到剧本文件，准确统计剧本总页数，总字数，每场戏的字数，补充到场景列表中。",
+            description="阅读剧本，提取剧本名称，场号、场景、内外、日夜等基础信息，做出场景列表。",
             parameters=types.Schema(
                 type=Type.OBJECT,
-                enum=[],
                 required=["screenplay_title","scenes_list"],
                 properties={
                     "screenplay_title": types.Schema(
@@ -177,10 +176,12 @@ class GoogleGeminiBot(Bot,GeminiVision):
                                 "daynight": types.Schema(
                                     type=Type.STRING,
                                     description="日景还是夜景",
+                                    enum = ["日", "夜"],
                                 ),
                                 "envirement": types.Schema(
                                     type=Type.STRING,
                                     description="室内环境还是室外环境",
+                                    enum = ["内", "外"],
                                 ),
                             },
                         ),
@@ -196,6 +197,11 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 system_instruction=self.system_prompt,
                 safety_settings=self.safety_settings,
                 tools=[self.function_declarations],
+                tool_config={
+                    'function_calling_config': {
+                        'mode': 'AUTO' 
+                    }
+                },
                 response_modalities=['TEXT'],
                 **self.generation_config
             )
@@ -229,7 +235,10 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     doc_cache = memory.USER_FILE_CACHE.get(context['session_id'])
                     return self._file_download(doc_cache)
             elif context.type == ContextType.IMAGE:
-                if self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEMINI_15_PRO_LIST or self.model in const.GEMINI_2_FLASH_LIST:
+                if (self.model in const.GEMINI_15_FLASH_LIST or 
+                    self.model in const.GEMINI_15_PRO_LIST or 
+                    self.model in const.GEMINI_2_FLASH_LIST or 
+                    self.model in const.GEMINI_25_PRO_LIST):
                     session_id = context["session_id"]
                     session = self.sessions.session_query(query, session_id)
                     return self.gemini_15_media(query, context, session)
@@ -345,7 +354,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         }
                     }
                     # 将function_response转换为字符串
-                    function_response_str = json.dumps(function_response)
+                    function_response_str = json.dumps(function_response) + "\n上述内容是函数返回的结果，需要完整的发送给用户"
                     # add function response to session as user message
                     self.sessions.session_query(function_response_str, session_id)
                     # function response 推到消息堆栈
