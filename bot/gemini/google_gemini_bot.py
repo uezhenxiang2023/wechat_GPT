@@ -269,7 +269,10 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     vision_res = self.do_vision_completion_if_need(session_id,query) # Image recongnition and vision completion
                     if vision_res:
                         return vision_res
-                elif self.model in const.GEMINI_15_PRO_LIST or self.model in const.GEMINI_15_FLASH_LIST or self.model in const.GEMINI_2_FLASH_LIST:
+                elif (self.model in const.GEMINI_15_PRO_LIST or 
+                      self.model in const.GEMINI_15_FLASH_LIST or 
+                      self.model in const.GEMINI_2_FLASH_LIST or 
+                      self.model in const.GEMINI_25_PRO_LIST):
                     gemini_messages = self._convert_to_gemini_15_messages(session.messages)
 
                 if self.model in const.GEMINI_GENAI_SDK:
