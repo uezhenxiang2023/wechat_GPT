@@ -57,7 +57,8 @@ class GoogleGeminiBot(Bot,GeminiVision):
         self.Model_ID = self.model.upper()
         self.system_prompt = conf().get("character_desc")
         self.function_call_dicts = {
-            "screenplay_scenes_breakdown": self.screenplay_scenes_breakdown
+            "screenplay_scenes_breakdown": self.screenplay_scenes_breakdown,
+            "screenplay_assets_breakdown": self.screenplay_assets_breakdown
         }
         # 复用文心的token计算方式
         self.sessions = SessionManager(BaiduWenxinSession, model=self.model or "gpt-3.5-turbo")
@@ -66,9 +67,9 @@ class GoogleGeminiBot(Bot,GeminiVision):
         generativeai.configure(api_key=self.api_key,transport='rest')
         self.generation_config = {
             "temperature": 0.4,
-            "top_p": 1,
-            "top_k": 1,
-            "max_output_tokens": 2048,
+            "top_p": 0.95,
+            "top_k": 64,
+            "max_output_tokens": 65536,
         }
         self.safety_settings = [
             {
@@ -151,14 +152,14 @@ class GoogleGeminiBot(Bot,GeminiVision):
          # schema for screenplay_scenes_breakdown need to be updated
         self.screenplay_scenes_breakdown_schema = FunctionDeclaration(
             name="screenplay_scenes_breakdown",
-            description="阅读剧本，提取剧本名称，场号、场景、内外、日夜等基础信息，做出场景列表。",
+            description="阅读剧本，结合内容，先提取剧本名称和剧本总页数，再逐个拆解场景，提取场号、场景名称、内外、日夜等基础信息，做成场景列表",
             parameters=types.Schema(
                 type=Type.OBJECT,
                 required=["screenplay_title","scenes_list"],
                 properties={
                     "screenplay_title": types.Schema(
                         type=Type.STRING,
-                        description="剧本名称",
+                        description="从文档中提取出的剧本名称",
                     ),
                     "scenes_list": types.Schema(
                         type=Type.ARRAY,
@@ -183,13 +184,62 @@ class GoogleGeminiBot(Bot,GeminiVision):
                                     description="室内环境还是室外环境",
                                     enum = ["内", "外"],
                                 ),
+                                "word_count": types.Schema(
+                                    type=Type.INTEGER,
+                                    description="场次字数",
+                                ),
+                                "page_count": types.Schema(
+                                    type=Type.NUMBER,
+                                    description="场次页数",
+                                )
                             },
                         ),
                     ),
                 },
             ),
         )
-        self.function_declarations = Tool(function_declarations=[self.screenplay_scenes_breakdown_schema])
+        self.screenplay_assets_breakdown_schema = FunctionDeclaration(
+            name="screenplay_assets_breakdown",
+            description="阅读剧本，熟悉内容，逐场提取场景、人物和道具名称，制作成资产列表",
+            parameters=types.Schema(
+                type=Type.OBJECT,
+                required=["screenplay_title","assets_list"],
+                properties={
+                    "screenplay_title": types.Schema(
+                        type=Type.STRING,
+                        description="从文档中提取出的剧本名称",
+                    ),
+                    "assets_list": types.Schema(
+                        type=Type.ARRAY,
+                        items=types.Schema(
+                            type=Type.OBJECT,
+                            properties={
+                                "asset_id": types.Schema(
+                                    type=Type.STRING,
+                                    description="资产ID，格式为类型前缀缩写字母+两位阿拉伯数字，场景前缀用S，角色前缀用C，道具资产用P，如S01、C02、P03。资产ID的作用是跟场景列表交叉索引与查询。",
+                                ),
+                                "name": types.Schema(
+                                    type=Type.STRING,
+                                    description="资产名称,完整保留每一场中出现的资产，包括无名无姓的角色、一闪而过的场景、无足轻重的道具，不要简化或过滤。",
+                                ),
+                                "scene_ids": types.Schema(
+                                    type=Type.ARRAY,
+                                    description="资产所出现的场次",
+                                    items=types.Schema(
+                                        type = Type.INTEGER
+                                    )
+                                ),
+                                "assets_page_count": types.Schema(
+                                    type=Type.NUMBER,
+                                    description="资产所出现场次总页数",
+                                )
+                            },
+                        ),
+                    ),
+                },
+            ),
+        )
+        self.function_declarations = Tool(function_declarations=[self.screenplay_scenes_breakdown_schema, self.screenplay_assets_breakdown_schema])
         self.google_search_tool = Tool(google_search=GoogleSearch())
         self.chat = self.client.chats.create(
             model=self.model,
@@ -527,11 +577,13 @@ class GoogleGeminiBot(Bot,GeminiVision):
         return None
 
     def screenplay_scenes_breakdown(self, *, screenplay_title: str = None, scenes_list: list = []):
+        screenplay_title_no_quotes = screenplay_title.replace('《','').replace('》','')
         # 遍历./tmp目录下的文件,如果文件名中含有screenplay_title,则将其路径赋值给path
         for root, dirs, files in os.walk('./tmp'):
             for file in files:
-                if screenplay_title in file:
+                if screenplay_title_no_quotes in file:
                     path = os.path.join(root, file)
+                    break
 
         if path[-5:] == '.docx':
             reader = docx.Document(path)
@@ -555,6 +607,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
             texts = ''.join([page.extract_text() for page in reader.pages])
             line_list = texts.splitlines()
         total_words = len(texts)
+        words_per_page = total_words / number_of_pages
         # 统计每一场的字数
         paragraph = ""
         sc_count = 0
@@ -571,14 +624,26 @@ class GoogleGeminiBot(Bot,GeminiVision):
         # 循环结束后，捕获最后一场戏的字数
         counter_dict[f"scene{sc_count}"] = f'{len(paragraph)}'
         del counter_dict["scene0"]
-
+        
         for i, v in enumerate(scenes_list):
-            v.update(word_count = counter_dict[f"scene{i+1}"])
+            words_per_scene = int(counter_dict.get(f"scene{i+1}"))
+            pages_per_scene = round(words_per_scene / words_per_page, 2)
+            v.update(word_count = words_per_scene)
+            v.update(page_count = pages_per_scene)
 
         api_response = {
             'total_pages':number_of_pages,
             'total_words':total_words,
             'scenes_list':scenes_list
+        }
+        return api_response
+    
+    def screenplay_assets_breakdown(self, *, screenplay_title: str = None, assets_list: list = []):
+        for i, v in enumerate(assets_list):
+            ref_id = i+1
+            v.update(ref_id = ref_id)
+        api_response = {
+            'asset_list':assets_list
         }
         return api_response
     
