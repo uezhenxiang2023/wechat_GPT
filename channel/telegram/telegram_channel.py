@@ -305,8 +305,16 @@ class TelegramChannel(ChatChannel):
 
     def send_image(self, reply_content, toUserName):
         """
-        This function sends a response text message back to the user.
+        This function sends a response image back to the user.
         """
         updater = Updater(self.bot_token, request_kwargs={'proxy_url': self.proxy_url})
         bot = updater.bot
         bot.send_photo(chat_id=toUserName, photo=reply_content)
+
+    def send_file(self, reply_content, toUserName):
+        """
+        This function sends a response file back to the user.
+        """
+        updater = Updater(self.bot_token, request_kwargs={'proxy_url': self.proxy_url})
+        bot = updater.bot
+        bot.send_document(chat_id=toUserName, document=reply_content)

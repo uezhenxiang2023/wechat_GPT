@@ -15,6 +15,7 @@ import docx
 from io import BytesIO
 from pypdf import PdfReader
 from bot.bot import Bot
+import pandas as pd
 import google.generativeai as generativeai
 from google.ai.generativelanguage_v1beta.types import content
 from google import genai
@@ -24,6 +25,7 @@ from bot.session_manager import SessionManager
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.tmp_dir import TmpDir
 from common import const, memory
 from config import conf
 from bot.baidu.baidu_wenxin_session import BaiduWenxinSession
@@ -166,7 +168,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         items=types.Schema(
                             type=Type.OBJECT,
                             properties={
-                                "id": types.Schema(
+                                "scene_id": types.Schema(
                                     type=Type.INTEGER,
                                     description="场号",
                                 ),
@@ -214,6 +216,11 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         items=types.Schema(
                             type=Type.OBJECT,
                             properties={
+                                "asset_type": types.Schema(
+                                    type = types.Type.STRING,
+                                    description = "资产的类型",
+                                    enum = ["scene", "character", "prop"],
+                                ),
                                 "asset_id": types.Schema(
                                     type=Type.STRING,
                                     description="资产ID，格式为类型前缀缩写字母+两位阿拉伯数字，场景前缀用S，角色前缀用C，道具资产用P，如S01、C02、P03。资产ID的作用是跟场景列表交叉索引与查询。",
@@ -395,7 +402,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     # call function
                     function_call = self.function_call_dicts.get(fn_name)
                     # 从fn_args中获取function_call的参数
-                    api_response = function_call(**fn_args)
+                    api_response = function_call(context, **fn_args)
                     fn_args.update(**api_response)
                     function_response = {
                         "functionResponse": {
@@ -407,7 +414,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         }
                     }
                     # 将function_response转换为字符串
-                    function_response_str = json.dumps(function_response) + "\n上述内容是函数返回的结果，需要完整的发送给用户"
+                    function_response_str = json.dumps(function_response) + '\n' + "上述函数响应内容尤其是列表中的细节不用完整输出，总结后简单回复即可。"
                     # add function response to session as user message
                     self.sessions.session_query(function_response_str, session_id)
                     # function response 推到消息堆栈
@@ -576,12 +583,12 @@ class GoogleGeminiBot(Bot,GeminiVision):
         logger.info("[{}] file={} is downloaded locally".format(self.Model_ID, path))
         return None
 
-    def screenplay_scenes_breakdown(self, *, screenplay_title: str = None, scenes_list: list = []):
+    def screenplay_scenes_breakdown(self, context, *, screenplay_title: str = None, scenes_list: list = []):
         screenplay_title_no_quotes = screenplay_title.replace('《','').replace('》','')
         # 遍历./tmp目录下的文件,如果文件名中含有screenplay_title,则将其路径赋值给path
         for root, dirs, files in os.walk('./tmp'):
             for file in files:
-                if screenplay_title_no_quotes in file:
+                if screenplay_title_no_quotes in file and file.endswith(('.docx', '.pdf')):
                     path = os.path.join(root, file)
                     break
 
@@ -636,15 +643,52 @@ class GoogleGeminiBot(Bot,GeminiVision):
             'total_words':total_words,
             'scenes_list':scenes_list
         }
+        
+        # Save the scenes list to an Excel file
+        scenes_list_str = json.dumps(scenes_list, ensure_ascii=False)
+        df_scenses_list = pd.read_json(scenes_list_str)
+        new_cols = ['scene_id', 'location', 'daynight', 'envirement', 'word_count', 'page_count']
+        df_scenses_list = df_scenses_list.reindex(columns=new_cols)
+        file_path = TmpDir().path()+ f"{screenplay_title}_scenes_breakdown.xlsx"
+        df_scenses_list.to_excel(
+            file_path,
+            sheet_name=f'{screenplay_title}_scenes_breakdown', 
+            index=False
+        )
+        logger.info(f"[TELEGRAMBOT_{self.Model_ID}] {file_path} is saved")
+
+        # Send the file to the user
+        file = open(file_path, 'rb')
+        TelegramChannel().send_file(file, context["receiver"])
+        file.close()
+        logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, file_path, context["receiver"]))
         return api_response
     
-    def screenplay_assets_breakdown(self, *, screenplay_title: str = None, assets_list: list = []):
+    def screenplay_assets_breakdown(self, context, *, screenplay_title: str = None, assets_list: list = []):
         for i, v in enumerate(assets_list):
             ref_id = i+1
-            v.update(ref_id = ref_id)
+            v.update(ref_url = f'RefURL_{ref_id}')
         api_response = {
             'asset_list':assets_list
         }
+
+        # Save the assets list to an Excel file
+        assets_list_str = json.dumps(assets_list, ensure_ascii=False)
+        df_assets_list = pd.read_json(assets_list_str)
+        new_cols = ['asset_type', 'asset_id', 'name', 'scene_ids', 'assets_page_count', 'ref_url']
+        df_assets_list = df_assets_list.reindex(columns=new_cols)
+        file_path = TmpDir().path()+ f"{screenplay_title}_assets_breakdown.xlsx"
+        df_assets_list.to_excel(
+            file_path,
+            sheet_name=f'{screenplay_title}_assets_breakdown', 
+            index=False
+        )
+        logger.info(f"[TELEGRAMBOT_{self.Model_ID}] {file_path} is saved")
+
+        # Send the file to the user
+        with open(file_path, 'rb') as f:
+            TelegramChannel().send_file(f, context["receiver"])
+        logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, file_path, context["receiver"]))
         return api_response
     
     def gemini_15_media(self, query, context, session: BaiduWenxinSession):
