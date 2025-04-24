@@ -16,6 +16,7 @@ from io import BytesIO
 from pypdf import PdfReader
 from bot.bot import Bot
 import pandas as pd
+import matplotlib.pyplot as plt
 import google.generativeai as generativeai
 from google.ai.generativelanguage_v1beta.types import content
 from google import genai
@@ -689,6 +690,44 @@ class GoogleGeminiBot(Bot,GeminiVision):
         with open(file_path, 'rb') as f:
             TelegramChannel().send_file(f, context["receiver"])
         logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, file_path, context["receiver"]))
+
+        # Create visualization figure of the assets list
+        plt.switch_backend('agg') # Use a non-interactive backend
+        plt.rcParams['font.sans-serif'] = ['SimHei'] # Set Chinese font
+        plt.rcParams['axes.unicode_minus'] = False # Fix the minus sign display issue
+        asset_types = set([asset['asset_type'] for asset in assets_list])
+        colormap = {
+            'scene': 'darkcyan',
+            'character': None,
+            'prop': 'darkorange'
+        }
+        for asset_type in asset_types:
+            plt.figure(figsize=(12, 4))
+            subset_assets_list = df_assets_list[df_assets_list['asset_type'] == asset_type]
+            ax = subset_assets_list.plot(
+                figsize=(12, 4),
+                title=f'<炒房客>Assets_Breakdown-{asset_type}',  
+                kind='bar', 
+                x='name', 
+                y='assets_page_count', 
+                ylabel='资产页数', 
+                color=colormap[asset_type],
+                legend=False
+            )
+            # Add value labels on top of the bars
+            for i, v in enumerate(subset_assets_list['assets_page_count']):
+                ax.text(i, v, f'{v:.2f}', ha='center', va='bottom')
+
+            figure_path = TmpDir().path() + f"{screenplay_title}_assets_breakdown-{asset_type}.png"
+            plt.savefig(figure_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            logger.info(f"[TELEGRAMBOT_{self.Model_ID}] {figure_path} is saved")
+
+            # Send the visualization figure to the user
+            with open(figure_path, 'rb') as f:
+                f.seek(0)
+                TelegramChannel().send_image(f, context["receiver"])
+            logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, figure_path, context["receiver"]))
         return api_response
     
     def gemini_15_media(self, query, context, session: BaiduWenxinSession):
