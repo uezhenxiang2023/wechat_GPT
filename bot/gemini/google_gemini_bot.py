@@ -171,21 +171,21 @@ class GoogleGeminiBot(Bot,GeminiVision):
                             properties={
                                 "scene_id": types.Schema(
                                     type=Type.INTEGER,
-                                    description="场号",
+                                    description="场号，包含正戏与彩蛋，彩蛋场号顺接正戏，比如正戏最后一场是95，彩蛋第一场就是96",
                                 ),
                                 "location": types.Schema(
                                     type=Type.STRING,
-                                    description="场景名称",
+                                    description="场景名称，包含正戏与彩蛋",
                                 ),
                                 "daynight": types.Schema(
                                     type=Type.STRING,
-                                    description="日景还是夜景",
-                                    enum = ["日", "夜"],
+                                    description="日景还是夜景，如果剧本中某一场次开头没有明确标注，根据该场次内容自行推断，并从枚举列表中提取相应推断结果",
+                                    enum = ["日", "夜", "极昼", "极夜", "晨", "昏", "晨(极昼)", "夜(极昼)", "晨(极夜)", "夜(极夜)"],
                                 ),
                                 "envirement": types.Schema(
                                     type=Type.STRING,
-                                    description="室内环境还是室外环境",
-                                    enum = ["内", "外"],
+                                    description="室内环境还是室外环境，如果剧本中某一场次开头没有明确标注，根据该场次内容自行推断，并从枚举列表中提取相应推断结果",
+                                    enum = ["内", "外", "外/内", "内/外"],
                                 ),
                                 "word_count": types.Schema(
                                     type=Type.INTEGER,
@@ -210,7 +210,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 properties={
                     "screenplay_title": types.Schema(
                         type=Type.STRING,
-                        description="从文档中提取出的剧本名称",
+                        description="剧本名称，调用函数必需输入的参数，仔细阅读文档，提取出剧本名称",
                     ),
                     "assets_list": types.Schema(
                         type=Type.ARRAY,
@@ -388,6 +388,8 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         fn_args = fn_dict.get('args')
                     else:
                         fn_name = part.name
+                        if "assets" in fn_name.lower():
+                            fn_name = "screenplay_assets_breakdown"
                         fn_args = part.args
                     function_call_reply = {
                         "functionCall": {
@@ -613,7 +615,10 @@ class GoogleGeminiBot(Bot,GeminiVision):
             reader = PdfReader(path)
             number_of_pages = len(reader.pages)
             texts = ''.join([page.extract_text() for page in reader.pages])
-            line_list = texts.splitlines()
+            # 删除脚标
+            footer_pattern = rf"\[{re.escape(screenplay_title_no_quotes)}\]\s*◁[\s\x00-\x1f]*▷\s*\n?"
+            texts = re.sub(footer_pattern, "", texts, flags=re.DOTALL)
+            line_list = re.split(r'[。！？\n]|\s{2,}', texts)
         total_words = len(texts)
         words_per_page = total_words / number_of_pages
         # 统计每一场的字数
@@ -624,7 +629,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         pattern = r"第.*场|场景.*|\d+\..*"
         for i, v in enumerate(line_list):
             # 只要每行的前3～7个字，符合场次描述规则
-            if any(re.match(pattern, v[:n]) is not None for n in (2, 3, 4, 5, 6, 7)):
+            if any(re.match(pattern, v.strip()[:n]) is not None for n in (2, 3, 4, 5, 6, 7, 9, 10)):
                 counter_dict[f"scene{sc_count}"] = f'{len(paragraph)}'
                 sc_count += 1
                 paragraph = ""
@@ -634,7 +639,12 @@ class GoogleGeminiBot(Bot,GeminiVision):
         del counter_dict["scene0"]
         
         for i, v in enumerate(scenes_list):
-            words_per_scene = int(counter_dict.get(f"scene{i+1}"))
+            scene_id = v['scene_id']
+            try:
+                words_per_scene = int(counter_dict.get(f"scene{scene_id}"))
+            except Exception as e:
+                logger.error(f"[TELEGRAMBOT_{self.Model_ID}] scene_id={scene_id} not found in counter_dict, error={e}")
+                continue
             pages_per_scene = round(words_per_scene / words_per_page, 2)
             v.update(word_count = words_per_scene)
             v.update(page_count = pages_per_scene)
@@ -651,6 +661,10 @@ class GoogleGeminiBot(Bot,GeminiVision):
         new_cols = ['scene_id', 'location', 'daynight', 'envirement', 'word_count', 'page_count']
         df_scenses_list = df_scenses_list.reindex(columns=new_cols)
         file_path = TmpDir().path()+ f"{screenplay_title}_scenes_breakdown.xlsx"
+        """df_scenses_list.to_csv(
+            file_path,
+            index=False,
+        )"""
         df_scenses_list.to_excel(
             file_path,
             sheet_name=f'{screenplay_title}_scenes_breakdown', 
@@ -672,10 +686,21 @@ class GoogleGeminiBot(Bot,GeminiVision):
         api_response = {
             'asset_list':assets_list
         }
-
-        # Save the assets list to an Excel file
         assets_list_str = json.dumps(assets_list, ensure_ascii=False)
         df_assets_list = pd.read_json(assets_list_str)
+        df_scenes_list = pd.read_excel(f'./tmp/{screenplay_title}_scenes_breakdown.xlsx')
+        for i, v in enumerate(df_assets_list['scene_ids']):
+            assets_page_count = 0
+            for n in v:
+                # 从scenes_list中取出对应的scene_id所在的行
+                scene_row = df_scenes_list[df_scenes_list['scene_id'] == n]
+                # 取出该行page_count列的值
+                page_count = scene_row['page_count'].values[0]
+                assets_page_count += page_count
+            # 将assets_page_count添加到assets_list中
+            df_assets_list.at[i, 'assets_page_count'] = assets_page_count
+
+        # Save the assets list to an Excel file
         new_cols = ['asset_type', 'asset_id', 'name', 'scene_ids', 'assets_page_count', 'ref_url']
         df_assets_list = df_assets_list.reindex(columns=new_cols)
         file_path = TmpDir().path()+ f"{screenplay_title}_assets_breakdown.xlsx"
