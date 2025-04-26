@@ -727,11 +727,12 @@ class GoogleGeminiBot(Bot,GeminiVision):
             'prop': 'darkorange'
         }
         for asset_type in asset_types:
-            plt.figure(figsize=(12, 4))
+            figsize = (40, 6)
+            plt.figure(figsize=figsize)
             subset_assets_list = df_assets_list[df_assets_list['asset_type'] == asset_type]
             ax = subset_assets_list.plot(
-                figsize=(12, 4),
-                title=f'<炒房客>Assets_Breakdown-{asset_type}',  
+                figsize=figsize,
+                title=f'{screenplay_title}_Assets_Breakdown-{asset_type}',  
                 kind='bar', 
                 x='name', 
                 y='assets_page_count', 
@@ -741,7 +742,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
             )
             # Add value labels on top of the bars
             for i, v in enumerate(subset_assets_list['assets_page_count']):
-                ax.text(i, v, f'{v:.2f}', ha='center', va='bottom')
+                ax.text(i, v, f'{v:.2f}', ha='center', va='bottom', fontsize=8)
 
             figure_path = TmpDir().path() + f"{screenplay_title}_assets_breakdown-{asset_type}.png"
             plt.savefig(figure_path, dpi=300, bbox_inches='tight')
