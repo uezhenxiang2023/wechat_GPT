@@ -164,6 +164,14 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         type=Type.STRING,
                         description="从文档中提取出的剧本名称",
                     ),
+                    "total_pages": types.Schema(
+                        type=Type.INTEGER,
+                        description="剧本总页数",
+                    ),
+                    "total_words": types.Schema(
+                        type=Type.INTEGER,
+                        description="剧本总字数",
+                    ),
                     "scenes_list": types.Schema(
                         type=Type.ARRAY,
                         items=types.Schema(
@@ -187,13 +195,17 @@ class GoogleGeminiBot(Bot,GeminiVision):
                                     description="室内环境还是室外环境，如果剧本中某一场次开头没有明确标注，根据该场次内容自行推断，并从枚举列表中提取相应推断结果",
                                     enum = ["内", "外", "外/内", "内/外"],
                                 ),
-                                "word_count": types.Schema(
+                                "words": types.Schema(
                                     type=Type.INTEGER,
                                     description="场次字数",
                                 ),
-                                "page_count": types.Schema(
+                                "pages": types.Schema(
                                     type=Type.NUMBER,
-                                    description="场次页数",
+                                    description="场次页数，计算方式为场次字数除以页均字数即(words / (total_words / total_pages))",
+                                ),
+                                "estimated_duration": types.Schema(
+                                    type=Type.NUMBER,
+                                    description="场次预计时长，单位是分钟，计算方式为场次页数的1.2倍即(pages * 1.2)",
                                 )
                             },
                         ),
@@ -219,12 +231,22 @@ class GoogleGeminiBot(Bot,GeminiVision):
                             properties={
                                 "asset_type": types.Schema(
                                     type = types.Type.STRING,
-                                    description = "资产的类型",
-                                    enum = ["scene", "character", "prop"],
+                                    description = "资产类型，cast是有名字、有台词、对剧情发展有重要影响的角色；stunt是特技或动作演员，extra是没名字、没台词的群众演员；costume是服装，location是不需要陈设的外景，set是需要陈设的内景，vehicle是交通工具，animal是需要驯养员看守的动物，prop是道具",
+                                    enum = [
+                                    "cast",
+                                    "stunt",
+                                    "extra",
+                                    "costume",
+                                    "location",
+                                    "set",
+                                    "vehicle",
+                                    "animal",
+                                    "prop"
+                                    ],
                                 ),
                                 "asset_id": types.Schema(
                                     type=Type.STRING,
-                                    description="资产ID，格式为类型前缀缩写字母+两位阿拉伯数字，场景前缀用S，角色前缀用C，道具资产用P，如S01、C02、P03。资产ID的作用是跟场景列表交叉索引与查询。",
+                                    description="资产ID，格式为资产类型+两位阿拉伯数字即asset_type##，如cast01，location02，prop03, vehicle04等",
                                 ),
                                 "name": types.Schema(
                                     type=Type.STRING,
@@ -237,9 +259,13 @@ class GoogleGeminiBot(Bot,GeminiVision):
                                         type = Type.INTEGER
                                     )
                                 ),
-                                "assets_page_count": types.Schema(
+                                "asset_pages": types.Schema(
                                     type=Type.NUMBER,
                                     description="资产所出现场次总页数",
+                                ),
+                                "estimated_asset_duration": types.Schema(
+                                    type=Type.NUMBER,
+                                    description="预计资产所出现场次总时长，单位是分钟，计算方式为资产页数的1.2倍即(asset_pages * 1.2)",
                                 )
                             },
                         ),
@@ -378,25 +404,15 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 # check function_call status
                 if hasattr(response, 'function_calls'):
                     function_calls = response.function_calls if response.function_calls is not None else []
+                    function_response_str_list = []
                 else:
                     function_calls = response.parts if response.parts[0].function_call.args is not None else []
+                    function_response_str_list = []
                 for part in function_calls:
-                    if hasattr(part, 'function_call'):
-                        fn = part.function_call
-                        fn_dict = type(fn).to_dict(fn)
-                        fn_name = fn_dict.get('name')
-                        fn_args = fn_dict.get('args')
-                    else:
-                        fn_name = part.name
-                        if "assets" in fn_name.lower():
-                            fn_name = "screenplay_assets_breakdown"
-                        fn_args = part.args
-                    function_call_reply = {
-                        "functionCall": {
-                            "name": fn_name,
-                            "args": fn_args
-                        }
-                    }
+                    function_call_reply = self.function_call_reply(part)
+                    fn_name = function_call_reply.get('functionCall').get('name')
+                    fn_args = function_call_reply.get('functionCall').get('args')
+
                     # 将reply_text转换为字符串
                     function_call_str = json.dumps(function_call_reply)
                     # add function call to session as model/assistant message
@@ -405,33 +421,23 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     # call function
                     function_call = self.function_call_dicts.get(fn_name)
                     # 从fn_args中获取function_call的参数
-                    api_response = function_call(context, **fn_args)
-                    fn_args.update(**api_response)
-                    function_response = {
-                        "functionResponse": {
-                            "name": fn_name,
-                            "response": {
-                                "name": fn_name,
-                                "content": fn_args
-                            }
-                        }
-                    }
-                    # 将function_response转换为字符串
-                    function_response_str = json.dumps(function_response) + '\n' + "上述函数响应内容尤其是列表中的细节不用完整输出，总结后简单回复即可。"
+                    function_response_str = function_call(context, fn_name, **fn_args)
                     # add function response to session as user message
                     self.sessions.session_query(function_response_str, session_id)
-                    # function response 推到消息堆栈
+                    function_response_str_list.append(function_response_str)
+                    
+                if function_response_str_list:
+                    # new turn of model request with function response
                     if self.model in const.GEMINI_GENAI_SDK:
-                        response = self.chat.send_message(function_response_str)
+                        response = self.chat.send_message(function_response_str_list)
                     else:
-                        # new turn of model request with function response
                         gemini_messages = self._convert_to_gemini_15_messages(session.messages)
                         chat_session = self.generative_model.start_chat(
-                        # 消息堆栈中的最新数据抛出去，留给send_message方法，从query中拿
-                            history=gemini_messages,
+                        # 消息堆栈中的最新数据抛出去，留给send_message方法，从function_response_str中拿
+                            history=gemini_messages[:-1],
                             enable_automatic_function_calling=True
                         )
-                        response = chat_session.send_message(query)
+                        response = chat_session.send_message(function_response_str)
 
                 if TelegramChannel().imaging is True:
                     self.get_reply_images(context, response)
@@ -456,6 +462,25 @@ class GoogleGeminiBot(Bot,GeminiVision):
         except Exception as e:
             logger.error("[{}] fetch reply error, {}".format(self.Model_ID, e))
             return Reply(ReplyType.ERROR, f"[{self.Model_ID}] {e}")
+
+    def function_call_reply(self, part):
+        if hasattr(part, 'function_call'):
+            fn = part.function_call
+            fn_dict = type(fn).to_dict(fn)
+            fn_name = fn_dict.get('name')
+            fn_args = fn_dict.get('args')
+        else:
+            fn_name = part.name
+            if "assets" in fn_name.lower():
+                fn_name = "screenplay_assets_breakdown"
+            fn_args = part.args
+        function_call_reply = {
+            "functionCall": {
+                "name": fn_name,
+                "args": fn_args
+            }
+        }
+        return function_call_reply
 
     def get_reply_text(self, response):
         parts = response.candidates[0].content.parts
@@ -586,7 +611,16 @@ class GoogleGeminiBot(Bot,GeminiVision):
         logger.info("[{}] file={} is downloaded locally".format(self.Model_ID, path))
         return None
 
-    def screenplay_scenes_breakdown(self, context, *, screenplay_title: str = None, scenes_list: list = []):
+    def screenplay_scenes_breakdown(
+            self, 
+            context, 
+            fn_name,
+            *, 
+            screenplay_title: str = None, 
+            total_pages: str = None, 
+            total_words: str = None, 
+            scenes_list: list = []
+        ):
         screenplay_title_no_quotes = screenplay_title.replace('《','').replace('》','')
         # 遍历./tmp目录下的文件,如果文件名中含有screenplay_title,则将其路径赋值给path
         for root, dirs, files in os.walk('./tmp'):
@@ -610,17 +644,17 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     num_id += 1
                 texts = texts + scene_normal + '\n'
                 line_list.append(scene_normal)
-            number_of_pages = len(texts)//500 + 1
+            total_pages = len(texts)//500 + 1
         elif path[-4:] == '.pdf':
             reader = PdfReader(path)
-            number_of_pages = len(reader.pages)
+            total_pages = len(reader.pages)
             texts = ''.join([page.extract_text() for page in reader.pages])
             # 删除脚标
             footer_pattern = rf"\[{re.escape(screenplay_title_no_quotes)}\]\s*◁[\s\x00-\x1f]*▷\s*\n?"
             texts = re.sub(footer_pattern, "", texts, flags=re.DOTALL)
             line_list = re.split(r'[。！？\n]|\s{2,}', texts)
         total_words = len(texts)
-        words_per_page = total_words / number_of_pages
+        words_per_page = total_words / total_pages
         # 统计每一场的字数
         paragraph = ""
         sc_count = 0
@@ -646,25 +680,17 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 logger.error(f"[TELEGRAMBOT_{self.Model_ID}] scene_id={scene_id} not found in counter_dict, error={e}")
                 continue
             pages_per_scene = round(words_per_scene / words_per_page, 2)
-            v.update(word_count = words_per_scene)
-            v.update(page_count = pages_per_scene)
-
-        api_response = {
-            'total_pages':number_of_pages,
-            'total_words':total_words,
-            'scenes_list':scenes_list
-        }
+            estimated_duration = round(pages_per_scene * 1.2, 2)
+            v.update(words = words_per_scene)
+            v.update(pages = pages_per_scene)
+            v.update(estimated_duration = estimated_duration)
         
         # Save the scenes list to an Excel file
         scenes_list_str = json.dumps(scenes_list, ensure_ascii=False)
         df_scenses_list = pd.read_json(scenes_list_str)
-        new_cols = ['scene_id', 'location', 'daynight', 'envirement', 'word_count', 'page_count']
+        new_cols = ['scene_id', 'location', 'daynight', 'envirement', 'words', 'pages', 'estimated_duration']
         df_scenses_list = df_scenses_list.reindex(columns=new_cols)
         file_path = TmpDir().path()+ f"{screenplay_title}_scenes_breakdown.xlsx"
-        """df_scenses_list.to_csv(
-            file_path,
-            index=False,
-        )"""
         df_scenses_list.to_excel(
             file_path,
             sheet_name=f'{screenplay_title}_scenes_breakdown', 
@@ -677,31 +703,47 @@ class GoogleGeminiBot(Bot,GeminiVision):
         TelegramChannel().send_file(file, context["receiver"])
         file.close()
         logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, file_path, context["receiver"]))
-        return api_response
+
+        api_response = {
+            'total_pages':total_pages,
+            'total_words':total_words,
+            'scenes_list':scenes_list
+        }
+        function_response = {
+            "functionResponse": {
+                "name": fn_name,
+                "response": {
+                    "name": fn_name,
+                    "content": api_response
+                }
+            }
+        }
+        # 将function_response转换为字符串
+        function_response_str = json.dumps(function_response) + '\n' + "上述函数响应内容是场景表，总结后简单回复即可，不要包含总字数和每一场的细节。"
+        return function_response_str
     
-    def screenplay_assets_breakdown(self, context, *, screenplay_title: str = None, assets_list: list = []):
+    def screenplay_assets_breakdown(self, context, fn_name, *, screenplay_title: str = None, assets_list: list = []):
         for i, v in enumerate(assets_list):
             ref_id = i+1
             v.update(ref_url = f'RefURL_{ref_id}')
-        api_response = {
-            'asset_list':assets_list
-        }
+        
         assets_list_str = json.dumps(assets_list, ensure_ascii=False)
         df_assets_list = pd.read_json(assets_list_str)
         df_scenes_list = pd.read_excel(f'./tmp/{screenplay_title}_scenes_breakdown.xlsx')
         for i, v in enumerate(df_assets_list['scene_ids']):
-            assets_page_count = 0
+            assets_pages = 0
             for n in v:
                 # 从scenes_list中取出对应的scene_id所在的行
                 scene_row = df_scenes_list[df_scenes_list['scene_id'] == n]
-                # 取出该行page_count列的值
-                page_count = scene_row['page_count'].values[0]
-                assets_page_count += page_count
-            # 将assets_page_count添加到assets_list中
-            df_assets_list.at[i, 'assets_page_count'] = assets_page_count
+                # 取出该行asset_pages列的值
+                asset_page = scene_row['pages'].values[0]
+                assets_pages += asset_page
+            # 将assets_pages和estimated_asset_duration更新到assets_list中
+            df_assets_list.at[i, 'assets_pages'] = assets_pages
+            df_assets_list.at[i, 'estimated_asset_duration'] = round(assets_pages * 1.2, 2)
 
         # Save the assets list to an Excel file
-        new_cols = ['asset_type', 'asset_id', 'name', 'scene_ids', 'assets_page_count', 'ref_url']
+        new_cols = ['asset_type', 'asset_id', 'name', 'scene_ids', 'asset_pages', 'estimated_asset_duration', 'ref_url']
         df_assets_list = df_assets_list.reindex(columns=new_cols)
         file_path = TmpDir().path()+ f"{screenplay_title}_assets_breakdown.xlsx"
         df_assets_list.to_excel(
@@ -722,12 +764,18 @@ class GoogleGeminiBot(Bot,GeminiVision):
         plt.rcParams['axes.unicode_minus'] = False # Fix the minus sign display issue
         asset_types = set([asset['asset_type'] for asset in assets_list])
         colormap = {
-            'scene': 'darkcyan',
-            'character': None,
+            'cast': None,
+            'extra': 'darkcyan',
+            'stunt': 'darkgrey',
+            'costume': None,
+            'location': 'darkgreen',
+            'set': 'darkred',
+            'vehicle': 'darkgrey',
+            'animal': 'darkgoldenrod',
             'prop': 'darkorange'
         }
         for asset_type in asset_types:
-            figsize = (40, 6)
+            figsize = (30, 5)
             plt.figure(figsize=figsize)
             subset_assets_list = df_assets_list[df_assets_list['asset_type'] == asset_type]
             ax = subset_assets_list.plot(
@@ -735,17 +783,17 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 title=f'{screenplay_title}_Assets_Breakdown-{asset_type}',  
                 kind='bar', 
                 x='name', 
-                y='assets_page_count', 
-                ylabel='资产页数', 
+                y='estimated_asset_duration', 
+                ylabel='资产预计时长(分钟)', 
                 color=colormap[asset_type],
                 legend=False
             )
             # Add value labels on top of the bars
-            for i, v in enumerate(subset_assets_list['assets_page_count']):
-                ax.text(i, v, f'{v:.2f}', ha='center', va='bottom', fontsize=8)
+            for i, v in enumerate(subset_assets_list['estimated_asset_duration']):
+                ax.text(i, v, f'{v:.2f}', ha='center', va='bottom', fontsize=10)
 
-            figure_path = TmpDir().path() + f"{screenplay_title}_assets_breakdown-{asset_type}.png"
-            plt.savefig(figure_path, dpi=300, bbox_inches='tight')
+            figure_path = TmpDir().path() + f"{screenplay_title}_assets_breakdown-{asset_type.upper()}.png"
+            plt.savefig(figure_path, dpi=200, bbox_inches='tight')
             plt.close()
             logger.info(f"[TELEGRAMBOT_{self.Model_ID}] {figure_path} is saved")
 
@@ -754,7 +802,22 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 f.seek(0)
                 TelegramChannel().send_image(f, context["receiver"])
             logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, figure_path, context["receiver"]))
-        return api_response
+        
+        api_response = {
+            'asset_list':assets_list
+        }
+        function_response = {
+            "functionResponse": {
+                "name": fn_name,
+                "response": {
+                    "name": fn_name,
+                    "content": api_response
+                }
+            }
+        }
+        # 将function_response转换为字符串
+        function_response_str = json.dumps(function_response)+ '\n' + "上述函数响应内容是资产表，总结后简单回复即可。"
+        return function_response_str
     
     def gemini_15_media(self, query, context, session: BaiduWenxinSession):
         session_id = context.kwargs["session_id"]
