@@ -155,7 +155,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
          # schema for screenplay_scenes_breakdown need to be updated
         self.screenplay_scenes_breakdown_schema = FunctionDeclaration(
             name="screenplay_scenes_breakdown",
-            description="阅读剧本，结合内容，先提取剧本名称和剧本总页数，再逐个拆解场景，提取场号、场景名称、内外、日夜等基础信息，做成场景列表",
+            description="拆解剧本一共两个步骤，这是第一步，拆解场景。阅读剧本，结合内容，先提取剧本名称和剧本总页数，再逐个拆解场景，提取场号、场景名称、内外、日夜等基础信息，做成场景列表",
             parameters=types.Schema(
                 type=Type.OBJECT,
                 required=["screenplay_title","scenes_list"],
@@ -206,7 +206,14 @@ class GoogleGeminiBot(Bot,GeminiVision):
                                 "estimated_duration": types.Schema(
                                     type=Type.NUMBER,
                                     description="场次预计时长，单位是分钟，计算方式为场次页数的1.2倍即(pages * 1.2)",
-                                )
+                                ),
+                                "assets_id": types.Schema(
+                                    type=Type.ARRAY,
+                                    description="场次引用资产的id，从screenplay_assets_breakdown的返回值中取",
+                                    items=types.Schema(
+                                        type = Type.STRING
+                                    )
+                                ),
                             },
                         ),
                     ),
@@ -215,7 +222,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         )
         self.screenplay_assets_breakdown_schema = FunctionDeclaration(
             name="screenplay_assets_breakdown",
-            description="阅读剧本，熟悉内容，逐场提取场景、人物和道具名称，制作成资产列表",
+            description="拆解剧本一共分两个步骤，这是第二步，拆解资产。阅读剧本，熟悉内容，逐场提取场景、人物和道具名称，制作成资产列表。该工具需要跟sreenplay_scenes_breakdown同时平行调用，才能完成剧本拆解。",
             parameters=types.Schema(
                 type=Type.OBJECT,
                 required=["screenplay_title","assets_list"],
@@ -400,44 +407,45 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         enable_automatic_function_calling=True
                     )
                     response = chat_session.send_message(query)
-
-                # check function_call status
-                if hasattr(response, 'function_calls'):
-                    function_calls = response.function_calls if response.function_calls is not None else []
-                    function_response_str_list = []
-                else:
-                    function_calls = response.parts if response.parts[0].function_call.args is not None else []
-                    function_response_str_list = []
-                for part in function_calls:
-                    function_call_reply = self.function_call_reply(part)
-                    fn_name = function_call_reply.get('functionCall').get('name')
-                    fn_args = function_call_reply.get('functionCall').get('args')
-
-                    # 将reply_text转换为字符串
-                    function_call_str = json.dumps(function_call_reply)
-                    # add function call to session as model/assistant message
-                    self.sessions.session_reply(function_call_str, session_id)
-
-                    # call function
-                    function_call = self.function_call_dicts.get(fn_name)
-                    # 从fn_args中获取function_call的参数
-                    function_response_str = function_call(context, fn_name, **fn_args)
-                    # add function response to session as user message
-                    self.sessions.session_query(function_response_str, session_id)
-                    function_response_str_list.append(function_response_str)
-                    
-                if function_response_str_list:
-                    # new turn of model request with function response
-                    if self.model in const.GEMINI_GENAI_SDK:
-                        response = self.chat.send_message(function_response_str_list)
+                
+                # 轮询模型响应结果中是否有函数调用
+                function_calling = True
+                while function_calling:
+                    if hasattr(response, 'function_calls'):
+                        function_calls = response.function_calls if response.function_calls is not None else []
                     else:
-                        gemini_messages = self._convert_to_gemini_15_messages(session.messages)
-                        chat_session = self.generative_model.start_chat(
-                        # 消息堆栈中的最新数据抛出去，留给send_message方法，从function_response_str中拿
-                            history=gemini_messages[:-1],
-                            enable_automatic_function_calling=True
-                        )
-                        response = chat_session.send_message(function_response_str)
+                        function_calls = response.parts if response.parts[0].function_call.args is not None else []
+                    function_response_parts = []
+                    for part in function_calls:
+                        function_call_reply = self.function_call_reply(part)
+                        fn_name = function_call_reply.get('functionCall').get('name')
+                        fn_args = function_call_reply.get('functionCall').get('args')
+                        # 将reply_text转换为字符串
+                        function_call_str = json.dumps(function_call_reply)
+                        # add function call to session as model/assistant message
+                        self.sessions.session_reply(function_call_str, session_id)
+                        # call function
+                        function_call = self.function_call_dicts.get(fn_name)
+                        # 从fn_args中获取function_call的参数
+                        function_response_part, function_response_str = function_call(context, fn_name, **fn_args)
+                        function_response_parts.extend(function_response_part)
+                        # add function response to session as user message
+                        self.sessions.session_query(function_response_str, session_id)
+
+                    if function_calls:
+                        # new turn of model request with function response
+                        if self.model in const.GEMINI_GENAI_SDK:
+                            response = self.chat.send_message(function_response_parts)
+                        else:
+                            gemini_messages = self._convert_to_gemini_15_messages(session.messages)
+                            chat_session = self.generative_model.start_chat(
+                            # 消息堆栈中的最新数据抛出去，留给send_message方法，从function_response_str中拿
+                                history=gemini_messages[:-1],
+                                enable_automatic_function_calling=True
+                            )
+                            response = chat_session.send_message(function_response_part)
+                        continue
+                    function_calling = False
 
                 if TelegramChannel().imaging is True:
                     self.get_reply_images(context, response)
@@ -688,7 +696,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         # Save the scenes list to an Excel file
         scenes_list_str = json.dumps(scenes_list, ensure_ascii=False)
         df_scenses_list = pd.read_json(scenes_list_str)
-        new_cols = ['scene_id', 'location', 'daynight', 'envirement', 'words', 'pages', 'estimated_duration']
+        new_cols = ['scene_id', 'location', 'daynight', 'envirement', 'words', 'pages', 'estimated_duration', 'assets_id']
         df_scenses_list = df_scenses_list.reindex(columns=new_cols)
         file_path = TmpDir().path()+ f"{screenplay_title}_scenes_breakdown.xlsx"
         df_scenses_list.to_excel(
@@ -709,7 +717,14 @@ class GoogleGeminiBot(Bot,GeminiVision):
             'total_words':total_words,
             'scenes_list':scenes_list
         }
-        function_response = {
+        
+        # Create a function response part
+        function_response_part = []
+        function_response_obj = Part.from_function_response(
+            name=fn_name,
+            response=api_response,
+        )
+        function_response_dic = {
             "functionResponse": {
                 "name": fn_name,
                 "response": {
@@ -718,9 +733,16 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 }
             }
         }
-        # 将function_response转换为字符串
-        function_response_str = json.dumps(function_response) + '\n' + "上述函数响应内容是场景表，总结后简单回复即可，不要包含总字数和每一场的细节。"
-        return function_response_str
+        function_response_part.append(function_response_obj)
+        # Create a function response text part
+        function_response_comment = "这是函数返回的场景表，总结后简单回复即可。不用包含总字数和详细的场景表内容"
+        function_response_text = Part.from_text(
+            text=function_response_comment
+        )
+        function_response_part.append(function_response_text)
+        # 将function_response_part转换为字符串
+        function_response_str = json.dumps(function_response_dic) + '\n' + function_response_comment 
+        return function_response_part, function_response_str
     
     def screenplay_assets_breakdown(self, context, fn_name, *, screenplay_title: str = None, assets_list: list = []):
         for i, v in enumerate(assets_list):
@@ -806,7 +828,14 @@ class GoogleGeminiBot(Bot,GeminiVision):
         api_response = {
             'asset_list':assets_list
         }
-        function_response = {
+ 
+        # Create a function response part
+        function_response_part = []
+        function_response_obj = Part.from_function_response(
+            name=fn_name,
+            response=api_response,
+        )
+        function_response_dic = {
             "functionResponse": {
                 "name": fn_name,
                 "response": {
@@ -815,9 +844,16 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 }
             }
         }
-        # 将function_response转换为字符串
-        function_response_str = json.dumps(function_response)+ '\n' + "上述函数响应内容是资产表，总结后简单回复即可。"
-        return function_response_str
+        function_response_part.append(function_response_obj)
+        # Create a function response text part
+        function_response_comment = "这是函数返回的资产表，总结后简单回复即可，不用包含详细的资产表内容"
+        function_response_text = Part.from_text(
+            text=function_response_comment
+        )
+        function_response_part.append(function_response_text)
+        # 将function_response_part转换为字符串
+        function_response_str = json.dumps(function_response_dic) + '\n' + function_response_comment 
+        return function_response_part, function_response_str
     
     def gemini_15_media(self, query, context, session: BaiduWenxinSession):
         session_id = context.kwargs["session_id"]
