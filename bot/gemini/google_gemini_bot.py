@@ -707,10 +707,10 @@ class GoogleGeminiBot(Bot,GeminiVision):
         logger.info(f"[TELEGRAMBOT_{self.Model_ID}] {file_path} is saved")
 
         # Send the file to the user
-        file = open(file_path, 'rb')
+        """file = open(file_path, 'rb')
         TelegramChannel().send_file(file, context["receiver"])
         file.close()
-        logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, file_path, context["receiver"]))
+        logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, file_path, context["receiver"]))"""
 
         api_response = {
             'total_pages':total_pages,
@@ -753,32 +753,49 @@ class GoogleGeminiBot(Bot,GeminiVision):
         df_assets_list = pd.read_json(assets_list_str)
         df_scenes_list = pd.read_excel(f'./tmp/{screenplay_title}_scenes_breakdown.xlsx')
         for i, v in enumerate(df_assets_list['scene_ids']):
-            assets_pages = 0
+            asset_pages = 0
             for n in v:
                 # 从scenes_list中取出对应的scene_id所在的行
                 scene_row = df_scenes_list[df_scenes_list['scene_id'] == n]
                 # 取出该行asset_pages列的值
                 asset_page = scene_row['pages'].values[0]
-                assets_pages += asset_page
+                asset_pages += asset_page
             # 将assets_pages和estimated_asset_duration更新到assets_list中
-            df_assets_list.at[i, 'assets_pages'] = assets_pages
-            df_assets_list.at[i, 'estimated_asset_duration'] = round(assets_pages * 1.2, 2)
+            df_assets_list.at[i, 'asset_pages'] = asset_pages
+            df_assets_list.at[i, 'estimated_asset_duration'] = round(asset_pages * 1.2, 2)
 
         # Save the assets list to an Excel file
         new_cols = ['asset_type', 'asset_id', 'name', 'scene_ids', 'asset_pages', 'estimated_asset_duration', 'ref_url']
         df_assets_list = df_assets_list.reindex(columns=new_cols)
-        file_path = TmpDir().path()+ f"{screenplay_title}_assets_breakdown.xlsx"
+        assets_breaddown_file_path = TmpDir().path()+ f"{screenplay_title}_assets_breakdown.xlsx"
         df_assets_list.to_excel(
-            file_path,
+            assets_breaddown_file_path,
             sheet_name=f'{screenplay_title}_assets_breakdown', 
             index=False
         )
-        logger.info(f"[TELEGRAMBOT_{self.Model_ID}] {file_path} is saved")
+        logger.info(f"[TELEGRAMBOT_{self.Model_ID}] {assets_breaddown_file_path} is saved")
 
-        # Send the file to the user
-        with open(file_path, 'rb') as f:
+        # 统计场景引用的资产,更新scenes_list
+        for i, v in enumerate(df_scenes_list['scene_id']):
+            assets_id = []
+            for asset_id_index, scene_ids in enumerate(df_assets_list['scene_ids']):
+                asset_scene_ids = [int(x) for x in scene_ids]
+                if v in asset_scene_ids:
+                    assets_id.append(df_assets_list['asset_id'][asset_id_index])
+            # 将assets_id添加到scenes_list中，转换为字符串形式
+            df_scenes_list.at[i, 'assets_id'] = str(assets_id)
+        scenes_breaddown_file_path = TmpDir().path()+ f"{screenplay_title}_scenes_breakdown.xlsx"
+        df_scenes_list.to_excel(
+            scenes_breaddown_file_path,
+            sheet_name=f'{screenplay_title}_scenes_breakdown', 
+            index=False
+        )
+        logger.info(f"[TELEGRAMBOT_{self.Model_ID}] {scenes_breaddown_file_path} is saved")
+
+        # Send the scenes_breakdown.xlsx to the user
+        with open(scenes_breaddown_file_path, 'rb') as f:
             TelegramChannel().send_file(f, context["receiver"])
-        logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, file_path, context["receiver"]))
+        logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, scenes_breaddown_file_path, context["receiver"]))
 
         # Create visualization figure of the assets list
         plt.switch_backend('agg') # Use a non-interactive backend
@@ -802,7 +819,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
             subset_assets_list = df_assets_list[df_assets_list['asset_type'] == asset_type]
             ax = subset_assets_list.plot(
                 figsize=figsize,
-                title=f'{screenplay_title}_Assets_Breakdown-{asset_type}',  
+                title=f'{screenplay_title}_Assets_Breakdown-{asset_type.upper()}',  
                 kind='bar', 
                 x='name', 
                 y='estimated_asset_duration', 
