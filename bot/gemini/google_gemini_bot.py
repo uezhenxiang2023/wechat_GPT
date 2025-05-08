@@ -238,18 +238,46 @@ class GoogleGeminiBot(Bot,GeminiVision):
                             properties={
                                 "asset_type": types.Schema(
                                     type = types.Type.STRING,
-                                    description = "资产类型，cast是有名字、有台词、对剧情发展有重要影响的角色；stunt是特技或动作演员，extra是没名字、没台词的群众演员；costume是服装，location是不需要陈设的外景，set是需要陈设的内景，vehicle是交通工具，animal是需要驯养员看守的动物，prop是道具",
+                                    description = "场次包含的资产类型，由人、物和事(过程)三大类构成。cast属于人，是有名字、有台词、在很多场次中重复出现的角色，没有台词但对剧情发展起到重要作用的人物也属于cast；stunts属于事(过程)，通常是指危险系数较高的动作戏，比如在身上着火、从楼梯上滚下来、爬上4米高的云梯、在索道上滑行、从自行车上摔落等，由特技或动作演员完成，搬家、看房、卖车等普通动作构成的事件不包含在stunts中；extra_silent属于人，是没名字、没台词、不影响剧情发展的人物，这些人物在剧本中通常以身份、职业或功能的形式出现，如1个调酒师，1位女服务员，部门领导等；extra_atmosphere属于人，是出现在背景或环境中的群众演员，比如10个商人、8个排队的游客等；costume是服装，属于物，包括鞋袜和帽子以及服饰的局部描述，如白色衬衣、牛仔裤、外套内兜、运动鞋、渔夫帽等；makeup是伤口、血、假肢等特殊化妆，属于事(过程)；location属于物，是不需要陈设或仅需简单陈设的外景；set_dressing属于事(过程)，是需要精心设计与陈设的内景；vehicle属于物，是戏用交通工具；animal属于物，是需要驯养员在拍摄现场看守与训练的宠物或者小型动物；livestock属于物，是需要交通工具来运输的大型动物，比如牛、马等;prop属于物，戏用道具;special_effects属于事(过程)，是需要在现场完成的烟火、爆破、撞车等特效，镜头块切这类剪辑效果或慢镜头这类摄影技巧不包含在special_effects中",
                                     enum = [
                                     "cast",
-                                    "stunt",
-                                    "extra",
+                                    "stunts",
+                                    "extra_silent",
+                                    "extra_atmosphere",
                                     "costume",
+                                    "makeup",
                                     "location",
-                                    "set",
+                                    "set_dressing",
                                     "vehicle",
                                     "animal",
-                                    "prop"
+                                    "livestock",
+                                    "prop",
+                                    "special_effects"
                                     ],
+                                ),
+                                "visual_effects_type": types.Schema(
+                                    type = types.Type.STRING,
+                                    description = "资产所对应的镜头是否需要后期视效(VFX)，digital_envrionment对应location或set_dressing,是数字环境，剧本中通常用魔幻、奇幻、超现实这样的关键词来描这类场景；digital_cast对应cast，是有姓名、性格、台词和故事线的数字角色；digital_double对应cast或stunts,是真人演员的数字替身，坠崖、车祸等对演员生命安全有威胁的戏份需要后期视效用演员的数字替身来完成；digital_creature对应animal或livestock,是数字生物，通常是现实世界中不存在的动物；set_extension对应location或set_dressing，是场景的数字延伸，如窗户外的特殊环境或街道环境的延伸；screen_comp对应prop，是电视机、电脑或手机屏幕内容的数字合成；sky_replacement对应location,是霞光、极光、极昼、极夜、日落、日出等特殊条件下的天空替换；digital_weather对应location,是台风、暴雨、暴雪、闪电等数字气象效果；digital_makeup对应makeup,是伤痕、血迹、假肢、残肢等数字特效化妆；digital_crowds对应extra_atmosphere或livestock,是数字集群，如体育场看台上数以万计的观众、草原上几千匹奔腾的骏马、铺天盖地的蝴蝶群等；day_for_night对应location,是通过后期视效将日景转为夜景；digital_prop对应prop,是数字道具，in_vehicle_comp对应vehicle，是交通工具窗户外移动背景合成，通常是拍摄演员在静止不动的交通工具内部，如开车、开飞机或开船；simulation_fx对应stunts,是数字弹道、爆破、火焰、浓烟、坍塌、破碎等效果",
+                                    enum = [
+                                    "digital_envrionment",
+                                    "digital_cast",
+                                    "digital_double",
+                                    "digital_creature",
+                                    "set_extension",
+                                    "screen_comp",
+                                    "sky_replacement",
+                                    "digital_weather",
+                                    "digital_makeup",
+                                    "digital_crowds",
+                                    "day_for_night",
+                                    "digital_prop",
+                                    "in_vehicle_comp",
+                                    "simulation_fx"
+                                    ],
+                                ),
+                                "visual_effects_description": types.Schema(
+                                    type=Type.STRING,
+                                    description="visua_effects内容阐述",
                                 ),
                                 "asset_id": types.Schema(
                                     type=Type.STRING,
@@ -765,7 +793,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
             df_assets_list.at[i, 'estimated_asset_duration'] = round(asset_pages * 1.2, 2)
 
         # Save the assets list to an Excel file
-        new_cols = ['asset_type', 'asset_id', 'name', 'scene_ids', 'asset_pages', 'estimated_asset_duration', 'ref_url']
+        new_cols = ['asset_type', 'asset_id', 'name', "visual_effects_type", 'visual_effects_description', 'scene_ids', 'asset_pages', 'estimated_asset_duration', 'ref_url']
         df_assets_list = df_assets_list.reindex(columns=new_cols)
         assets_breaddown_file_path = TmpDir().path()+ f"{screenplay_title}_assets_breakdown.xlsx"
         df_assets_list.to_excel(
@@ -804,14 +832,18 @@ class GoogleGeminiBot(Bot,GeminiVision):
         asset_types = set([asset['asset_type'] for asset in assets_list])
         colormap = {
             'cast': None,
-            'extra': 'darkcyan',
-            'stunt': 'darkgrey',
+            'extra_silent': 'darkcyan',
+            'extra_atmosphere': 'darkblue',
+            'stunts': 'darkgrey',
             'costume': None,
+            'makeup': None,
             'location': 'darkgreen',
-            'set': 'darkred',
+            'set_dressing': 'darkred',
             'vehicle': 'darkgrey',
             'animal': 'darkgoldenrod',
-            'prop': 'darkorange'
+            'livestock': None,
+            'prop': 'darkorange',
+            'special_effects': None
         }
         for asset_type in asset_types:
             figsize = (30, 5)

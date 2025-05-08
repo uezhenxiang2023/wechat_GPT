@@ -246,10 +246,19 @@ class TelegramChannel(ChatChannel):
     # 统一的发送函数，每个Channel自行实现，根据reply的type字段发送不同类型的消息
     def send(self, reply: Reply, context: Context):
         receiver = context["receiver"]
+        error_response = "网络有点小烦忙，请过几秒再试一试，给您带来不便，大超子深表歉意"
         if reply.type == ReplyType.TEXT:
-            self.send_text(reply.content, toUserName=receiver)
-            logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply, receiver))
-        elif reply.type == ReplyType.ERROR or reply.type == ReplyType.INFO:
+            try:
+                self.send_text(reply.content, toUserName=receiver)
+                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply, receiver))
+            except Exception as e:
+                logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, e))
+                self.send_text(error_response, toUserName=receiver)
+                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(error_response, receiver))
+        elif reply.type == ReplyType.ERROR:
+            self.send_text(error_response, toUserName=receiver)
+            logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(error_response, receiver))
+        elif reply.type == ReplyType.INFO:
             self.send_text(escape(reply.content), toUserName=receiver)
             logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply, receiver))
         elif reply.type == ReplyType.VOICE:
