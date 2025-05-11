@@ -1,63 +1,95 @@
 from bridge.context import ContextType
 from channel.chat_message import ChatMessage
-import json
-import requests
+import json, re
 from common.log import logger
 from common.tmp_dir import TmpDir
-from common import utils
+
+def get_file(file_id):
+        """
+        Use this method to get basic information about a file and prepare it for downloading.
+        """
+
+def get_file_name(file):
+    file_path = file.file_path
+    file_name_index = file_path.rfind("/")
+    file_name = file_path[file_name_index+1:]
+    return file_name
 
 
 class FeishuMessage(ChatMessage):
-    def __init__(self, event: dict, is_group=False, access_token=None):
+    def __init__(self, event: dict, is_group=False):
         super().__init__(event)
-        msg = event.get("message")
-        sender = event.get("sender")
-        self.access_token = access_token
-        self.msg_id = msg.get("message_id")
-        self.create_time = msg.get("create_time")
+        self.msg_id = event.message.message_id
+        self.create_time = event.message.create_time
         self.is_group = is_group
-        msg_type = msg.get("message_type")
+        self.from_user_id = event.sender.sender_id.open_id
+        self.to_user_id = event.message.chat_id
+        self.other_user_id = self.to_user_id
 
-        if msg_type == "text":
+        if event.message.message_type == 'text':
             self.ctype = ContextType.TEXT
-            content = json.loads(msg.get('content'))
-            self.content = content.get("text").strip()
-        elif msg_type == "file":
+            self.content = json.loads(event.message.content)["text"]
+        elif event.message["voice"]:
+            self.ctype = ContextType.VOICE
+            self.content = TmpDir().path() + event.message["FileName"]  # content直接存临时目录路径
+            self._prepare_fn = lambda: event.message.download(self.content)
+        elif event.message["photo"]:
+            self.ctype = ContextType.IMAGE
+            file_id = event.message.photo[-1].file_id
+            file, error = get_file(file_id)
+            if file:
+                self.content = TmpDir().path() + get_file_name(file)  # content直接存临时目录路径
+                self._prepare_fn = lambda: file.download(self.content)
+            if error:
+                error_reply = f"[Lark] fetch get_file() error '{error}' ,because <{file_id}> is larger than 20MB, can't be downloaded" 
+                logger.error(error_reply)
+                raise NotImplementedError(error_reply)
+        elif event.message["video"]:
+            self.ctype = ContextType.VIDEO
+            self.content = TmpDir().path() + event.message["FileName"]  # content直接存临时目录路径
+            self._prepare_fn = lambda: event.message.download(self.content)
+        elif event.message["NOTE"] and event.message["MsgType"] == 10000:
+            if is_group and ("加入群聊" in event.message["Content"] or "加入了群聊" in event.message["Content"]):
+                # 这里只能得到nickname， actual_user_id还是机器人的id
+                if "加入了群聊" in event.message["Content"]:
+                    self.ctype = ContextType.JOIN_GROUP
+                    self.content = event.message["Content"]
+                    self.actual_user_nickname = re.findall(r"\"(.*?)\"", event.message["Content"])[-1]
+                elif "加入群聊" in event.message["Content"]:
+                    self.ctype = ContextType.JOIN_GROUP
+                    self.content = event.message["Content"]
+                    self.actual_user_nickname = re.findall(r"\"(.*?)\"", event.message["Content"])[0]
+
+            elif is_group and ("移出了群聊" in event.message["Content"]):
+                self.ctype = ContextType.EXIT_GROUP
+                self.content = event.message["Content"]
+                self.actual_user_nickname = re.findall(r"\"(.*?)\"", event.message["Content"])[0]
+                    
+            elif "你已添加了" in event.message["Content"]:  #通过好友请求
+                self.ctype = ContextType.ACCEPT_FRIEND
+                self.content = event.message["Content"]
+            elif "拍了拍我" in event.message["Content"]:
+                self.ctype = ContextType.PATPAT
+                self.content = event.message["Content"]
+                if is_group:
+                    self.actual_user_nickname = re.findall(r"\"(.*?)\"", event.message["Content"])[0]
+            else:
+                raise NotImplementedError("Unsupported note message: " + event.message["Content"])
+        elif event.message["document"]:
             self.ctype = ContextType.FILE
-            content = json.loads(msg.get("content"))
-            file_key = content.get("file_key")
-            file_name = content.get("file_name")
+            file_id = event.message.document.file_id
+            file_name = event.message.document.file_name
+            file, error = get_file(file_id)
+            if file:
+                self.content = TmpDir().path() + file_name  # content直接存临时目录路径
+                self._prepare_fn = lambda: file.download(self.content)
+            elif error:
+                error_reply = f"[Lark] fetch get_file() error '{error}' ,because <{file_name}> is larger than 20MB, can't be downloaded" 
+                logger.error(error_reply)
+                raise NotImplementedError(error_reply)
+        elif 'https://' in event.message["text_html"]:
+            self.ctype = ContextType.SHARING
+            self.content = event.message["text_html"]
 
-            self.content = TmpDir().path() + file_key + "." + utils.get_path_suffix(file_name)
-
-            def _download_file():
-                # 如果响应状态码是200，则将响应内容写入本地文件
-                url = f"https://open.feishu.cn/open-apis/im/v1/messages/{self.msg_id}/resources/{file_key}"
-                headers = {
-                    "Authorization": "Bearer " + access_token,
-                }
-                params = {
-                    "type": "file"
-                }
-                response = requests.get(url=url, headers=headers, params=params)
-                if response.status_code == 200:
-                    with open(self.content, "wb") as f:
-                        f.write(response.content)
-                else:
-                    logger.info(f"[FeiShu] Failed to download file, key={file_key}, res={response.text}")
-            self._prepare_fn = _download_file
         else:
-            raise NotImplementedError("Unsupported message type: Type:{} ".format(msg_type))
-
-        self.from_user_id = sender.get("sender_id").get("open_id")
-        self.to_user_id = event.get("app_id")
-        if is_group:
-            # 群聊
-            self.other_user_id = msg.get("chat_id")
-            self.actual_user_id = self.from_user_id
-            self.content = self.content.replace("@_user_1", "").strip()
-            self.actual_user_nickname = ""
-        else:
-            # 私聊
-            self.other_user_id = self.from_user_id
-            self.actual_user_id = self.from_user_id
+            raise NotImplementedError("Unsupported message type: Type:{} MsgType:{}".format(event.message["Type"], event.message["MsgType"]))

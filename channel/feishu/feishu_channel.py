@@ -1,254 +1,278 @@
 """
 飞书通道接入
 
-@author Saboteur7
-@Date 2023/11/19
+@author uezhenxiang2023
+@Date 2025/05/11
 """
 
 # -*- coding=utf-8 -*-
-import uuid
+import io, json
+from flask import Flask 
 
 import requests
-import web
 from channel.feishu.feishu_message import FeishuMessage
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
 from common.singleton import singleton
 from config import conf
-from common.expired_dict import ExpiredDict
 from bridge.context import ContextType
-from channel.chat_channel import ChatChannel, check_prefix
-from common import utils
-import json
-import os
-
-URL_VERIFICATION = "url_verification"
+from channel.chat_channel import ChatChannel
+from channel.chat_message import ChatMessage
+import lark_oapi as lark
+from lark_oapi.api.im.v1 import *
+from lark_oapi.adapter.flask import *
+from channel.telegram.telegram_text_util import escape
 
 
 @singleton
 class FeiShuChanel(ChatChannel):
-    feishu_app_id = conf().get('feishu_app_id')
-    feishu_app_secret = conf().get('feishu_app_secret')
-    feishu_token = conf().get('feishu_token')
-
     def __init__(self):
         super().__init__()
-        # 历史消息id暂存，用于幂等控制
-        self.receivedMsgs = ExpiredDict(60 * 60 * 7.1)
-        logger.info("[FeiShu] app_id={}, app_secret={} verification_token={}".format(
-            self.feishu_app_id, self.feishu_app_secret, self.feishu_token))
-        # 无需群校验和前缀
-        conf()["group_name_white_list"] = ["ALL_GROUP"]
-        conf()["single_chat_prefix"] = [""]
-
-    def startup(self):
-        urls = (
-            '/', 'channel.feishu.feishu_channel.FeishuController'
+        self.app_id = conf().get('feishu_app_id')
+        self.app_secret = conf().get('feishu_app_secret')
+        self.encrypt_key = conf().get('feishu_encrypt_key')
+        self.verification_token = conf().get('feishu_verify_token')
+        self.websocket = conf().get('feishu_websocket')
+        self.CLIENT_ENCRYPT_KEY = "" if self.websocket is True else self.encrypt_key
+        self.CLIENT_VERIFICATION_TOKEN = "" if self.websocket is True else self.verification_token
+        # 初始化 Flask app
+        self.app = Flask(__name__)
+        # 注册路由
+        self.app.route("/", methods=["POST"])(self.handle_webhook_event)
+        self.webhook_port = conf().get('feishu_webhook_port')
+        # Register event handler.
+        self.event_handler = (
+            lark.EventDispatcherHandler.builder(self.CLIENT_ENCRYPT_KEY, self.CLIENT_VERIFICATION_TOKEN)
+            .register_p2_im_message_receive_v1(self.do_p2_im_message_receive_v1)
+            .build()
         )
-        app = web.application(urls, globals(), autoreload=False)
-        port = conf().get("feishu_port", 9891)
-        web.httpserver.runsimple(app.wsgifunc(), ("0.0.0.0", port))
+        # Create LarkClient object for requesting OpenAPI, and create LarkWSClient object for receiving events using long connection.
+        self.client = lark.Client.builder().app_id(self.app_id).app_secret(self.app_secret).build()
+        self.wsClient = lark.ws.Client(
+            self.app_id,
+            self.app_secret,
+            event_handler=self.event_handler,
+            log_level=lark.LogLevel.DEBUG,
+        )
+    
+    # Register event handler to handle received messages.
+    # https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/events/receive
+    def do_p2_im_message_receive_v1(self, data: P2ImMessageReceiveV1) -> None:
+        if data.event.message.chat_type == "p2p":
+            self.handler_single_msg(data.event)
 
-    def send(self, reply: Reply, context: Context):
-        msg = context.get("msg")
-        is_group = context["isgroup"]
-        if msg:
-            access_token = msg.access_token
-        else:
-            access_token = self.fetch_access_token()
-        headers = {
-            "Authorization": "Bearer " + access_token,
-            "Content-Type": "application/json",
-        }
-        msg_type = "text"
-        logger.info(f"[FeiShu] start send reply message, type={context.type}, content={reply.content}")
-        reply_content = reply.content
-        content_key = "text"
-        if reply.type == ReplyType.IMAGE_URL:
-            # 图片上传
-            reply_content = self._upload_image_url(reply.content, access_token)
-            if not reply_content:
-                logger.warning("[FeiShu] upload file failed")
-                return
-            msg_type = "image"
-            content_key = "image_key"
-        if is_group:
-            # 群聊中直接回复
-            url = f"https://open.feishu.cn/open-apis/im/v1/messages/{msg.msg_id}/reply"
-            data = {
-                "msg_type": msg_type,
-                "content": json.dumps({content_key: reply_content})
-            }
-            res = requests.post(url=url, headers=headers, json=data, timeout=(5, 10))
-        else:
-            url = "https://open.feishu.cn/open-apis/im/v1/messages"
-            params = {"receive_id_type": context.get("receive_id_type") or "open_id"}
-            data = {
-                "receive_id": context.get("receiver"),
-                "msg_type": msg_type,
-                "content": json.dumps({content_key: reply_content})
-            }
-            res = requests.post(url=url, headers=headers, params=params, json=data, timeout=(5, 10))
-        res = res.json()
-        if res.get("code") == 0:
-            logger.info(f"[FeiShu] send message success")
-        else:
-            logger.error(f"[FeiShu] send message failed, code={res.get('code')}, msg={res.get('msg')}")
-
-
-    def fetch_access_token(self) -> str:
-        url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal/"
-        headers = {
-            "Content-Type": "application/json"
-        }
-        req_body = {
-            "app_id": self.feishu_app_id,
-            "app_secret": self.feishu_app_secret
-        }
-        data = bytes(json.dumps(req_body), encoding='utf8')
-        response = requests.post(url=url, data=data, headers=headers)
-        if response.status_code == 200:
-            res = response.json()
-            if res.get("code") != 0:
-                logger.error(f"[FeiShu] get tenant_access_token error, code={res.get('code')}, msg={res.get('msg')}")
-                return ""
-            else:
-                return res.get("tenant_access_token")
-        else:
-            logger.error(f"[FeiShu] fetch token error, res={response}")
-
-
-    def _upload_image_url(self, img_url, access_token):
-        logger.debug(f"[WX] start download image, img_url={img_url}")
-        response = requests.get(img_url)
-        suffix = utils.get_path_suffix(img_url)
-        temp_name = str(uuid.uuid4()) + "." + suffix
-        if response.status_code == 200:
-            # 将图片内容保存为临时文件
-            with open(temp_name, "wb") as file:
-                file.write(response.content)
-
-        # upload
-        upload_url = "https://open.feishu.cn/open-apis/im/v1/images"
-        data = {
-            'image_type': 'message'
-        }
-        headers = {
-            'Authorization': f'Bearer {access_token}',
-        }
-        with open(temp_name, "rb") as file:
-            upload_response = requests.post(upload_url, files={"image": file}, data=data, headers=headers)
-            logger.info(f"[FeiShu] upload file, res={upload_response.content}")
-            os.remove(temp_name)
-            return upload_response.json().get("data").get("image_key")
-
-
-
-class FeishuController:
-    # 类常量
-    FAILED_MSG = '{"success": false}'
-    SUCCESS_MSG = '{"success": true}'
-    MESSAGE_RECEIVE_TYPE = "im.message.receive_v1"
-
-    def GET(self):
-        return "Feishu service start success!"
-
-    def POST(self):
-        try:
-            channel = FeiShuChanel()
-
-            request = json.loads(web.data().decode("utf-8"))
-            logger.debug(f"[FeiShu] receive request: {request}")
-
-            # 1.事件订阅回调验证
-            if request.get("type") == URL_VERIFICATION:
-                varify_res = {"challenge": request.get("challenge")}
-                return json.dumps(varify_res)
-
-            # 2.消息接收处理
-            # token 校验
-            header = request.get("header")
-            if not header or header.get("token") != channel.feishu_token:
-                return self.FAILED_MSG
-
-            # 处理消息事件
-            event = request.get("event")
-            if header.get("event_type") == self.MESSAGE_RECEIVE_TYPE and event:
-                if not event.get("message") or not event.get("sender"):
-                    logger.warning(f"[FeiShu] invalid message, msg={request}")
-                    return self.FAILED_MSG
-                msg = event.get("message")
-
-                # 幂等判断
-                if channel.receivedMsgs.get(msg.get("message_id")):
-                    logger.warning(f"[FeiShu] repeat msg filtered, event_id={header.get('event_id')}")
-                    return self.SUCCESS_MSG
-                channel.receivedMsgs[msg.get("message_id")] = True
-
-                is_group = False
-                chat_type = msg.get("chat_type")
-                if chat_type == "group":
-                    if not msg.get("mentions") and msg.get("message_type") == "text":
-                        # 群聊中未@不响应
-                        return self.SUCCESS_MSG
-                    if msg.get("mentions")[0].get("name") != conf().get("feishu_bot_name") and msg.get("message_type") == "text":
-                        # 不是@机器人，不响应
-                        return self.SUCCESS_MSG
-                    # 群聊
-                    is_group = True
-                    receive_id_type = "chat_id"
-                elif chat_type == "p2p":
-                    receive_id_type = "open_id"
-                else:
-                    logger.warning("[FeiShu] message ignore")
-                    return self.SUCCESS_MSG
-                # 构造飞书消息对象
-                feishu_msg = FeishuMessage(event, is_group=is_group, access_token=channel.fetch_access_token())
-                if not feishu_msg:
-                    return self.SUCCESS_MSG
-
-                context = self._compose_context(
-                    feishu_msg.ctype,
-                    feishu_msg.content,
-                    isgroup=is_group,
-                    msg=feishu_msg,
-                    receive_id_type=receive_id_type,
-                    no_need_at=True
+        elif data.event.message.chat_type == "group":
+            self.handler_group_msg(data.event)
+            """request: ReplyMessageRequest = (
+                ReplyMessageRequest.builder()
+                .message_id(data.event.message.message_id)
+                .request_body(
+                    ReplyMessageRequestBody.builder()
+                    .content(content)
+                    .msg_type("text")
+                    .build()
                 )
-                if context:
-                    channel.produce(context)
-                logger.info(f"[FeiShu] query={feishu_msg.content}, type={feishu_msg.ctype}")
-            return self.SUCCESS_MSG
-
+                .build()
+            )
+            # Reply to messages using reply OpenAPI
+            # https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/reply
+            response: ReplyMessageResponse = self.client.im.v1.message.reply(request)
+            if not response.success():
+                raise Exception(
+                    f"client.im.v1.message.reply failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}"
+                )"""
+            
+    def handle_webhook_event(self):
+        """Webhook event handler"""
+        try:
+            # 获取请求数据
+            event_data = parse_req()
+            resp = self.event_handler.do(event_data)
+            return parse_resp(resp)
         except Exception as e:
-            logger.error(e)
-            return self.FAILED_MSG
+            logger.error(f"[Lark]Error handling webhook event: {str(e)}")
+            return {"[Lark]error": str(e)}, 500
+        
+    def main(self):
+        if self.websocket is True:
+            # 使用websocket长链接接收飞书事件.
+            self.wsClient.start()
+        else:
+            # 使用webhook模式，通过本地服务器接收飞书事件
+            logger.info(f"Starting webhook server on port {self.webhook_port}")
+            self.app.run(
+                host='0.0.0.0',  # 允许外部访问
+                port=self.webhook_port,
+                debug=False  # 生产环境建议设为False
+            )
+    def startup(self):
+        self.main()
 
-    def _compose_context(self, ctype: ContextType, content, **kwargs):
-        context = Context(ctype, content)
-        context.kwargs = kwargs
-        if "origin_ctype" not in context:
-            context["origin_ctype"] = ctype
+    def handler_single_msg(self, msg):
+        try:
+            cmsg = FeishuMessage(msg, False)
+        except NotImplementedError as e:
+            logger.debug("[Lark]single message {} skipped: {}".format(msg["MsgId"], e))
+            error_reply = e
+            self.send_text(error_reply, msg.chat_id)
+            return None
+        self.handle_single(cmsg)
+        return None
+    
+    def handler_group_msg(self, msg):
+        try:
+            cmsg = FeishuMessage(msg, True)
+        except NotImplementedError as e:
+            logger.debug("[Lark]group message {} skipped: {}".format(msg["MsgId"], e))
+            return None
+        self.handle_group(cmsg)
+        return None
+    
+    def handle_single(self, cmsg: ChatMessage):
+        # filter system message
+        if cmsg.other_user_id in ["weixin"]:
+            return
+        if cmsg.ctype == ContextType.VOICE:
+            if conf().get("speech_recognition") != True:
+                return
+            logger.debug("[Lark]receive voice msg: {}".format(cmsg.content))
+        elif cmsg.ctype == ContextType.IMAGE:
+            logger.debug("[Lark]receive image msg: {}".format(cmsg.content))
+        elif cmsg.ctype == ContextType.VIDEO:
+            logger.debug("[Lark]receive video msg: {}".format(cmsg.content))
+        elif cmsg.ctype == ContextType.SHARING:
+            logger.debug("[Lark]receive url msg: {}".format(cmsg.content))
+        elif cmsg.ctype == ContextType.PATPAT:
+            logger.debug("[Lark]receive patpat msg: {}".format(cmsg.content))
+        elif cmsg.ctype == ContextType.FILE:
+            logger.debug("[Lark]receive file msg: {}".format(cmsg.content))
+        elif cmsg.ctype == ContextType.TEXT:
+            logger.debug("[Lark]receive text msg: {}, cmsg={}".format(cmsg.content, cmsg))
+        else:
+            logger.debug("[Lark]receive msg: {}, cmsg={}".format(cmsg.content, cmsg))
+        context = self._compose_context(cmsg.ctype, cmsg.content, isgroup=False, msg=cmsg)
+        if context:
+            self.produce(context)
+    
+    def handle_group(self, cmsg: ChatMessage):
+        if cmsg.ctype == ContextType.VOICE:
+            if conf().get("group_speech_recognition") != True:
+                return
+            logger.debug("[Lark]receive voice for group msg: {}".format(cmsg.content))
+        elif cmsg.ctype == ContextType.IMAGE:
+            logger.debug("[Lark]receive image for group msg: {}".format(cmsg.content))
+        elif cmsg.ctype in [ContextType.JOIN_GROUP, ContextType.PATPAT, ContextType.ACCEPT_FRIEND, ContextType.EXIT_GROUP]:
+            logger.debug("[Lark]receive note msg: {}".format(cmsg.content))
+        elif cmsg.ctype == ContextType.TEXT:
+            logger.debug("[Lark]receive group msg: {}, cmsg={}".format(cmsg.content, cmsg))
+            pass
+        elif cmsg.ctype == ContextType.FILE:
+            logger.debug(f"[Lark]receive attachment msg, file_name={cmsg.content}")
+        else:
+            logger.debug("[Lark]receive group msg: {}".format(cmsg.content))
+        context = self._compose_context(cmsg.ctype, cmsg.content, isgroup=True, msg=cmsg)
+        if context:
+            self.produce(context)
 
-        cmsg = context["msg"]
-        context["session_id"] = cmsg.from_user_id
-        context["receiver"] = cmsg.other_user_id
+    # 统一的发送函数，每个Channel自行实现，根据reply的type字段发送不同类型的消息
+    def send(self, reply: Reply, context: Context):
+        receiver = context["receiver"]
+        error_response = "网络有点小烦忙，请过几秒再试一试，给您带来不便，大超子深表歉意"
+        if reply.type == ReplyType.TEXT:
+            try:
+                self.send_text(reply.content, toUserName=receiver)
+                logger.info("[Lark] sendMsg={}, receiver={}".format(reply, receiver))
+            except Exception as e:
+                logger.error("[Lark] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, e))
+                self.send_text(error_response, toUserName=receiver)
+                logger.info("[Lark] sendMsg={}, receiver={}".format(error_response, receiver))
+        elif reply.type == ReplyType.ERROR:
+            self.send_text(error_response, toUserName=receiver)
+            logger.info("[Lark] sendMsg={}, receiver={}".format(error_response, receiver))
+        elif reply.type == ReplyType.INFO:
+            self.send_text(escape(reply.content), toUserName=receiver)
+            logger.info("[Lark] sendMsg={}, receiver={}".format(reply, receiver))
+        elif reply.type == ReplyType.VOICE:
+            self.send_file(reply.content, toUserName=receiver)
+            logger.info("[Lark] sendFile={}, receiver={}".format(reply.content, receiver))
+        elif reply.type == ReplyType.IMAGE_URL:  # 从网络下载图片
+            img_url = reply.content
+            logger.debug(f"[Lark] start download image, img_url={img_url}")
+            pic_res = requests.get(img_url, stream=True)
+            image_storage = io.BytesIO()
+            size = 0
+            for block in pic_res.iter_content(1024):
+                size += len(block)
+                image_storage.write(block)
+            logger.info(f"[Lark] download image success, size={size}, img_url={img_url}")
+            image_storage.seek(0)
+            self.send_image(image_storage, toUserName=receiver)
+            logger.info("[Lark] sendImage url={}, receiver={}".format(img_url, receiver))
+        elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
+            image_storage = reply.content
+            image_storage.seek(0)
+            self.send_image(image_storage, toUserName=receiver)
+            logger.info("[Lark] sendImage, receiver={}".format(receiver))
+        elif reply.type == ReplyType.FILE:  # 新增文件回复类型
+            file_storage = reply.content
+            self.send_file(file_storage, toUserName=receiver)
+            logger.info("[Lark] sendFile, receiver={}".format(receiver))
+        elif reply.type == ReplyType.VIDEO:  # 新增视频回复类型
+            video_storage = reply.content
+            self.send_video(video_storage, toUserName=receiver)
+            logger.info("[Lark] sendFile, receiver={}".format(receiver))
+        elif reply.type == ReplyType.VIDEO_URL:  # 新增视频URL回复类型
+            video_url = reply.content
+            logger.debug(f"[Lark] start download video, video_url={video_url}")
+            video_res = requests.get(video_url, stream=True)
+            video_storage = io.BytesIO()
+            size = 0
+            for block in video_res.iter_content(1024):
+                size += len(block)
+                video_storage.write(block)
+            logger.info(f"[Lark] download video success, size={size}, video_url={video_url}")
+            video_storage.seek(0)
+            self.send_video(video_storage, toUserName=receiver)
+            logger.info("[Lark] sendVideo url={}, receiver={}".format(video_url, receiver))
 
-        if ctype == ContextType.TEXT:
-            # 1.文本请求
-            # 图片生成处理
-            img_match_prefix = check_prefix(content, conf().get("image_create_prefix"))
-            if img_match_prefix:
-                content = content.replace(img_match_prefix, "", 1)
-                context.type = ContextType.IMAGE_CREATE
-            else:
-                context.type = ContextType.TEXT
-            context.content = content.strip()
+    def send_text(self, reply_content, toUserName):
+        """
+        This function sends a response text message back to the user.
+        """
+        content = json.dumps(
+            {
+                "text": reply_content
+            }
+        )
+        request = (
+                CreateMessageRequest.builder()
+                .receive_id_type("chat_id")
+                .request_body(
+                    CreateMessageRequestBody.builder()
+                    .receive_id(toUserName)
+                    .msg_type("text")
+                    .content(content)
+                    .build()
+                )
+                .build()
+            )
+        # Use send OpenAPI to send messages
+        # https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/create
+        response = self.client.im.v1.chat.create(request)
 
-        elif context.type == ContextType.VOICE:
-            # 2.语音请求
-            if "desire_rtype" not in context and conf().get("voice_reply_voice"):
-                context["desire_rtype"] = ReplyType.VOICE
+        if not response.success():
+            raise Exception(
+                f"client.im.v1.chat.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}"
+            )
 
-        return context
+
+    def send_image(self, reply_content, toUserName):
+        """
+        This function sends a response image back to the user.
+        """
+
+    def send_file(self, reply_content, toUserName):
+        """
+        This function sends a response file back to the user.
+        """
