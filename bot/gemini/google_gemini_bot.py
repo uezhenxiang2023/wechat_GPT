@@ -27,7 +27,7 @@ from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
 from common.tmp_dir import TmpDir
-from common import const, memory
+from common import const, memory, tool_button
 from config import conf
 from bot.baidu.baidu_wenxin_session import BaiduWenxinSession
 from bot.gemini.google_genimi_vision import GeminiVision
@@ -420,12 +420,12 @@ class GoogleGeminiBot(Bot,GeminiVision):
                             filedata.append(query)
                             query = filedata
                         memory.USER_IMAGE_CACHE.pop(session_id)
-                    if TelegramChannel().searching is True:
+                    if tool_button.searching is True:
                         response = self.chat.send_message(query,config=self.search_config)
-                    elif TelegramChannel().searching is False:
-                        if TelegramChannel().imaging is True:
+                    elif tool_button.searching is False:
+                        if tool_button.imaging is True:
                             response = self.image_chat.send_message(query)
-                        elif TelegramChannel().imaging is False:
+                        elif tool_button.imaging is False:
                             response = self.chat.send_message(query)
 
                 elif self.model not in const.GEMINI_GENAI_SDK:
@@ -475,23 +475,18 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         continue
                     function_calling = False
 
-                if TelegramChannel().imaging is True:
-                    self.get_reply_images(context, response)
-                    return None
-                elif TelegramChannel().imaging is False:
-                    raw_reply_contents = self.get_reply_text(response)
-                    reply_text = escape(raw_reply_contents)
-
-                    # attach search sources from the Grounded response
-                    if response.candidates[0].grounding_metadata:
-                        grounding_metadata = response.candidates[0].grounding_metadata.grounding_chunks
-                        if grounding_metadata:
-                            inline_url = self.get_search_sources(response)
-                            reply_text = f'{reply_text}\n\n{inline_url}'
-
-                    self.sessions.session_reply(reply_text, session_id)
-                    logger.info(f"[{self.Model_ID}] reply={reply_text}")
-                    return Reply(ReplyType.TEXT, reply_text)
+                if tool_button.imaging is True:
+                    return Reply(ReplyType.IMAGE, response)
+                elif tool_button.imaging is False:
+                    # 响应中是否有网页链接
+                    grounding_metadata = response.candidates[0].grounding_metadata
+                    if grounding_metadata is None:
+                        return Reply(ReplyType.TEXT, response.text)
+                    elif grounding_metadata is not None:
+                        if grounding_metadata.grounding_chunks is None:
+                            return Reply(ReplyType.TEXT, response.text)
+                        else:
+                            return Reply(ReplyType.IMAGE_URL, response)
             else:
                 logger.warning(f"[{self.Model_ID}] Unsupported message type, type={context.type}")
                 return Reply(ReplyType.ERROR, f"[{self.Model_ID}] Unsupported message type, type={context.type}")
@@ -517,56 +512,6 @@ class GoogleGeminiBot(Bot,GeminiVision):
             }
         }
         return function_call_reply
-
-    def get_reply_text(self, response):
-        parts = response.candidates[0].content.parts
-        texts = ''
-        if parts is None:
-            finish_reason = response.candidates[0].finish_reason
-            print(f'{finish_reason=}')
-            return
-        for part in response.candidates[0].content.parts:
-            if part.text:
-                texts += part.text
-            elif part.executable_code:
-                continue
-        return texts
-    
-    def get_reply_images(self, context, response):
-        parts = response.candidates[0].content.parts
-        if parts is None:
-            finish_reason = response.candidates[0].finish_reason
-            print(f'{finish_reason=}')
-            return
-        for part in response.candidates[0].content.parts:
-            if part.text:
-                reply_text = escape(part.text)
-                TelegramChannel().send_text(reply_text, context["receiver"])
-                logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(part.text, context["receiver"]))
-            elif part.inline_data:
-                image = BytesIO(part.inline_data.data)
-                logger.info(f"{self.Model_ID} reply={image}")
-                image.seek(0)
-                TelegramChannel().send_image(image, context["receiver"])
-                logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(image, context["receiver"]))
-            elif part.executable_code:
-                continue
-        return None
-    
-    def get_search_sources(self, response):
-        """
-        Get search sources from the response Grounded with Google Search
-        """
-        sources = []
-        ground_chunks = response.candidates[0].grounding_metadata.grounding_chunks
-        for i, ground_chunk in enumerate(ground_chunks):
-            title = ground_chunk.web.title
-            title = escape(title)
-            uri = ground_chunk.web.uri
-            source = f'{i+1}\.[{title}]({uri})'
-            sources.append(source)
-        inline_url = '\n'.join(sources)
-        return inline_url
 
     def _convert_to_gemini_1_messages(self, messages: list):
         res = []
@@ -733,12 +678,6 @@ class GoogleGeminiBot(Bot,GeminiVision):
             index=False
         )
         logger.info(f"[TELEGRAMBOT_{self.Model_ID}] {file_path} is saved")
-
-        # Send the file to the user
-        """file = open(file_path, 'rb')
-        TelegramChannel().send_file(file, context["receiver"])
-        file.close()
-        logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, file_path, context["receiver"]))"""
 
         api_response = {
             'total_pages':total_pages,

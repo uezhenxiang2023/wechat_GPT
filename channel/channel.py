@@ -19,7 +19,7 @@ class Channel(object):
     def handle_text(self, msg):
         """
         process received msg
-        :param msg: message object
+        - msg: message object
         """
         raise NotImplementedError
 
@@ -27,9 +27,9 @@ class Channel(object):
     def send(self, reply: Reply, context: Context):
         """
         send message to user
-        :param msg: message content
-        :param receiver: receiver channel account
-        :return:
+        - reply: message content
+        - context: receiver channel account
+        - return:
         """
         raise NotImplementedError
 

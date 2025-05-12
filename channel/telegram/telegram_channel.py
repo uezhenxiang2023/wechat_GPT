@@ -1,21 +1,21 @@
 import io
 import requests
 import logging
-import json
-import time
-import re
-from common.log import logger
+
+from io import BytesIO
 
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
 from channel.chat_channel import ChatChannel
 from channel.chat_message import ChatMessage
 from channel.telegram.telegram_message import TelegramMessage
+from common import tool_button
+from common.log import logger
 from common.singleton import singleton
 from config import conf
 from channel.telegram.telegram_text_util import escape
 
-from telegram import Update, ForceReply, InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
 
 @singleton
@@ -25,10 +25,6 @@ class TelegramChannel(ChatChannel):
         self.logger = logging.getLogger(__name__)
         self.bot_token = conf().get("telegram_bot_token")
         self.proxy_url = conf().get("telegram_proxy_url")
-
-        # Store bot tool status
-        self.searching = False
-        self.imaging = False
 
         # Pre-assign menu text
         self.FIRST_MENU = "<b>Menu 1</b>\n\nA beautiful menu with a shiny inline button."
@@ -54,8 +50,8 @@ class TelegramChannel(ChatChannel):
         This function would be added to the dispatcher as a handler for messages coming from the Bot API
         """
 
-        # Print to console
-        print(f'{update.message.from_user.first_name} wrote {update.message.text}\n[search] is {self.searching}')
+        # Print tool_button stasus to console
+        print(f'{update.message.from_user.first_name} wrote {update.message.text}\n[search] is {tool_button.searching}\n[image] is {tool_button.imaging}')
 
         self.handler_single_msg(update.message)
 
@@ -64,13 +60,13 @@ class TelegramChannel(ChatChannel):
         This function handles the /search command
         """
 
-        if self.searching:
+        if tool_button.searching:
             text = "联网功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
-        elif not self.searching:
+        elif not tool_button.searching:
             text = "联网搜索功能已开启，需要我帮你查询点啥？"
 
         text = escape(text)
-        self.searching = not self.searching
+        tool_button.searching = not tool_button.searching
         
         """title = 'mykhel-AC.com'
         #title = self.escape(title)
@@ -93,13 +89,13 @@ class TelegramChannel(ChatChannel):
         This function handles /image command
         """
 
-        if self.imaging:
+        if tool_button.imaging:
             text = "图片生成功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
-        elif not self.imaging:
-            text = "图片生成功能已开启，需要我帮你做点啥图？"
+        elif not tool_button.imaging:
+            text = "图片生成功能已开启，需要我帮你弄点啥图？"
 
         text = escape(text)
-        self.imaging = not self.imaging
+        tool_button.imaging = not tool_button.imaging
 
         context.bot.send_message(
             update.message.chat_id,
@@ -249,8 +245,8 @@ class TelegramChannel(ChatChannel):
         error_response = "网络有点小烦忙，请过几秒再试一试，给您带来不便，大超子深表歉意"
         if reply.type == ReplyType.TEXT:
             try:
-                self.send_text(reply.content, toUserName=receiver)
-                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply, receiver))
+                self.send_text(escape(reply.content), receiver)
+                logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(reply, receiver))
             except Exception as e:
                 logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, e))
                 self.send_text(error_response, toUserName=receiver)
@@ -264,24 +260,59 @@ class TelegramChannel(ChatChannel):
         elif reply.type == ReplyType.VOICE:
             self.send_file(reply.content, toUserName=receiver)
             logger.info("[TELEGRAMBOT] sendFile={}, receiver={}".format(reply.content, receiver))
-        elif reply.type == ReplyType.IMAGE_URL:  # 从网络下载图片
-            img_url = reply.content
-            logger.debug(f"[TELEGRAMBOT] start download image, img_url={img_url}")
-            pic_res = requests.get(img_url, stream=True)
-            image_storage = io.BytesIO()
-            size = 0
-            for block in pic_res.iter_content(1024):
-                size += len(block)
-                image_storage.write(block)
-            logger.info(f"[TELEGRAMBOT] download image success, size={size}, img_url={img_url}")
-            image_storage.seek(0)
-            self.send_image(image_storage, toUserName=receiver)
-            logger.info("[TELEGRAMBOT] sendImage url={}, receiver={}".format(img_url, receiver))
+        elif reply.type == ReplyType.IMAGE_URL:  # 从网络下载图片、获取网址
+            response = reply.content
+            if not isinstance(response, str):
+                #获取网址
+                parts = response.candidates[0].content.parts
+                grouding_metadata = response.candidates[0].grounding_metadata
+                if parts is None:
+                    finish_reason = response.candidates[0].finish_reason
+                    logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
+                    self.send_text(error_response, toUserName=receiver)
+                    logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(error_response, receiver))
+                elif parts is not None:
+                    reply_text = escape("\n".join(part.text for part in parts))
+                if grouding_metadata is not None:
+                    inline_url = self.get_search_sources(grouding_metadata)
+                reply_content = reply_text + "\n\n" + inline_url
+                self.send_text(reply_content, receiver)
+                logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(reply_content, receiver))
+
+            else:
+                # 下载图片
+                img_url = reply.content
+                logger.debug(f"[TELEGRAMBOT] start download image, img_url={img_url}")
+                pic_res = requests.get(img_url, stream=True)
+                image_storage = io.BytesIO()
+                size = 0
+                for block in pic_res.iter_content(1024):
+                    size += len(block)
+                    image_storage.write(block)
+                logger.info(f"[TELEGRAMBOT] download image success, size={size}, img_url={img_url}")
+                image_storage.seek(0)
+                self.send_image(image_storage, toUserName=receiver)
+                logger.info("[TELEGRAMBOT] sendImage url={}, receiver={}".format(img_url, receiver))
         elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
-            image_storage = reply.content
-            image_storage.seek(0)
-            self.send_image(image_storage, toUserName=receiver)
-            logger.info("[TELEGRAMBOT] sendImage, receiver={}".format(receiver))
+            response = reply.content
+            parts = response.candidates[0].content.parts
+            if parts is None:
+                finish_reason = response.candidates[0].finish_reason
+                logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
+                self.send_text(error_response, toUserName=receiver)
+                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(error_response, receiver))
+            else:
+                for part in parts:
+                    if part.text:
+                        reply_text = escape(part.text)
+                        self.send_text(reply_text, receiver)
+                        logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(part.text, receiver))
+                    elif part.inline_data:
+                        image = BytesIO(part.inline_data.data)
+                        logger.info(f"[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] reply={image}")
+                        image.seek(0)
+                        self.send_image(image, receiver)
+                        logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(image, receiver))
         elif reply.type == ReplyType.FILE:  # 新增文件回复类型
             file_storage = reply.content
             self.send_file(file_storage, toUserName=receiver)
@@ -311,6 +342,21 @@ class TelegramChannel(ChatChannel):
         updater = Updater(self.bot_token, request_kwargs={'proxy_url': self.proxy_url})
         bot = updater.bot
         bot.send_message(chat_id=toUserName, text=reply_content, parse_mode=ParseMode.MARKDOWN_V2)
+
+    def get_search_sources(self, grounding_metadata):
+        """
+        Get search sources from the response Grounded with Google Search
+        """
+        sources = []
+        ground_chunks = grounding_metadata.grounding_chunks
+        for i, ground_chunk in enumerate(ground_chunks):
+            title = ground_chunk.web.title
+            title = escape(title)
+            uri = ground_chunk.web.uri
+            source = f'{i+1}\.[{title}]({uri})'
+            sources.append(source)
+        inline_url = '\n'.join(sources)
+        return inline_url
 
     def send_image(self, reply_content, toUserName):
         """
