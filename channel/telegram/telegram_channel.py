@@ -9,7 +9,7 @@ from bridge.reply import Reply, ReplyType
 from channel.chat_channel import ChatChannel
 from channel.chat_message import ChatMessage
 from channel.telegram.telegram_message import TelegramMessage
-from common import tool_button
+from common import const, tool_button
 from common.log import logger
 from common.singleton import singleton
 from config import conf
@@ -242,18 +242,17 @@ class TelegramChannel(ChatChannel):
     # 统一的发送函数，每个Channel自行实现，根据reply的type字段发送不同类型的消息
     def send(self, reply: Reply, context: Context):
         receiver = context["receiver"]
-        error_response = "网络有点小烦忙，请过几秒再试一试，给您带来不便，大超子深表歉意"
         if reply.type == ReplyType.TEXT:
             try:
                 self.send_text(escape(reply.content), receiver)
                 logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(reply, receiver))
             except Exception as e:
                 logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, e))
-                self.send_text(error_response, toUserName=receiver)
-                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(error_response, receiver))
+                self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
+                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(const.ERROR_RESPONSE, receiver))
         elif reply.type == ReplyType.ERROR:
-            self.send_text(error_response, toUserName=receiver)
-            logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(error_response, receiver))
+            self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
+            logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(const.ERROR_RESPONSE, receiver))
         elif reply.type == ReplyType.INFO:
             self.send_text(escape(reply.content), toUserName=receiver)
             logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply, receiver))
@@ -269,8 +268,8 @@ class TelegramChannel(ChatChannel):
                 if parts is None:
                     finish_reason = response.candidates[0].finish_reason
                     logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
-                    self.send_text(error_response, toUserName=receiver)
-                    logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(error_response, receiver))
+                    self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
+                    logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(const.ERROR_RESPONSE, receiver))
                 elif parts is not None:
                     reply_text = escape("\n".join(part.text for part in parts))
                 if grouding_metadata is not None:
@@ -299,8 +298,8 @@ class TelegramChannel(ChatChannel):
             if parts is None:
                 finish_reason = response.candidates[0].finish_reason
                 logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
-                self.send_text(error_response, toUserName=receiver)
-                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(error_response, receiver))
+                self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
+                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(const.ERROR_RESPONSE, receiver))
             else:
                 for part in parts:
                     if part.text:
@@ -314,9 +313,14 @@ class TelegramChannel(ChatChannel):
                         self.send_image(image, receiver)
                         logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(image, receiver))
         elif reply.type == ReplyType.FILE:  # 新增文件回复类型
-            file_storage = reply.content
-            self.send_file(file_storage, toUserName=receiver)
-            logger.info("[TELEGRAMBOT] sendFile, receiver={}".format(receiver))
+            file_pathes = reply.content['function_response']['file_pathes']
+            reply_text = reply.content['reply_text']
+            for file_path in file_pathes:
+                with open(file_path, "rb") as f:
+                    self.send_file(f, toUserName=receiver)
+                logger.info("[TELEGRAMBOT] sendFile={}, receiver={}".format(file_path, receiver))
+            self.send_text(reply_text, receiver)
+            logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(reply_text, receiver))
         elif reply.type == ReplyType.VIDEO:  # 新增视频回复类型
             video_storage = reply.content
             self.send_video(video_storage, toUserName=receiver)

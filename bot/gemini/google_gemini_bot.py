@@ -12,28 +12,31 @@ import os
 import time
 import re
 import docx
-from io import BytesIO
-from pypdf import PdfReader
-from bot.bot import Bot
 import pandas as pd
 import matplotlib.pyplot as plt
+from pypdf import PdfReader
+from PIL import Image
+
 import google.generativeai as generativeai
 from google.ai.generativelanguage_v1beta.types import content
 from google import genai
 from google.genai import types
 from google.genai.types import Tool,GenerateContentConfig,GoogleSearch,Part,FunctionDeclaration,Type,FileData
+
+from config import conf
+from bot.bot import Bot
 from bot.session_manager import SessionManager
+from bot.baidu.baidu_wenxin_session import BaiduWenxinSession
+from bot.gemini.google_genimi_vision import GeminiVision
+
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
 from common.tmp_dir import TmpDir
 from common import const, memory, tool_button
-from config import conf
-from bot.baidu.baidu_wenxin_session import BaiduWenxinSession
-from bot.gemini.google_genimi_vision import GeminiVision
-from PIL import Image
-from channel.telegram.telegram_text_util import escape
+
 from channel.telegram.telegram_channel import TelegramChannel
+from plugins.bigchao.script_breakdown import screenplay_scenes_breakdown, screenplay_assets_breakdown
 
 
 # OpenAI对话模型API (可用)
@@ -60,8 +63,8 @@ class GoogleGeminiBot(Bot,GeminiVision):
         self.Model_ID = self.model.upper()
         self.system_prompt = conf().get("character_desc")
         self.function_call_dicts = {
-            "screenplay_scenes_breakdown": self.screenplay_scenes_breakdown,
-            "screenplay_assets_breakdown": self.screenplay_assets_breakdown
+            "screenplay_scenes_breakdown": screenplay_scenes_breakdown,
+            "screenplay_assets_breakdown": screenplay_assets_breakdown
         }
         # 复用文心的token计算方式
         self.sessions = SessionManager(BaiduWenxinSession, model=self.model or "gpt-3.5-turbo")
@@ -235,6 +238,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         type=Type.ARRAY,
                         items=types.Schema(
                             type=Type.OBJECT,
+                            required=['asset_id'],
                             properties={
                                 "asset_type": types.Schema(
                                     type = types.Type.STRING,
@@ -395,6 +399,10 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     gemini_messages = self._convert_to_gemini_15_messages(session.messages)
 
                 if self.model in const.GEMINI_GENAI_SDK:
+                    # 构建请求内容列表
+                    resquest_contents = []
+                    text = Part.from_text(text=query)
+                    resquest_contents.insert(0, text)
                     # 检查缓存中是否媒体文件
                     file_cache = memory.USER_IMAGE_CACHE.get(session_id)
                     if file_cache:
@@ -403,30 +411,30 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         if data_type == 'dict':
                             mime_type = first_data.get('mime_type')
                             if mime_type in ['application/docx', 'application/doc']:
-                                query = query + '\n' + first_data.get('data')
+                                file_content = Part.from_text(text=first_data.get('data'))
+                                resquest_contents.insert(0, file_content)
                             elif mime_type == 'application/pdf':
-                                file_content = [Part.from_bytes(**first_data)]
-                                file_content.append(query)
-                                query = file_content
+                                file_content = Part.from_bytes(**first_data)
+                                resquest_contents.insert(0, file_content) 
                         elif data_type in ['JpegImageFile','File']:
-                            file_cache['files'].append(query)
-                            query = file_cache['files']
+                            file_cache['files'].append(text)
+                            resquest_contents = file_cache['files']
                         elif data_type in ['FileData']:
                             filedata = [
                                 {
                                 'fileData': first_data
                             }
                             ]
-                            filedata.append(query)
-                            query = filedata
+                            filedata.append(text)
+                            resquest_contents = filedata
                         memory.USER_IMAGE_CACHE.pop(session_id)
                     if tool_button.searching is True:
-                        response = self.chat.send_message(query,config=self.search_config)
+                        response = self.chat.send_message(resquest_contents,config=self.search_config)
                     elif tool_button.searching is False:
                         if tool_button.imaging is True:
-                            response = self.image_chat.send_message(query)
+                            response = self.image_chat.send_message(resquest_contents)
                         elif tool_button.imaging is False:
-                            response = self.chat.send_message(query)
+                            response = self.chat.send_message(resquest_contents)
 
                 elif self.model not in const.GEMINI_GENAI_SDK:
                     chat_session = self.generative_model.start_chat(
@@ -434,55 +442,26 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         history=gemini_messages[:-1],
                         enable_automatic_function_calling=True
                     )
-                    response = chat_session.send_message(query)
-                
-                # 轮询模型响应结果中是否有函数调用
-                function_calling = True
-                while function_calling:
-                    if hasattr(response, 'function_calls'):
-                        function_calls = response.function_calls if response.function_calls is not None else []
-                    else:
-                        function_calls = response.parts if response.parts[0].function_call.args is not None else []
-                    function_response_parts = []
-                    for part in function_calls:
-                        function_call_reply = self.function_call_reply(part)
-                        fn_name = function_call_reply.get('functionCall').get('name')
-                        fn_args = function_call_reply.get('functionCall').get('args')
-                        # 将reply_text转换为字符串
-                        function_call_str = json.dumps(function_call_reply)
-                        # add function call to session as model/assistant message
-                        self.sessions.session_reply(function_call_str, session_id)
-                        # call function
-                        function_call = self.function_call_dicts.get(fn_name)
-                        # 从fn_args中获取function_call的参数
-                        function_response_part, function_response_str = function_call(context, fn_name, **fn_args)
-                        function_response_parts.extend(function_response_part)
-                        # add function response to session as user message
-                        self.sessions.session_query(function_response_str, session_id)
-
-                    if function_calls:
-                        # new turn of model request with function response
-                        if self.model in const.GEMINI_GENAI_SDK:
-                            response = self.chat.send_message(function_response_parts)
-                        else:
-                            gemini_messages = self._convert_to_gemini_15_messages(session.messages)
-                            chat_session = self.generative_model.start_chat(
-                            # 消息堆栈中的最新数据抛出去，留给send_message方法，从function_response_str中拿
-                                history=gemini_messages[:-1],
-                                enable_automatic_function_calling=True
-                            )
-                            response = chat_session.send_message(function_response_part)
-                        continue
-                    function_calling = False
+                    response = chat_session.send_message(resquest_contents)
+                response, function_response = self.function_call_polling_loop(response)
 
                 if tool_button.imaging is True:
                     return Reply(ReplyType.IMAGE, response)
                 elif tool_button.imaging is False:
-                    # 响应中是否有网页链接
-                    grounding_metadata = response.candidates[0].grounding_metadata
-                    if grounding_metadata is None:
-                        return Reply(ReplyType.TEXT, response.text)
-                    elif grounding_metadata is not None:
+                    # 是否开启联网搜索
+                    if tool_button.searching is False:
+                        # 是否监测到函数响应内容
+                        if function_response != []:
+                            response = {
+                                'reply_text':response.text,
+                                'function_response':function_response[0].function_response.response
+                            }
+                            return Reply(ReplyType.FILE, response)
+                        else:
+                            return Reply(ReplyType.TEXT, response.text)
+                    elif tool_button.searching is True:
+                        grounding_metadata = response.candidates[0].grounding_metadata
+                        # 响应中是否有网页链接
                         if grounding_metadata.grounding_chunks is None:
                             return Reply(ReplyType.TEXT, response.text)
                         else:
@@ -512,6 +491,50 @@ class GoogleGeminiBot(Bot,GeminiVision):
             }
         }
         return function_call_reply
+    
+    def function_call_polling_loop(self, response):
+        """轮询模型响应结果中的函数调用"""
+        function_calling = True
+        function_response = []
+        while function_calling:
+            if hasattr(response, 'function_calls'):
+                function_calls = response.function_calls if response.function_calls is not None else []
+            else:
+                # 为gemini 2.0以前的版本留出调用接口
+                function_calls = response.parts if response.parts[0].function_call.args is not None else []
+            function_response_parts = []
+            for part in function_calls:
+                function_call_reply = self.function_call_reply(part)
+                fn_name = function_call_reply.get('functionCall').get('name')
+                fn_args = function_call_reply.get('functionCall').get('args')
+                """# 将reply_text转换为字符串 --- gemini 2.0开始，chat方法自动维护消息历史，后续考虑暂停维护脚手架中的旧版gemini的消息历史
+                function_call_str = json.dumps(function_call_reply)
+                # add function call to session as model/assistant message
+                self.sessions.session_reply(function_call_str, session_id)"""
+                # call function
+                function_call = self.function_call_dicts.get(fn_name)
+                # 从fn_args中获取function_call的参数
+                function_response_part = function_call(fn_name, **fn_args)
+                function_response_parts.extend(function_response_part)
+                function_response = function_response_part
+                """# add function response to session as user message --- gemini 2.0开始，chat方法自动维护消息历史，后续考虑暂停维护脚手架中旧版gemini的消息历史
+                self.sessions.session_query(function_response_str, session_id)"""
+            if function_calls:
+                # new turn of model request with function response
+                if self.model in const.GEMINI_GENAI_SDK:
+                    response = self.chat.send_message(function_response_parts)
+                """else:
+                # gemini 2.0开始，chat方法自动维护消息历史，后续考虑暂停维护脚手架中旧版gemini的消息历史
+                    gemini_messages = self._convert_to_gemini_15_messages(session.messages)
+                    chat_session = self.generative_model.start_chat(
+                    # 消息堆栈中的最新数据抛出去，留给send_message方法，从function_response_str中拿
+                        history=gemini_messages[:-1],
+                        enable_automatic_function_calling=True
+                    )
+                    response = chat_session.send_message(function_response_part)"""
+                continue
+            function_calling = False
+        return response, function_response
 
     def _convert_to_gemini_1_messages(self, messages: list):
         res = []
@@ -592,7 +615,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         logger.info("[{}] file={} is downloaded locally".format(self.Model_ID, path))
         return None
 
-    def screenplay_scenes_breakdown(
+    """def screenplay_scenes_breakdown(
             self, 
             context, 
             fn_name,
@@ -841,7 +864,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         function_response_part.append(function_response_text)
         # 将function_response_part转换为字符串
         function_response_str = json.dumps(function_response_dic) + '\n' + function_response_comment 
-        return function_response_part, function_response_str
+        return function_response_part, function_response_str"""
     
     def gemini_15_media(self, query, context, session: BaiduWenxinSession):
         session_id = context.kwargs["session_id"]

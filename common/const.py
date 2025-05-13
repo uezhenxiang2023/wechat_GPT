@@ -108,3 +108,6 @@ DOCUMENT = ['pdf', 'doc', 'docx', 'plain']
 SPREADSHEET = ['csv', 'xml']
 PRESENTATION = ['ppt', 'pptx']
 APPLICATION = ['x-javascript', 'x-python']
+
+# custom service reply
+ERROR_RESPONSE = "网络有点小烦忙，请过几秒再试一试，给您带来不便，大超子深表歉意"
