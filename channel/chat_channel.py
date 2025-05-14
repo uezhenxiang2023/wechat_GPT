@@ -1,7 +1,10 @@
 import os
 import re
+import base64
 import threading
 import time
+import docx
+from PIL import Image
 from asyncio import CancelledError
 from concurrent.futures import Future, ThreadPoolExecutor
 
@@ -10,6 +13,7 @@ from bridge.reply import *
 from channel.channel import Channel
 from common.dequeue import Dequeue
 from common import memory, const
+from plugins.bigchao.script_breakdown import cache_media
 from plugins import *
 
 try:
@@ -182,6 +186,7 @@ class ChatChannel(Channel):
             )
         )
         reply = e_context["reply"]
+        model = conf().get('model')
         if not e_context.is_pass():
             logger.debug("[WX] ready to handle context: type={}, content={}".format(context.type, context.content))
             if context.type == ContextType.VOICE:  # 语音消息
@@ -211,38 +216,74 @@ class ChatChannel(Channel):
                         reply = self._generate_reply(new_context)
                     else:
                         return
-            elif (context.type == ContextType.TEXT or 
-                  context.type == ContextType.FILE or
-                  context.type == ContextType.VIDEO or 
-                  context.type == ContextType.IMAGE_CREATE or 
-                  (
-                    (context.type == ContextType.IMAGE or context.type == ContextType.VOICE) and 
-                    (conf().get('model') in const.CLAUDE_3_LIST or
-                     conf().get('model') in const.CLAUDE_35_LIST or
-                    conf().get('model') in const.GPT4_MULTIMODEL_LIST or
-                    conf().get('model') in const.GEMINI_1_PRO_LIST or
-                    conf().get('model') in const.GEMINI_15_FLASH_LIST or
-                    conf().get('model') in const.GEMINI_15_PRO_LIST or
-                    conf().get('model') in const.GEMINI_2_FLASH_LIST or
-                    conf().get('model') in const.GEMINI_25_PRO_LIST or
-                    conf().get('model') == const.OPEN_AI_ASSISTANT)
-                   )
-                  ):
-                # 文字、图片和文件消息
+            elif context.type == ContextType.TEXT:
+                # 文字消息
                 context["channel"] = e_context["channel"]
                 reply = super().build_reply_content(context.content, context)
-            elif context.type == ContextType.IMAGE:  # 图片消息，当前仅做下载保存到本地的逻辑
-                memory.USER_IMAGE_CACHE[context["session_id"]] = {
-                    "path": context.content,
-                    "msg": context.get("msg")
-                }
-            elif context.type == ContextType.SHARING and conf().get('model') in const.GEMINI_GENAI_SDK:  
+            elif context.type == ContextType.IMAGE:
+                if model in const.GEMINI_GENAI_SDK:  
+                    # 文件消息,目前只针对gemini2.0+进行监听配置
+                    image_path = context.content
+                    logger.info(f'[{model}] query with file, path={image_path}')
+                    mime_type = image_path[(image_path.rfind('.') + 1):]
+                    type_id = 'image'
+                    if mime_type in const.IMAGE:
+                        context['msg'].prepare()
+                        img = Image.open(image_path)
+                        image_file = img
+                        # check if the image has an alpha channel
+                        if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
+                            # Convert the image to RGB mode,whick removes the alpha channel
+                            img = img.convert('RGB')
+                            # Save the converted image
+                            img_path_no_alpha = image_path[:len(image_path)-3] + 'jpg'
+                            img.save(img_path_no_alpha)
+                            # Update img_path with the path to the converted image
+                            image_file = img_path_no_alpha
+                        cache_media(image_path, image_file, context)
+                    else:
+                        logger.warning(f'[{model}] query with unsupported image type:{mime_type}') 
+                else:
+                    memory.USER_IMAGE_CACHE[context["session_id"]] = {
+                        "path": context.content,
+                        "msg": context.get("msg")
+                    }
+            elif context.type == ContextType.SHARING and model in const.GEMINI_GENAI_SDK:  
                 # 分享信息
                 context["channel"] = e_context["channel"]
                 reply = super().build_reply_content(context.content, context)
-            elif context.type == ContextType.FUNCTION or context.type == ContextType.FILE:  # 文件消息及函数调用等，当前无默认逻辑
-                pass
-            elif context.type == ContextType.VIDEO:   # 视频消息，当前无默认逻辑
+            elif context.type == ContextType.FILE:
+                if model in const.GEMINI_GENAI_SDK:  
+                    # 文件消息,目前只针对gemini2.0+进行监听配置
+                    file_path = context.content
+                    logger.info(f'[{model}] query with file, path={file_path}')
+                    mime_type = file_path[(file_path.rfind('.') + 1):]
+                    type_id = 'application'
+                    if mime_type in const.DOCUMENT:
+                        # 将文件下载到本地/tmp目录
+                        context['msg'].prepare()
+                        if mime_type == 'pdf':
+                            with open(file_path, 'rb') as file:
+                                pdf_data = file.read()
+                                b64 = base64.b64encode(pdf_data).decode('utf-8')
+                        elif mime_type == 'docx':
+                            doc = docx.Document(file_path)
+                            full_text = []
+                            for paragraph in doc.paragraphs:
+                                full_text.append(paragraph.text)
+                            docx_text = '\n'.join(full_text)
+                            b64 = docx_text
+                        file_part = {
+                            'mime_type': f'{type_id}/{mime_type}',
+                            'data': b64
+                        }
+                        cache_media(file_path, file_part, context)
+                    else:
+                        logger.warning(f'[{model}] query with unsupported file type:{mime_type}')                       
+                else:
+                    pass
+            elif context.type == ContextType.VIDEO:   
+                # 视频消息，当前无默认逻辑
                 pass
             else:
                 logger.warning("[WX] unknown context type: {}".format(context.type))

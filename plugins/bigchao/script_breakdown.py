@@ -10,6 +10,7 @@ from pypdf import PdfReader
 from google.genai.types import Part
 
 from config import conf
+from common import memory
 from common.log import logger
 from common.tmp_dir import TmpDir
 
@@ -249,3 +250,16 @@ def screenplay_assets_breakdown(
     )
     function_response_part.append(function_response_text) 
     return function_response_part
+
+def cache_media(media_path, media_file, context):
+        session_id = context["session_id"]
+        if session_id not in memory.USER_IMAGE_CACHE:
+            memory.USER_IMAGE_CACHE[session_id] = {
+                "path": [media_path],
+                "files": [media_file]
+            }
+        else:
+            memory.USER_IMAGE_CACHE[session_id]["path"].append(media_path)
+            memory.USER_IMAGE_CACHE[session_id]["files"].append(media_file)
+        logger.info(f"[{model}] {media_path} cached to memory")
+        return None

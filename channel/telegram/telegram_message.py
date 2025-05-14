@@ -92,7 +92,7 @@ class TelegramMessage(ChatMessage):
             file_name = telegram_message.document.file_name
             file, error = get_file(file_id)
             if file:
-                self.content = TmpDir().path() + file_name  # content直接存临时目录路径
+                self.content = TmpDir().path() + file_name  # content记录临时存储路径
                 self._prepare_fn = lambda: file.download(self.content)
             elif error:
                 error_reply = f"[TELEGRAMBOT] fetch get_file() error '{error}' ,because <{file_name}> is larger than 20MB, can't be downloaded" 

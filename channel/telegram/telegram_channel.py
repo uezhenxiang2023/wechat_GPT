@@ -314,7 +314,7 @@ class TelegramChannel(ChatChannel):
                         logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(image, receiver))
         elif reply.type == ReplyType.FILE:  # 新增文件回复类型
             file_pathes = reply.content['function_response']['file_pathes']
-            reply_text = reply.content['reply_text']
+            reply_text = escape(reply.content['reply_text'])
             for file_path in file_pathes:
                 with open(file_path, "rb") as f:
                     self.send_file(f, toUserName=receiver)

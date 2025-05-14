@@ -6,16 +6,8 @@ Google gemini bot
 """
 # encoding:utf-8
 
-import base64
-import json
 import os
 import time
-import re
-import docx
-import pandas as pd
-import matplotlib.pyplot as plt
-from pypdf import PdfReader
-from PIL import Image
 
 import google.generativeai as generativeai
 from google.ai.generativelanguage_v1beta.types import content
@@ -32,10 +24,8 @@ from bot.gemini.google_genimi_vision import GeminiVision
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
-from common.tmp_dir import TmpDir
 from common import const, memory, tool_button
 
-from channel.telegram.telegram_channel import TelegramChannel
 from plugins.bigchao.script_breakdown import screenplay_scenes_breakdown, screenplay_assets_breakdown
 
 
@@ -883,46 +873,12 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 # Image URL request
                 if query[:8] == 'https://':
                     media_file = media_path
-
-                # Image base64 encoded request
-                else:
-                    msg.prepare()
-                    img = Image.open(media_path)
-                    media_file = img
-                    # check if the image has an alpha channel
-                    if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
-                        # Convert the image to RGB mode,whick removes the alpha channel
-                        img = img.convert('RGB')
-                        # Save the converted image
-                        img_path_no_alpha = media_path[:len(media_path)-3] + 'jpg'
-                        img.save(img_path_no_alpha)
-                        # Update img_path with the path to the converted image
-                        media_file = img_path_no_alpha
             elif mime_type in const.AUDIO:
                 msg.prepare()
                 type_id = 'audio'
             elif mime_type in const.VIDEO:
                 msg.prepare()
                 type_id = 'video'
-            elif mime_type in const.DOCUMENT:
-                msg.prepare()
-                # Read and b64encode the PDF file smaller than 20MB
-                if mime_type == 'pdf':
-                    with open(media_path, 'rb') as file:
-                        pdf_data = file.read()
-                        b64 = base64.b64encode(pdf_data).decode('utf-8')
-                elif mime_type == 'docx':
-                    doc = docx.Document(media_path)
-                    full_text = []
-                    for paragraph in doc.paragraphs:
-                        full_text.append(paragraph.text)
-                    docx_text = '\n'.join(full_text)
-                    b64 = docx_text
-                type_id = 'application'
-                media_file = {
-                    'mime_type': f'{type_id}/{mime_type}',
-                    'data': b64
-                }
             elif mime_type in const.SPREADSHEET or mime_type in const.TXT:
                 msg.prepare()
                 type_id = 'text'
