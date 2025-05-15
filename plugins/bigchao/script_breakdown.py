@@ -16,16 +16,17 @@ from common.tmp_dir import TmpDir
 
 model = conf().get('model').upper()
 
-def screenplay_scenes_breakdown(  
+
+def screenplay_scenes_breakdown(
         fn_name,
-        *, 
-        screenplay_title: str = None, 
-        total_pages: str = None, 
-        total_words: str = None, 
+        *,
+        screenplay_title: str = None,
+        total_pages: str = None,
+        total_words: str = None,
         scenes_list: list = []
     ):
     """scenes breakdown for screenscript"""
-    screenplay_title_no_quotes = screenplay_title.replace('《','').replace('》','')
+    screenplay_title_no_quotes = screenplay_title.replace('《', '').replace('》', '')
     # 遍历./tmp目录下的文件,如果文件名中含有screenplay_title,则将其路径赋值给path
     for root, dirs, files in os.walk('./tmp'):
         for file in files:
@@ -43,7 +44,7 @@ def screenplay_scenes_breakdown(
             # 提取文本内容
             scene_normal = paragraph.text.strip()
             # 检查段落是否有序号
-            if paragraph._p.pPr and paragraph._p.pPr.numPr:           
+            if paragraph._p.pPr and paragraph._p.pPr.numPr:
                 scene_normal = f"{num_id}. " + scene_normal
                 num_id += 1
             texts = texts + scene_normal + '\n'
@@ -63,7 +64,7 @@ def screenplay_scenes_breakdown(
     paragraph = ""
     sc_count = 0
     counter_dict ={}
-    # 定义场次描述规则 
+    # 定义场次描述规则
     pattern = r"第.*场|场景.*|\d+\..*"
     for i, v in enumerate(line_list):
         # 只要每行的前3～7个字，符合场次描述规则
@@ -75,7 +76,7 @@ def screenplay_scenes_breakdown(
     # 循环结束后，捕获最后一场戏的字数
     counter_dict[f"scene{sc_count}"] = f'{len(paragraph)}'
     del counter_dict["scene0"]
-    
+
     for i, v in enumerate(scenes_list):
         scene_id = v['scene_id']
         try:
@@ -88,7 +89,7 @@ def screenplay_scenes_breakdown(
         v.update(words = words_per_scene)
         v.update(pages = pages_per_scene)
         v.update(estimated_duration = estimated_duration)
-    
+
     # Save the scenes list to an Excel file
     scenes_list_str = json.dumps(scenes_list, ensure_ascii=False)
     df_scenses_list = pd.read_json(scenes_list_str)
@@ -97,14 +98,14 @@ def screenplay_scenes_breakdown(
     file_path = TmpDir().path()+ f"{screenplay_title}_scenes_breakdown.xlsx"
     df_scenses_list.to_excel(
         file_path,
-        sheet_name=f'{screenplay_title}_scenes_breakdown', 
+        sheet_name=f'{screenplay_title}_scenes_breakdown',
         index=False
     )
     logger.info(f"[TELEGRAMBOT_{model}] {file_path} is saved")
     api_response = {
-        'total_pages':total_pages,
-        'total_words':total_words,
-        'scenes_list':scenes_list
+        'total_pages': total_pages,
+        'total_words': total_words,
+        'scenes_list': scenes_list
     }
     # Create a function response part
     function_response_part = []
@@ -121,17 +122,18 @@ def screenplay_scenes_breakdown(
     function_response_part.append(function_response_text)
     return function_response_part
 
-def screenplay_assets_breakdown(  
-        fn_name, 
-        *, 
-        screenplay_title: str = None, 
+
+def screenplay_assets_breakdown(
+        fn_name,
+        *,
+        screenplay_title: str = None,
         assets_list: list = []
     ):
     """assets breaddown for screenscript"""
     for i, v in enumerate(assets_list):
         ref_id = i+1
         v.update(ref_url = f'RefURL_{ref_id}')
-    
+
     assets_list_str = json.dumps(assets_list, ensure_ascii=False)
     df_assets_list = pd.read_json(assets_list_str)
     df_scenes_list = pd.read_excel(f'./tmp/{screenplay_title}_scenes_breakdown.xlsx')
@@ -154,7 +156,7 @@ def screenplay_assets_breakdown(
     assets_breakdown_file_path = TmpDir().path()+ f"{screenplay_title}_assets_breakdown.xlsx"
     df_assets_list.to_excel(
         assets_breakdown_file_path,
-        sheet_name=f'{screenplay_title}_assets_breakdown', 
+        sheet_name=f'{screenplay_title}_assets_breakdown',
         index=False
     )
     logger.info(f"[TELEGRAMBOT_{model}] {assets_breakdown_file_path} is saved")
@@ -172,11 +174,11 @@ def screenplay_assets_breakdown(
     scenes_breakdown_file_path = TmpDir().path()+ f"{screenplay_title}_scenes_breakdown.xlsx"
     df_scenes_list.to_excel(
         scenes_breakdown_file_path,
-        sheet_name=f'{screenplay_title}_scenes_breakdown', 
+        sheet_name=f'{screenplay_title}_scenes_breakdown',
         index=False
     )
     logger.info(f"[TELEGRAMBOT_{model}] {scenes_breakdown_file_path} is updated")
-    
+
     """# Send the scenes_breakdown.xlsx to the user
     with open(scenes_breakdown_file_path, 'rb') as f:
         TelegramChannel().send_file(f, context["receiver"])
@@ -230,11 +232,11 @@ def screenplay_assets_breakdown(
             f.seek(0)
             TelegramChannel().send_image(f, context["receiver"])
         logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, figure_path, context["receiver"]))"""
-    
+
     api_response = {
-        'scenes_list':json.dumps(scenes_list),
-        'assets_list':json.dumps(assets_list),
-        'file_pathes':[scenes_breakdown_file_path, assets_breakdown_file_path]
+        'scenes_list': json.dumps(scenes_list),
+        'assets_list': json.dumps(assets_list),
+        'file_pathes': [scenes_breakdown_file_path, assets_breakdown_file_path]
     }
     # Create a function response part
     function_response_part = []
@@ -248,8 +250,9 @@ def screenplay_assets_breakdown(
     function_response_text = Part.from_text(
         text=function_response_comment
     )
-    function_response_part.append(function_response_text) 
+    function_response_part.append(function_response_text)
     return function_response_part
+
 
 def cache_media(media_path, media_file, context):
         session_id = context["session_id"]

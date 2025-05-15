@@ -7,7 +7,7 @@
 
 # -*- coding=utf-8 -*-
 import io, json
-from flask import Flask 
+from flask import Flask
 
 import requests
 from channel.feishu.feishu_message import FeishuMessage
@@ -48,14 +48,19 @@ class FeiShuChanel(ChatChannel):
             .build()
         )
         # Create LarkClient object for requesting OpenAPI, and create LarkWSClient object for receiving events using long connection.
-        self.client = lark.Client.builder().app_id(self.app_id).app_secret(self.app_secret).build()
+        self.client = (
+            lark.Client.builder()
+            .app_id(self.app_id)
+            .app_secret(self.app_secret)
+            .build()
+            )
         self.wsClient = lark.ws.Client(
             self.app_id,
             self.app_secret,
             event_handler=self.event_handler,
-            log_level=lark.LogLevel.DEBUG,
+            log_level=lark.LogLevel.INFO,
         )
-    
+
     # Register event handler to handle received messages.
     # https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/events/receive
     def do_p2_im_message_receive_v1(self, data: P2ImMessageReceiveV1) -> None:
@@ -82,7 +87,7 @@ class FeiShuChanel(ChatChannel):
                 raise Exception(
                     f"client.im.v1.message.reply failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}"
                 )"""
-            
+
     def handle_webhook_event(self):
         """Webhook event handler"""
         try:
@@ -93,7 +98,7 @@ class FeiShuChanel(ChatChannel):
         except Exception as e:
             logger.error(f"[Lark]Error handling webhook event: {str(e)}")
             return {"[Lark]error": str(e)}, 500
-        
+
     def main(self):
         if self.websocket is True:
             # 使用websocket长链接接收飞书事件.
@@ -119,7 +124,7 @@ class FeiShuChanel(ChatChannel):
             return None
         self.handle_single(cmsg)
         return None
-    
+
     def handler_group_msg(self, msg):
         try:
             cmsg = FeishuMessage(msg, True)
@@ -128,7 +133,7 @@ class FeiShuChanel(ChatChannel):
             return None
         self.handle_group(cmsg)
         return None
-    
+
     def handle_single(self, cmsg: ChatMessage):
         # filter system message
         if cmsg.other_user_id in ["weixin"]:
@@ -154,7 +159,7 @@ class FeiShuChanel(ChatChannel):
         context = self._compose_context(cmsg.ctype, cmsg.content, isgroup=False, msg=cmsg)
         if context:
             self.produce(context)
-    
+
     def handle_group(self, cmsg: ChatMessage):
         if cmsg.ctype == ContextType.VOICE:
             if conf().get("group_speech_recognition") != True:
@@ -265,7 +270,6 @@ class FeiShuChanel(ChatChannel):
             raise Exception(
                 f"client.im.v1.chat.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}"
             )
-
 
     def send_image(self, reply_content, toUserName):
         """
