@@ -13,7 +13,7 @@ import google.generativeai as generativeai
 from google.ai.generativelanguage_v1beta.types import content
 from google import genai
 from google.genai import types
-from google.genai.types import Tool,GenerateContentConfig,GoogleSearch,Part,FunctionDeclaration,Type,FileData
+from google.genai.types import Tool, GenerateContentConfig, GoogleSearch, Part, FunctionDeclaration, Type, FileData
 
 from config import conf
 from bot.bot import Bot
@@ -30,24 +30,24 @@ from plugins.bigchao.script_breakdown import screenplay_scenes_breakdown, screen
 
 
 # OpenAI对话模型API (可用)
-class GoogleGeminiBot(Bot,GeminiVision):
+class GoogleGeminiBot(Bot, GeminiVision):
 
     def __init__(self):
         super().__init__()
         # Add these imports at the top
         import asyncio
         import nest_asyncio
-        
+
         # Initialize event loop
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-        
+
         # Allow nested event loops
         nest_asyncio.apply()
-        
+
         self.api_key = conf().get("gemini_api_key")
         self.model = conf().get('model')
         self.Model_ID = self.model.upper()
@@ -58,9 +58,9 @@ class GoogleGeminiBot(Bot,GeminiVision):
         }
         # 复用文心的token计算方式
         self.sessions = SessionManager(BaiduWenxinSession, model=self.model or "gpt-3.5-turbo")
-        
+
         # Initialize a client according to old generativeai SDK
-        generativeai.configure(api_key=self.api_key,transport='rest')
+        generativeai.configure(api_key=self.api_key, transport='rest')
         self.generation_config = {
             "temperature": 0.4,
             "top_p": 0.95,
@@ -101,7 +101,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                                         parameters = content.Schema(
                                             type = content.Type.OBJECT,
                                             enum = [],
-                                            required = ["screenplay_title","scenes_list"],
+                                            required = ["screenplay_title", "scenes_list"],
                                             properties = {
                                                 "screenplay_title": content.Schema(
                                                     type = content.Type.STRING,
@@ -123,12 +123,12 @@ class GoogleGeminiBot(Bot,GeminiVision):
                                                             "daynight": content.Schema(
                                                                 type = content.Type.STRING,
                                                                 description = "日景还是夜景",
-                                                                enum = ["日","夜"]
+                                                                enum = ["日", "夜"]
                                                             ),
                                                             "envirement": content.Schema(
                                                                 type = content.Type.STRING,
                                                                 description = "室内环境还是室外环境",
-                                                                enum = ["内","外"]
+                                                                enum = ["内", "外"]
                                                             ),
                                                         },
                                                     ),
@@ -151,7 +151,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
             description="拆解剧本一共两个步骤，这是第一步，拆解场景。阅读剧本，结合内容，先提取剧本名称和剧本总页数，再逐个拆解场景，提取场号、场景名称、内外、日夜等基础信息，做成场景列表",
             parameters=types.Schema(
                 type=Type.OBJECT,
-                required=["screenplay_title","scenes_list"],
+                required=["screenplay_title", "scenes_list"],
                 properties={
                     "screenplay_title": types.Schema(
                         type=Type.STRING,
@@ -218,7 +218,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
             description="拆解剧本一共分两个步骤，这是第二步，拆解资产。阅读剧本，熟悉内容，逐场提取场景、人物和道具名称，制作成资产列表。该工具需要跟sreenplay_scenes_breakdown同时平行调用，才能完成剧本拆解。",
             parameters=types.Schema(
                 type=Type.OBJECT,
-                required=["screenplay_title","assets_list"],
+                required=["screenplay_title", "assets_list"],
                 properties={
                     "screenplay_title": types.Schema(
                         type=Type.STRING,
@@ -302,7 +302,74 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 },
             ),
         )
-        self.function_declarations = Tool(function_declarations=[self.screenplay_scenes_breakdown_schema, self.screenplay_assets_breakdown_schema])
+        self.screenplay_formatter = FunctionDeclaration(
+                    name="screenplay_formatter",
+                    description="按照好莱坞电影工业的标准，对剧本进行排版。",
+                    parameters=types.Schema(
+                        type = Type.OBJECT,
+                        required = ["screenplay_title", "screenwriter", "paragraph_metadata"],
+                        properties = {
+                            "screenplay_title": types.Schema(
+                                type = Type.STRING,
+                                description = "从文档中提取出的剧本名称，如果没有，需要请用户提供",
+                            ),
+                            "screenwriter": types.Schema(
+                                type = Type.STRING,
+                                description = "从文档中提取出的剧本名称,如果没有，需要请用户提供",
+                            ),
+                            "paragraph_metadata": types.Schema(
+                                type = Type.OBJECT,
+                                description = "剧本段落的原始数据",
+                                properties = {
+                                    "scene_heading": types.Schema(
+                                        type = Type.OBJECT,
+                                        description = "场次标题即段落所在场次的基本信息，该值不能为空值",
+                                        properties = {
+                                            "scene_id": types.Schema(
+                                                type = Type.INTEGER,
+                                                description = "段落所在的场号，包含正戏与彩蛋，彩蛋场号顺接正戏，比如正戏最后一场是95，彩蛋第一场就是96",
+                                            ),
+                                            "envirement": types.Schema(
+                                                type = Type.STRING,
+                                                description = "段落发生的环境，大部分情况是内或外，内/外或外/内表明该场次同时包含了室内外的景，比如说车戏的时候，或者是门、窗内外的角色有互动的时候。如果场次标题中没有环境信息，根据段落内容进行推测。",
+                                                enum = ["内", "外", "内/外", "外/内"],
+                                            ),
+                                            "location": types.Schema(
+                                                type = Type.STRING,
+                                                description = "段落发生的场景名称，包含正戏与彩蛋",
+                                            ),
+                                            "daynight": types.Schema(
+                                                type = Type.STRING,
+                                                description = "段落发生的时间，如果场次标题中没有环境信息，根据段落内容进行推测。",
+                                                enum = ["日", "夜"],
+                                            ),
+                                        },
+                                    ),
+                                    "paragraph_id": types.Schema(
+                                        type = Type.INTEGER,
+                                        description = "段落序号，段落通常以句号'。'、感叹号‘！’、问号‘？’、冒号‘：’或段落标记号‘¶’结束。",
+                                    ),
+                                    "contennt": types.Schema(
+                                        type = Type.STRING,
+                                        description = "从文档中提取出的段落内容",
+                                    ),
+                                    "category": types.Schema(
+                                        type = Type.STRING,
+                                        description = "段落类别，action是动作段落，场景和事物的客观描述，通常是以句号结束；character是角色段落，通常以姓名或身份加冒号‘：’结束，比如“孙涛：”或“产房护士：”；有时character段落以“画外音”加冒号‘：’结束，如“画外音:”或；“央媒新闻播报的画外音”；有的情况需要在角色名、身份名或‘画外音’后加Extension扩展，比如（V.O.）和（O.S.），VO即Voice Over，场景之外角色的声音——旁白或独白，这个好理解，OS即Off Screen是指角色不在镜头内发出的声音，比如说一个角色在书房写作业，这时他的母亲在厨房大喊一声“出来吃饭了”，这就是OS；偶尔剧本内容提及屏幕出现的字幕内容，也会用冒号‘：’作为结束，如“黑屏，出字幕:根据国家相关法律法规，非发集资，教唆别人炒房，从中放高利贷，非法吸收存款，证券化炒房，属于扰乱金融市场，均构成金融犯罪。”这种情况，冒号前是action段落，冒号后是dialogue段落；dialogue是台词段落，通常紧跟角色段落。",
+                                        enum = ["action", "character", "dialogue"],
+                                    ),
+                                },
+                            ),
+                        },
+                    ),
+                ),
+        self.function_declarations = Tool(
+            function_declarations=[
+                self.screenplay_scenes_breakdown_schema, 
+                self.screenplay_assets_breakdown_schema,
+                self.screenplay_formatter
+                ]
+        )
         self.google_search_tool = Tool(google_search=GoogleSearch())
         self.chat = self.client.chats.create(
             model=self.model,
@@ -312,7 +379,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 tools=[self.function_declarations],
                 tool_config={
                     'function_calling_config': {
-                        'mode': 'AUTO' 
+                        'mode': 'AUTO'
                     }
                 },
                 response_modalities=['TEXT'],
@@ -323,7 +390,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
             model='gemini-2.0-flash-exp',
             config=GenerateContentConfig(
                 safety_settings=self.safety_settings,
-                response_modalities=['TEXT','Image'],
+                response_modalities=['TEXT', 'Image'],
                 **self.generation_config
             )
         )
@@ -348,9 +415,9 @@ class GoogleGeminiBot(Bot,GeminiVision):
                     doc_cache = memory.USER_FILE_CACHE.get(context['session_id'])
                     return self._file_download(doc_cache)
             elif context.type == ContextType.IMAGE:
-                if (self.model in const.GEMINI_15_FLASH_LIST or 
-                    self.model in const.GEMINI_15_PRO_LIST or 
-                    self.model in const.GEMINI_2_FLASH_LIST or 
+                if (self.model in const.GEMINI_15_FLASH_LIST or
+                    self.model in const.GEMINI_15_PRO_LIST or
+                    self.model in const.GEMINI_2_FLASH_LIST or
                     self.model in const.GEMINI_25_PRO_LIST):
                     session_id = context["session_id"]
                     session = self.sessions.session_query(query, session_id)
@@ -379,12 +446,12 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 if self.model in const.GEMINI_1_PRO_LIST:
                     gemini_messages = self._convert_to_gemini_1_messages(self._filter_gemini_1_messages(session.messages))
                     system_prompt = None
-                    vision_res = self.do_vision_completion_if_need(session_id,query) # Image recongnition and vision completion
+                    vision_res = self.do_vision_completion_if_need(session_id, query) # Image recongnition and vision completion
                     if vision_res:
                         return vision_res
-                elif (self.model in const.GEMINI_15_PRO_LIST or 
-                      self.model in const.GEMINI_15_FLASH_LIST or 
-                      self.model in const.GEMINI_2_FLASH_LIST or 
+                elif (self.model in const.GEMINI_15_PRO_LIST or
+                      self.model in const.GEMINI_15_FLASH_LIST or
+                      self.model in const.GEMINI_2_FLASH_LIST or
                       self.model in const.GEMINI_25_PRO_LIST):
                     gemini_messages = self._convert_to_gemini_15_messages(session.messages)
 
@@ -405,8 +472,8 @@ class GoogleGeminiBot(Bot,GeminiVision):
                                 resquest_contents.insert(0, file_content)
                             elif mime_type == 'application/pdf':
                                 file_content = Part.from_bytes(**first_data)
-                                resquest_contents.insert(0, file_content) 
-                        elif data_type in ['JpegImageFile','File']:
+                                resquest_contents.insert(0, file_content)
+                        elif data_type in ['JpegImageFile', 'File']:
                             file_cache['files'].append(text)
                             resquest_contents = file_cache['files']
                         elif data_type in ['FileData']:
@@ -419,7 +486,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                             resquest_contents = filedata
                         memory.USER_IMAGE_CACHE.pop(session_id)
                     if tool_button.searching is True:
-                        response = self.chat.send_message(resquest_contents,config=self.search_config)
+                        response = self.chat.send_message(resquest_contents, config=self.search_config)
                     elif tool_button.searching is False:
                         if tool_button.imaging is True:
                             response = self.image_chat.send_message(resquest_contents)
@@ -443,8 +510,8 @@ class GoogleGeminiBot(Bot,GeminiVision):
                         # 是否监测到函数响应内容
                         if function_response != []:
                             response = {
-                                'reply_text':response.text,
-                                'function_response':function_response[0].function_response.response
+                                'reply_text': response.text,
+                                'function_response': function_response[0].function_response.response
                             }
                             return Reply(ReplyType.FILE, response)
                         else:
@@ -481,7 +548,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
             }
         }
         return function_call_reply
-    
+
     def function_call_polling_loop(self, response):
         """轮询模型响应结果中的函数调用"""
         function_calling = True
@@ -554,7 +621,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 if msg_type == 'File':
                     media_parts.append(msg_content)
                     continue
-                if msg_type in ['str','JpegImageFile','dict']:
+                if msg_type in ['str', 'JpegImageFile', 'dict']:
                     if media_parts != []:
                         media_parts.append(msg_content)
                         user_parts = media_parts
@@ -589,7 +656,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
             elif turn == "assistant":
                 turn = "user"
         return res
-    
+
     def _file_cache(self, context):
         memory.USER_FILE_CACHE[context['session_id']] = {
             "path": context.content,
@@ -597,7 +664,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         }
         logger.info("[{}] file={} is cached for assistant".format(self.Model_ID, context.content))
         return None
-    
+
     def _file_download(self, file_cache):
         msg = file_cache.get("msg")
         path = file_cache.get("path")
@@ -855,7 +922,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
         # 将function_response_part转换为字符串
         function_response_str = json.dumps(function_response_dic) + '\n' + function_response_comment 
         return function_response_part, function_response_str"""
-    
+
     def gemini_15_media(self, query, context, session: BaiduWenxinSession):
         session_id = context.kwargs["session_id"]
         msg = context.kwargs["msg"]
@@ -895,7 +962,7 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 media_file = self.upload_to_gemini(media_path, mime_type=f'{type_id}/{mime_type}')
         self.sessions.session_query(media_file, session_id)
         self.cache_media(media_path, media_file, context)
-    
+
     def cache_media(self, media_path, media_file, context):
         session_id = context["session_id"]
         if session_id not in memory.USER_IMAGE_CACHE:
@@ -921,11 +988,11 @@ class GoogleGeminiBot(Bot,GeminiVision):
                 mime_type=mime_type
             )
         )
-        
+
         self.wait_for_files_active(file)
         print(f"Uploaded file '{file.display_name}' as: {file.uri}")
         return file
-    
+
     def wait_for_files_active(self, media_file):
         """Waits for the given files to be active.
 
@@ -947,4 +1014,4 @@ class GoogleGeminiBot(Bot,GeminiVision):
             raise Exception(f"File {file.name} failed to process")
         print("...all files ready")
         print()
-         
+

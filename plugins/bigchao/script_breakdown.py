@@ -1,9 +1,14 @@
-"""BigChao API"""
+"""
+BigChao API
+@author uezhenxiang2023
+@Date 2025/05/13
+"""
 
 import os
-import docx
 import re
 import json
+
+import docx
 import pandas as pd
 import matplotlib.pyplot as plt
 from pypdf import PdfReader
