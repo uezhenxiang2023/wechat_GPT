@@ -13,6 +13,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pypdf import PdfReader
 from google.genai.types import Part
+from docx import Document
+from docx.shared import Pt, Inches, Mm
+from docx.oxml import ns, OxmlElement
+from docx.oxml.ns import qn
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx2pdf import convert
 
 from config import conf
 from common import memory
@@ -21,6 +27,244 @@ from common.tmp_dir import TmpDir
 
 model = conf().get('model').upper()
 
+class AddPageNumber:
+    """在文档右上角添加页码"""
+    def __init__(self, header):
+        self.paragraph = header.paragraphs[0]
+        self.paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    def create_element(self, name):
+        return OxmlElement(name)
+
+    def create_attribute(self, element, name, value):
+        element.set(ns.qn(name), value)
+
+    def add_page_number(self, *, font_name='SimHei', font_size=10):
+        # 创建页码元素
+        run = self.paragraph.add_run()
+
+        # 创建域开始标记
+        fldChar1 = self.create_element('w:fldChar')
+        self.create_attribute(fldChar1, 'w:fldCharType', 'begin')
+        
+        # 创建域代码
+        instrText = self.create_element('w:instrText')
+        instrText.text = "PAGE"
+        
+        # 创建域结束标记
+        fldChar2 = self.create_element('w:fldChar')
+        self.create_attribute(fldChar2, 'w:fldCharType', 'end')
+        
+        # 添加到run中
+        run._r.append(fldChar1)
+        run._r.append(instrText)
+        run._r.append(fldChar2)
+
+        # 设置字体格式
+        font = run.font
+        font.name = font_name
+        font.size = Pt(font_size)
+        font._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
+
+def screenplay_formatter(
+        fn_name: str = None,
+        *,
+        screenplay_title: str = None,
+        screenwriter: str = None,
+        paragraphs_metadata: list = []
+    ):
+    # 创建新文文档
+    doc = Document()
+    # 页面设置为A4尺寸
+    section = doc.sections[0]
+    section.page_height = Mm(297)
+    section.page_width = Mm(210)
+    # 设置页边距
+    section.left_margin = Inches(1.5)
+    section.right_margin = Inches(1)
+    section.top_margin = Inches(1)
+    section.bottom_margin = Inches(1)
+    # 添加页码
+    page_number = AddPageNumber(section.header)
+    paragraph = page_number.add_page_number(font_size=10)
+    # 添加封面
+    add_cover(doc, screenplay_title=screenplay_title, screenwriter=screenwriter)
+    for paragraph_metadata in paragraphs_metadata:
+        category = paragraph_metadata['category']
+        if category == 'scene_setting':
+            add_scene_setting(doc, paragraph_metadata)
+        elif category == 'action':
+            add_action(doc, paragraph_metadata)
+        elif category == 'character':
+            add_character(doc, paragraph_metadata)
+        elif category == 'dialogue':
+            add_dialogue(doc, paragraph_metadata)
+    docx_file_path = TmpDir().path() + f"{screenplay_title}.docx"
+    pdf_file_path = TmpDir().path() + f"{screenplay_title}.pdf"
+    # 将文档存储到本地目录
+    doc.save(docx_file_path)
+    convert(docx_file_path, pdf_file_path)
+    api_response = {
+        'file_pathes': [docx_file_path, pdf_file_path]
+    }
+    # Create a function response part
+    function_response_part = []
+    function_response_obj = Part.from_function_response(
+        name=fn_name,
+        response=api_response,
+    )
+    function_response_part.append(function_response_obj)
+    # Create a function response text part
+    function_response_comment = "这是按照好莱坞工业标准，排版后的剧本，两种格式，pdf格式方便阅读，docx方便修改"
+    function_response_text = Part.from_text(
+        text=function_response_comment
+    )
+    function_response_part.append(function_response_text)
+    return function_response_part
+
+def add_cover(
+        doc,
+        *, 
+        screenplay_title:str = None, 
+        screenwriter:str = None
+    ):
+        """添加封面"""
+        # 插入空行达到第8行的效果
+        for _ in range(7):
+            doc.add_paragraph()
+        
+        # 插入剧本标题段落
+        title_paragraph = doc.add_paragraph()
+        title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER  # 居中对齐
+        title_paragraph.paragraph_format.line_spacing = 1.5
+        title_paragraph.paragraph_format.space_after = Pt(0)
+        
+        # 添加剧本标题
+        title_run = title_paragraph.add_run(screenplay_title)
+        title_font = title_run.font
+        title_font.name = 'SimHei'  # 黑体
+        title_font.size = Pt(22)    # 22号字
+        title_font._element.rPr.rFonts.set(qn('w:eastAsia'), 'SimHei')
+        title_font.bold = True
+        
+        # 添加编剧信息
+        if screenwriter:   
+            writer_paragraph = doc.add_paragraph()
+            writer_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            writer_run = writer_paragraph.add_run(f"编剧：{screenwriter}")
+            writer_font = writer_run.font
+            writer_font.name = 'SimHei'
+            writer_font.size = Pt(12)
+            writer_font._element.rPr.rFonts.set(qn('w:eastAsia'), 'SimHei')
+        
+        # 添加分节符，开始新的章节
+        doc.add_section()
+        
+def add_scene_setting(doc, content):
+        scene_id = content['scene_heading']['scene_id']
+        env = content['scene_heading']['enviroment']
+        location = content['scene_heading']['location']
+        daynight = content['scene_heading']['daynight']
+        content = str(scene_id) + ' ' + env + ' ' + location + ' - ' + daynight
+        """添加场景段落"""
+        # 插入新段落
+        paragraph = doc.add_paragraph()
+        # 设置段落行间距
+        paragraph.paragraph_format.line_spacing = 1
+        paragraph.paragraph_format.space_after = Pt(0)
+        # 设置段落左右缩进
+        paragraph.paragraph_format.left_indent = Mm(0)
+        paragraph.paragraph_format.right_indent = Mm(0)
+        # 设置字体
+        run = paragraph.add_run(text=content)
+        font = run.font
+        font.name = 'SimHei'
+        font._element.rPr.rFonts.set(qn('w:eastAsia'), 'SimHei')  # 东亚文字字体
+        font.size = Pt(12)
+        font.bold = True
+        # 动作段落结尾插入新的空白段落
+        paragraph = doc.add_paragraph()
+        # 设置段落行间距
+        paragraph.paragraph_format.line_spacing = 1
+        paragraph.paragraph_format.space_after = Pt(0)
+        # 设置段落左右缩进
+        paragraph.paragraph_format.left_indent = Mm(0)
+        paragraph.paragraph_format.right_indent = Mm(0)
+
+def add_action(doc, content):
+    """添加动作段落"""
+    # 插入新段落
+    paragraph = doc.add_paragraph()
+    # 设置段落行间距
+    paragraph.paragraph_format.line_spacing = 1
+    paragraph.paragraph_format.space_after = Pt(0)
+    # 设置段落左右缩进
+    paragraph.paragraph_format.left_indent = Mm(0)
+    paragraph.paragraph_format.right_indent = Mm(0)
+    # 设置字体
+    content = convert_punctuation(content['content'])
+    run = paragraph.add_run(text=content)
+    font = run.font
+    font.name = 'SimHei'
+    font._element.rPr.rFonts.set(qn('w:eastAsia'), 'SimHei')  # 东亚文字字体
+    font.size = Pt(12)
+    # 动作段落结尾插入新的空白段落
+    paragraph = doc.add_paragraph()
+    # 设置段落行间距
+    paragraph.paragraph_format.line_spacing = 1
+    paragraph.paragraph_format.space_after = Pt(0)
+    # 设置段落左右缩进
+    paragraph.paragraph_format.left_indent = Mm(0)
+    paragraph.paragraph_format.right_indent = Mm(0)
+
+def add_character(doc, content):
+    """添加角色段落"""
+    # 插入新段落
+    paragraph = doc.add_paragraph()
+    # 设置段落行间距
+    paragraph.paragraph_format.line_spacing = 1
+    paragraph.paragraph_format.space_after = Pt(0)
+    # 设置段落左右缩进
+    paragraph.paragraph_format.left_indent = Mm(56)
+    paragraph.paragraph_format.right_indent = Mm(0)
+    # 检查角色名是否以冒号结尾，如果不是则添加
+    character_text = content['content']
+    # 替换特殊标记 (不区分大小写)
+    character_text = re.sub(r'\bos\b', '(O.S.)', character_text, flags=re.IGNORECASE)
+    character_text = re.sub(r'\bvo\b', '(V.O.)', character_text, flags=re.IGNORECASE)
+    if not character_text.endswith((':', '：')):
+        character_text += '：'  # 使用中文冒号  
+    # 设置字体
+    run = paragraph.add_run(text=character_text)
+    font = run.font
+    font.name = 'SimHei'
+    font._element.rPr.rFonts.set(qn('w:eastAsia'), 'SimHei')  # 东亚文字字体
+    font.size = Pt(12)
+
+def add_dialogue(doc, content):
+    """添加台词段落"""
+    # 插入新段落
+    paragraph = doc.add_paragraph()
+    # 设置段落行间距
+    paragraph.paragraph_format.line_spacing = 1
+    paragraph.paragraph_format.space_after = Pt(0)
+    # 设置段落左右缩进
+    paragraph.paragraph_format.left_indent = Mm(30)
+    paragraph.paragraph_format.right_indent = Mm(30)
+    # 设置字体
+    dialogue_content = convert_punctuation(content['content'])
+    run = paragraph.add_run(text=dialogue_content)
+    font = run.font
+    font.name = 'SimHei'
+    font._element.rPr.rFonts.set(qn('w:eastAsia'), 'SimHei')  # 东亚文字字体
+    font.size = Pt(12)
+    # 台词段落结尾插入新的空白段落
+    paragraph = doc.add_paragraph()
+    # 设置空白段落行间距
+    paragraph.paragraph_format.line_spacing = 1
+    paragraph.paragraph_format.space_after = Pt(0)
+    # 设置空白段落左右缩进
+    paragraph.paragraph_format.left_indent = Mm(30)
+    paragraph.paragraph_format.right_indent = Mm(30)
 
 def screenplay_scenes_breakdown(
         fn_name,
@@ -126,7 +370,6 @@ def screenplay_scenes_breakdown(
     )
     function_response_part.append(function_response_text)
     return function_response_part
-
 
 def screenplay_assets_breakdown(
         fn_name,
@@ -258,7 +501,6 @@ def screenplay_assets_breakdown(
     function_response_part.append(function_response_text)
     return function_response_part
 
-
 def cache_media(media_path, media_file, context):
         session_id = context["session_id"]
         if session_id not in memory.USER_IMAGE_CACHE:
@@ -271,3 +513,13 @@ def cache_media(media_path, media_file, context):
             memory.USER_IMAGE_CACHE[session_id]["files"].append(media_file)
         logger.info(f"[{model}] {media_path} cached to memory")
         return None
+
+def convert_punctuation(text: str) -> str:
+    """将英文标点转换为中文标点"""
+    punctuation_map = {
+        ',': '，',
+    }
+    
+    for en_punct, cn_punct in punctuation_map.items():
+        text = text.replace(en_punct, cn_punct)
+    return text
