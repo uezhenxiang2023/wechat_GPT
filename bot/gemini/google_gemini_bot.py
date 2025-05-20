@@ -356,7 +356,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
                             ),
                             "category": types.Schema(
                                 type = Type.STRING,
-                                description = "段落类别，scene_setting是场景段落，通常出现在每一场的第一行，内容描写顺序是内外环境，场景名称，时间；action是动作段落，场景和事物的客观描述，通常是以句号结束；character是角色段落（特别注意，画外音也属于角色段落），通常以姓名或身份加冒号‘：’结束，比如“孙涛：”或“产房护士：”；有时会在角色名字或身份名和冒号‘：’之间加入动作或情绪描述，如“张智宇笑到：”，此时冒号前部分也是角色段落；有时character段落以“画外音”加冒号‘：’结束，如“画外音:”或；“央媒新闻播报的画外音”；有的情况需要在角色名、身份名或‘画外音’后加Extension扩展，比如（V.O.）和（O.S.），VO即Voice Over，场景之外角色的声音——旁白或独白，这个好理解，OS即Off Screen是指角色不在镜头内发出的声音，比如说一个角色在书房写作业，这时他的母亲在厨房大喊一声“出来吃饭了”，这就是OS；偶尔剧本内容提及屏幕出现的字幕内容，也会用冒号‘：’作为结束，如“黑屏，出字幕:根据国家相关法律法规，非发集资，教唆别人炒房，从中放高利贷，非法吸收存款，证券化炒房，属于扰乱金融市场，均构成金融犯罪。”这种情况，冒号前是action段落，冒号后是dialogue段落；dialogue是台词段落，通常紧跟角色段落；特别注意，画外音和屏幕字幕提示也属于dialogue段落",
+                                description = "段落类别，scene_setting是场景段落，通常出现在每一场的第一行，内容描写顺序是内外环境，场景名称，时间；action是动作段落，场景和事物的客观描述，通常是以句号结束；character是角色段落（特别注意，旁白、画外音也属于角色段落），通常以姓名或身份加冒号‘：’结束，比如“孙涛：”或“产房护士：”；有时会在角色名字或身份名和冒号‘：’之间加入动作或情绪描述，如“张智宇笑到：”，此时冒号前部分也是角色段落；有时character段落以“旁白或画外音”加冒号‘：’结束，如“旁白:”或；“央媒新闻播报的画外音”；偶尔会用字母代替角色或身份加冒号‘：’，如“A：你怎么来了”、“C:我来看看你和小丽”；有的情况需要在角色名、身份名或‘画外音’后加Extension扩展，比如（V.O.）和（O.S.），VO即Voice Over，场景之外角色的声音——旁白或独白，这个好理解，OS即Off Screen是指角色不在镜头内发出的声音，比如说一个角色在书房写作业，这时他的母亲在厨房大喊一声“出来吃饭了”，这就是OS；偶尔剧本内容提及屏幕出现的字幕内容，也会用冒号‘：’作为结束，如“黑屏，出字幕:根据国家相关法律法规，非发集资，教唆别人炒房，从中放高利贷，非法吸收存款，证券化炒房，属于扰乱金融市场，均构成金融犯罪。”这种情况，冒号前是action段落，冒号后是dialogue段落；dialogue是台词段落，通常紧跟角色段落；特别注意，画外音和屏幕字幕提示也属于dialogue段落",
                                 enum = ["scene_setting", "action", "character", "dialogue"],
                             ),
                         },
@@ -501,7 +501,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
                         enable_automatic_function_calling=True
                     )
                     response = chat_session.send_message(resquest_contents)
-                response, function_response = self.function_call_polling_loop(response)
+                response, function_response = self.function_call_polling_loop(session_id, response)
 
                 if tool_button.imaging is True:
                     return Reply(ReplyType.IMAGE, response)
@@ -550,7 +550,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
         }
         return function_call_reply
 
-    def function_call_polling_loop(self, response):
+    def function_call_polling_loop(self, session_id, response):
         """轮询模型响应结果中的函数调用"""
         function_calling = True
         function_response = []
@@ -572,7 +572,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
                 # call function
                 function_call = self.function_call_dicts.get(fn_name)
                 # 从fn_args中获取function_call的参数
-                function_response_part = function_call(fn_name, **fn_args)
+                function_response_part = function_call(session_id, fn_name, **fn_args)
                 function_response_parts.extend(function_response_part)
                 function_response = function_response_part
                 """# add function response to session as user message --- gemini 2.0开始，chat方法自动维护消息历史，后续考虑暂停维护脚手架中旧版gemini的消息历史

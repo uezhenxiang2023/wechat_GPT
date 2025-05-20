@@ -23,7 +23,7 @@ from docx2pdf import convert
 from config import conf
 from common import memory
 from common.log import logger
-from common.tmp_dir import TmpDir
+from common.tmp_dir import TmpDir, create_user_dir
 
 model = conf().get('model').upper()
 
@@ -102,7 +102,9 @@ def screenplay_formatter(
     pdf_file_path = TmpDir().path() + f"{screenplay_title}.pdf"
     # 将文档存储到本地目录
     doc.save(docx_file_path)
+    logger.info(f"[TELEGRAMBOT_{model}] {docx_file_path} is saved")
     convert(docx_file_path, pdf_file_path)
+    logger.info(f"[TELEGRAMBOT_{model}] {pdf_file_path} is saved")
     api_response = {
         'file_pathes': [docx_file_path, pdf_file_path]
     }
@@ -267,6 +269,7 @@ def add_dialogue(doc, content):
     paragraph.paragraph_format.right_indent = Mm(30)
 
 def screenplay_scenes_breakdown(
+        session_id,
         fn_name,
         *,
         screenplay_title: str = None,
@@ -277,13 +280,14 @@ def screenplay_scenes_breakdown(
     """scenes breakdown for screenscript"""
     screenplay_title_no_quotes = screenplay_title.replace('《', '').replace('》', '')
     # 遍历./tmp目录下的文件,如果文件名中含有screenplay_title,则将其路径赋值给path
-    for root, dirs, files in os.walk('./tmp'):
+    for root, dirs, files in os.walk(f'./tmp/{session_id}'):
         for file in files:
             if screenplay_title_no_quotes in file and file.endswith(('.docx', '.pdf')):
                 path = os.path.join(root, file)
                 break
-
-    if path.endswith('.docx'):
+    if path.endswith('.pdf'):
+        total_words, words_per_page, counter_dict = sc_counter(path)
+    """elif path.endswith('.docx'):
         reader = docx.Document(path)
         texts = ''
         line_list = []
@@ -298,34 +302,7 @@ def screenplay_scenes_breakdown(
                 num_id += 1
             texts = texts + scene_normal + '\n'
             line_list.append(scene_normal)
-        total_pages = len(texts)//500 + 1
-    elif path.endswith('.pdf'):
-        reader = PdfReader(path)
-        total_pages = len(reader.pages)
-        texts = ''.join([page.extract_text() for page in reader.pages])
-        # 删除脚标
-        footer_pattern = rf"\[{re.escape(screenplay_title_no_quotes)}\]\s*◁[\s\x00-\x1f]*▷\s*\n?"
-        texts = re.sub(footer_pattern, "", texts, flags=re.DOTALL)
-        line_list = re.split(r'[。！？\n]|\s{2,}', texts)
-    total_words = len(texts)
-    words_per_page = total_words / total_pages
-    # 统计每一场的字数
-    paragraph = ""
-    sc_count = 0
-    counter_dict ={}
-    # 定义场次描述规则
-    pattern = r"第.*场|场景.*|\d+\..*"
-    for i, v in enumerate(line_list):
-        # 只要每行的前3～7个字，符合场次描述规则
-        if any(re.match(pattern, v.strip()[:n]) is not None for n in (2, 3, 4, 5, 6, 7, 9, 10)):
-            counter_dict[f"scene{sc_count}"] = f'{len(paragraph)}'
-            sc_count += 1
-            paragraph = ""
-        paragraph += v.strip()
-    # 循环结束后，捕获最后一场戏的字数
-    counter_dict[f"scene{sc_count}"] = f'{len(paragraph)}'
-    del counter_dict["scene0"]
-
+        total_pages = len(texts)//500 + 1"""
     for i, v in enumerate(scenes_list):
         scene_id = v['scene_id']
         try:
@@ -344,7 +321,11 @@ def screenplay_scenes_breakdown(
     df_scenses_list = pd.read_json(scenes_list_str)
     new_cols = ['scene_id', 'location', 'daynight', 'envirement', 'words', 'pages', 'estimated_duration', 'assets_id']
     df_scenses_list = df_scenses_list.reindex(columns=new_cols)
-    file_path = TmpDir().path()+ f"{screenplay_title}_scenes_breakdown.xlsx"
+    user_dir = TmpDir().path() + str(session_id) + '/response/'
+    user_dir_exists = os.path.exists(user_dir)
+    if not user_dir_exists:
+        create_user_dir(user_dir)
+    file_path = user_dir + f"{screenplay_title}_scenes_breakdown.xlsx"
     df_scenses_list.to_excel(
         file_path,
         sheet_name=f'{screenplay_title}_scenes_breakdown',
@@ -372,6 +353,7 @@ def screenplay_scenes_breakdown(
     return function_response_part
 
 def screenplay_assets_breakdown(
+        session_id,
         fn_name,
         *,
         screenplay_title: str = None,
@@ -384,7 +366,8 @@ def screenplay_assets_breakdown(
 
     assets_list_str = json.dumps(assets_list, ensure_ascii=False)
     df_assets_list = pd.read_json(assets_list_str)
-    df_scenes_list = pd.read_excel(f'./tmp/{screenplay_title}_scenes_breakdown.xlsx')
+    user_dir = TmpDir().path() + str(session_id) + '/response/'
+    df_scenes_list = pd.read_excel(user_dir + f'{screenplay_title}_scenes_breakdown.xlsx')
     for i, v in enumerate(df_assets_list['scene_ids']):
         asset_pages = 0
         for n in v:
@@ -401,7 +384,7 @@ def screenplay_assets_breakdown(
     new_cols = ['asset_type', 'asset_id', 'name', "visual_effects_type", 'visual_effects_description', 'scene_ids', 'asset_pages', 'estimated_asset_duration', 'ref_url']
     df_assets_list = df_assets_list.reindex(columns=new_cols)
     assets_list = df_assets_list.to_dict('records')
-    assets_breakdown_file_path = TmpDir().path()+ f"{screenplay_title}_assets_breakdown.xlsx"
+    assets_breakdown_file_path = user_dir + f"{screenplay_title}_assets_breakdown.xlsx"
     df_assets_list.to_excel(
         assets_breakdown_file_path,
         sheet_name=f'{screenplay_title}_assets_breakdown',
@@ -419,7 +402,7 @@ def screenplay_assets_breakdown(
         # 将assets_id添加到scenes_list中，转换为字符串形式
         df_scenes_list.at[i, 'assets_id'] = str(assets_id)
     scenes_list = df_scenes_list.to_dict('records')
-    scenes_breakdown_file_path = TmpDir().path()+ f"{screenplay_title}_scenes_breakdown.xlsx"
+    scenes_breakdown_file_path = user_dir + f"{screenplay_title}_scenes_breakdown.xlsx"
     df_scenes_list.to_excel(
         scenes_breakdown_file_path,
         sheet_name=f'{screenplay_title}_scenes_breakdown',
@@ -523,3 +506,47 @@ def convert_punctuation(text: str) -> str:
     for en_punct, cn_punct in punctuation_map.items():
         text = text.replace(en_punct, cn_punct)
     return text
+
+def sc_counter(pdf_path:str) -> dict:
+    """精算每一场的字数.
+
+    args:
+        pdf_path: 剧本的本地存储路径，如'./tmp/《炒房客》_v2.pdf'
+    returns:
+        total_words： 总字数\n
+        words_per_page: 页均字数\n
+        counter_dict: 场号及对应场次内容的字数.
+    """
+    reader = PdfReader(pdf_path)
+    total_pages = len(reader.pages)
+    texts = ''.join([page.extract_text() for page in reader.pages])
+    # 1. 清理纯数字页码（位于每行开头或结尾的数字）
+    texts = re.sub(r'\s*\d+\s*$', '', texts, flags=re.MULTILINE)
+    # 2. 删除换行符
+    texts = texts.replace('\t', ' ').strip()
+    # 3. 删除脚标
+    footer_pattern = rf"\[{re.escape('炒房客')}\]\s*◁[\s\x00-\x1f]*▷\s*\n?"
+    texts = re.sub(footer_pattern, "", texts, flags=re.DOTALL)
+    total_words = len(texts)
+    words_per_page = total_words / total_pages
+    # 用句号、感叹号、问号和换行符拆分texts内容
+    lines_list = re.split(r'[。！？\n]|\s{2,}', texts)
+    # 统计每一场的字数
+    paragraph = ""
+    sc_heading = ""
+    sc_id = 0
+    counter_dict ={}
+    # 定义场次描述规则
+    pattern = r"第.*场|场景.*|\d+\..*|\d+.*"
+    for i, v in enumerate(lines_list):
+        # 只要每行的前3～7个字，符合场次描述规则
+        if any(re.match(pattern, v.strip()[:n]) is not None for n in (2, 3, 4, 5, 6, 7, 9, 10)):
+            counter_dict[f"scene{sc_id}"] = f'{len(paragraph)-len(sc_heading)}'
+            sc_id += 1
+            sc_heading = v
+            paragraph = ""
+        paragraph += v.strip()
+    # 循环结束后，捕获最后一场戏的字数
+    counter_dict[f"scene{sc_id}"] = f'{len(paragraph)}'
+    del counter_dict["scene0"]
+    return total_words, words_per_page, counter_dict

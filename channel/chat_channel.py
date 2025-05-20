@@ -13,6 +13,7 @@ from bridge.reply import *
 from channel.channel import Channel
 from common.dequeue import Dequeue
 from common import memory, const
+from common.tmp_dir import create_user_dir
 from plugins.bigchao.script_breakdown import cache_media
 from plugins import *
 
@@ -256,6 +257,10 @@ class ChatChannel(Channel):
                 if model in const.GEMINI_GENAI_SDK:  
                     # 文件消息,目前只针对gemini2.0+进行监听配置
                     file_path = context.content
+                    dir_path = os.path.dirname(file_path)
+                    dir_exists = os.path.exists(dir_path)
+                    if not dir_exists:
+                        create_user_dir(dir_path)
                     logger.info(f'[{model}] query with file, path={file_path}')
                     mime_type = file_path[(file_path.rfind('.') + 1):]
                     type_id = 'application'

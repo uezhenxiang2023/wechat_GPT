@@ -3,9 +3,10 @@ import re
 from bridge.context import ContextType
 from channel.chat_message import ChatMessage
 from common.log import logger
-from common.tmp_dir import TmpDir
+from common.tmp_dir import TmpDir, create_user_dir
 from telegram.ext import Updater
 from config import conf
+
 
 def get_file(file_id):
         """
@@ -21,11 +22,13 @@ def get_file(file_id):
         except Exception as e:
             return None, e
 
+
 def get_file_name(file):
     file_path = file.file_path
     file_name_index = file_path.rfind("/")
     file_name = file_path[file_name_index+1:]
     return file_name
+
 
 class TelegramMessage(ChatMessage):
     def __init__(self, telegram_message, is_group=False):
@@ -36,28 +39,29 @@ class TelegramMessage(ChatMessage):
         self.from_user_id = telegram_message["from_user"]["id"]
         self.to_user_id = telegram_message["chat_id"]
         self.other_user_id = self.to_user_id
+        self.user_dir = TmpDir().path() + str(self.from_user_id) + '/request/'
 
         if telegram_message["text"] and 'https://' not in telegram_message["text_html"]:
             self.ctype = ContextType.TEXT
             self.content = telegram_message["text"]
         elif telegram_message["voice"]:
             self.ctype = ContextType.VOICE
-            self.content = TmpDir().path() + telegram_message["FileName"]  # content直接存临时目录路径
+            self.content = self.user_dir + telegram_message["FileName"]  # content直接存临时目录路径
             self._prepare_fn = lambda: telegram_message.download(self.content)
         elif telegram_message["photo"]:
             self.ctype = ContextType.IMAGE
             file_id = telegram_message.photo[-1].file_id
             file, error = get_file(file_id)
             if file:
-                self.content = TmpDir().path() + get_file_name(file)  # content直接存临时目录路径
+                self.content = self.user_dir + get_file_name(file)  # content直接存临时目录路径
                 self._prepare_fn = lambda: file.download(self.content)
             if error:
-                error_reply = f"[TELEGRAMBOT] fetch get_file() error '{error}' ,because <{file_id}> is larger than 20MB, can't be downloaded" 
+                error_reply = f"[TELEGRAMBOT] fetch get_file() error '{error}' ,because <{file_id}> is larger than 20MB, can't be downloaded"
                 logger.error(error_reply)
                 raise NotImplementedError(error_reply)
         elif telegram_message["video"]:
             self.ctype = ContextType.VIDEO
-            self.content = TmpDir().path() + telegram_message["FileName"]  # content直接存临时目录路径
+            self.content = self.user_dir + telegram_message["FileName"]  # content直接存临时目录路径
             self._prepare_fn = lambda: telegram_message.download(self.content)
         elif telegram_message["NOTE"] and telegram_message["MsgType"] == 10000:
             if is_group and ("加入群聊" in telegram_message["Content"] or "加入了群聊" in telegram_message["Content"]):
@@ -75,7 +79,7 @@ class TelegramMessage(ChatMessage):
                 self.ctype = ContextType.EXIT_GROUP
                 self.content = telegram_message["Content"]
                 self.actual_user_nickname = re.findall(r"\"(.*?)\"", telegram_message["Content"])[0]
-                    
+
             elif "你已添加了" in telegram_message["Content"]:  #通过好友请求
                 self.ctype = ContextType.ACCEPT_FRIEND
                 self.content = telegram_message["Content"]
@@ -92,10 +96,10 @@ class TelegramMessage(ChatMessage):
             file_name = telegram_message.document.file_name
             file, error = get_file(file_id)
             if file:
-                self.content = TmpDir().path() + file_name  # content记录临时存储路径
+                self.content = self.user_dir + file_name  # content记录临时存储路径
                 self._prepare_fn = lambda: file.download(self.content)
             elif error:
-                error_reply = f"[TELEGRAMBOT] fetch get_file() error '{error}' ,because <{file_name}> is larger than 20MB, can't be downloaded" 
+                error_reply = f"[TELEGRAMBOT] fetch get_file() error '{error}' ,because <{file_name}> is larger than 20MB, can't be downloaded"
                 logger.error(error_reply)
                 raise NotImplementedError(error_reply)
         elif 'https://' in telegram_message["text_html"]:

@@ -249,10 +249,10 @@ class TelegramChannel(ChatChannel):
             except Exception as e:
                 logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, e))
                 self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
-                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(const.ERROR_RESPONSE, receiver))
+                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
         elif reply.type == ReplyType.ERROR:
             self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
-            logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(const.ERROR_RESPONSE, receiver))
+            logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
         elif reply.type == ReplyType.INFO:
             self.send_text(escape(reply.content), toUserName=receiver)
             logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply, receiver))
@@ -269,7 +269,7 @@ class TelegramChannel(ChatChannel):
                     finish_reason = response.candidates[0].finish_reason
                     logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
                     self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
-                    logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(const.ERROR_RESPONSE, receiver))
+                    logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
                 elif parts is not None:
                     reply_text = escape("\n".join(part.text for part in parts))
                 if grouding_metadata is not None:
@@ -299,7 +299,7 @@ class TelegramChannel(ChatChannel):
                 finish_reason = response.candidates[0].finish_reason
                 logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
                 self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
-                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(const.ERROR_RESPONSE, receiver))
+                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
             else:
                 for part in parts:
                     if part.text:
