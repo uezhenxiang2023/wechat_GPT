@@ -7,10 +7,12 @@ BigChao API
 import os
 import re
 import json
+import time
 
 import docx
 import pandas as pd
 import matplotlib.pyplot as plt
+import lark_oapi as lark
 from pypdf import PdfReader
 from google.genai.types import Part
 from docx import Document
@@ -19,6 +21,7 @@ from docx.oxml import ns, OxmlElement
 from docx.oxml.ns import qn
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx2pdf import convert
+from lark_oapi.api.bitable.v1 import *
 
 from config import conf
 from common import memory
@@ -26,6 +29,9 @@ from common.log import logger
 from common.tmp_dir import TmpDir, create_user_dir
 
 model = conf().get('model').upper()
+app_id = conf().get('feishu_app_id')
+app_secret = conf().get('feishu_app_secret')
+
 
 class AddPageNumber:
     """在文档右上角添加页码"""
@@ -64,6 +70,195 @@ class AddPageNumber:
         font.name = font_name
         font.size = Pt(font_size)
         font._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
+
+class CreateBase():
+    """创建BreakDown多维表格"""
+    def __init__(self, screenplay_title, session_id, scene_records, asset_records):
+        self.screenplay_title = screenplay_title
+        self.session_id = session_id
+        self.scene_records = scene_records
+        self.asset_records = asset_records
+        # 构建客户端
+        self.client = lark.Client.builder() \
+        .app_id(app_id) \
+        .app_secret(app_secret) \
+        .log_level(lark.LogLevel.INFO) \
+        .build()
+        self.app_token = self.copy_app()
+        copy_status = self.copy_status(self.app_token)
+        while copy_status != "success":
+            time.sleep(10)
+            copy_status = self.copy_status(self.app_token)
+        self.scene_table_id = self.list_app_table()[0]
+        self.asset_table_id = self.list_app_table()[1]
+
+    def copy_app(self):
+        """将BD多维表格模版拷贝到tmp目录"""
+        # 创建client
+        client = self.client
+
+        # 构造请求对象
+        request: CopyAppRequest = CopyAppRequest.builder() \
+            .app_token("Uen7bebXNaxe1WscVAec3O3Zn5f") \
+            .request_body(CopyAppRequestBody.builder()
+                .name(f"{self.screenplay_title}_BD_database_{self.session_id}")
+                .folder_token("GO4Kf8RgSlXZzgdhtg8cJw1Tn9d")
+                .without_content(False)
+                .time_zone("Asia/Shanghai")
+                .build()) \
+            .build()
+
+        # 发起请求
+        response: CopyAppResponse = client.bitable.v1.app.copy(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.bitable.v1.app.copy failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
+            return
+        else:
+            # 处理业务结果
+            lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+            return response.data.app.app_token
+    
+    def copy_status(self, app_token):
+        """获取多维表格的拷贝状态"""
+        # 创建client
+        client = self.client
+
+        # 构造请求对象
+        request: GetAppRequest = GetAppRequest.builder() \
+            .app_token(app_token) \
+            .build()
+
+        # 发起请求
+        response: GetAppResponse = client.bitable.v1.app.get(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.bitable.v1.app.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
+            return
+
+        else:
+            # 处理业务结果
+            lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+            return response.msg
+    
+    def list_app_table(self):
+        """列出多维表格中的数据表"""
+    # 创建client
+        client = self.client
+
+        # 构造请求对象
+        request: ListAppTableRequest = ListAppTableRequest.builder() \
+            .app_token(self.app_token) \
+            .page_size(20) \
+            .build()
+
+        # 发起请求
+        response: ListAppTableResponse = client.bitable.v1.app_table.list(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.bitable.v1.app_table.list failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
+            return
+        else:
+            # 处理业务结果
+            items = response.data.items
+            # 提取资产表与场景表的table_id
+            for item in items:
+                if item.name[-7:] == "assects":
+                    assects_bd_table = item.table_id
+                elif item.name[-6:] == 'scenes':
+                    scenes_bd_table = item.table_id
+                    lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+            return scenes_bd_table, assects_bd_table
+        
+    def add_scene_table_record(self):
+        """向多维表格的场景数据表中批量添加记录"""
+        # 创建client
+        client = self.client 
+
+        # 构造请求对象
+        request: BatchCreateAppTableRecordRequest = BatchCreateAppTableRecordRequest.builder() \
+            .app_token(self.app_token) \
+            .table_id(self.scene_table_id) \
+            .request_body(BatchCreateAppTableRecordRequestBody.builder()
+                .records(self.scene_records)
+                .build()) \
+            .build()
+
+        # 发起请求
+        response: BatchCreateAppTableRecordResponse = client.bitable.v1.app_table_record.batch_create(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.bitable.v1.app_table_record.batch_create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
+            return
+        else:
+            # 处理业务结果
+            lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+
+    def add_asset_table_record(self):
+        """向多维表格的资产数据表中批量添加记录"""
+        # 创建client
+        client = self.client
+
+        # 构造请求对象
+        request: BatchCreateAppTableRecordRequest = BatchCreateAppTableRecordRequest.builder() \
+            .app_token(self.app_token) \
+            .table_id(self.asset_table_id) \
+            .request_body(BatchCreateAppTableRecordRequestBody.builder()
+                .records(self.asset_records)
+                .build()) \
+            .build()
+
+        # 发起请求
+        response: BatchCreateAppTableRecordResponse = client.bitable.v1.app_table_record.batch_create(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.bitable.v1.app_table_record.batch_create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
+            return
+        else:
+            # 处理业务结果
+            lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+
+def scene_records(bd_file_path:str):
+    """构建批量场景记录消息体"""
+    df_scenes_list = pd.read_excel(bd_file_path)
+    # 将scene_id字段转换为字符串类型
+    df_scenes_list['scene_id'] = df_scenes_list['scene_id'].astype(str)
+    scenes_list = df_scenes_list.to_dict('records')
+    for item in scenes_list:
+        if 'assets_id' in item:
+            # Remove quotes and spaces from the string, then split by comma
+            assets_id_str = item['assets_id'].replace("'", "").replace("[", "").replace("]", "").strip()
+            # Convert to list, excluding empty strings
+            item['assets_id'] = [x.strip() for x in assets_id_str.split(',') if x.strip()]
+    scene_records = [AppTableRecord.builder().fields(v).build() for v in scenes_list]
+    return scene_records
+
+def asset_records(bd_file_path:str):
+    """构建批量资产记录消息体"""
+    df_assets_list = pd.read_excel(bd_file_path)
+    assets_list = df_assets_list.to_dict('records')
+    for item in assets_list:
+        if 'visual_effects_type' in item and pd.isna(item['visual_effects_type']):
+            item['visual_effects_type'] = ""
+        if 'visual_effects_description' in item and pd.isna(item['visual_effects_description']):
+            item['visual_effects_description'] = ""
+        if 'scene_ids' in item:
+            # Remove quotes and spaces from the string, then split by comma
+            scene_ids_str = str(item['scene_ids']).replace("'", "").replace("[", "").replace("]", "").strip()
+            # Convert to list, excluding empty strings
+            item['scene_ids'] = [x.strip() for x in scene_ids_str.split(',') if x.strip()]
+    asset_records = [AppTableRecord.builder().fields(v).build() for v in assets_list]
+    return asset_records
 
 def screenplay_formatter(
         fn_name: str = None,
@@ -391,8 +586,10 @@ def screenplay_assets_breakdown(
         index=False
     )
     logger.info(f"[TELEGRAMBOT_{model}] {assets_breakdown_file_path} is saved")
+    # 为资产构建飞书多维表格的批量记录
+    asset_records_list = asset_records(assets_breakdown_file_path)
 
-    # 统计场景引用的资产,更新scenes_list
+    # 统计场景引用的资产,更新scenes_lists
     for i, v in enumerate(df_scenes_list['scene_id']):
         assets_id = []
         for asset_id_index, scene_ids in enumerate(df_assets_list['scene_ids']):
@@ -409,6 +606,14 @@ def screenplay_assets_breakdown(
         index=False
     )
     logger.info(f"[TELEGRAMBOT_{model}] {scenes_breakdown_file_path} is updated")
+    # 为场景构建飞书多维表格的批量记录
+    scene_records_list = scene_records(scenes_breakdown_file_path)
+    # 创建多维表格
+    base = CreateBase(screenplay_title, session_id, scene_records_list, asset_records_list)
+    base.add_scene_table_record()
+    base.add_asset_table_record()
+    logger.info(f"[TELEGRAMBOT_{model}][Lark_Base]{screenplay_title} is created")
+
 
     """# Send the scenes_breakdown.xlsx to the user
     with open(scenes_breakdown_file_path, 'rb') as f:
