@@ -1,13 +1,45 @@
+import os, json, re
+
+import lark_oapi as lark
+from lark_oapi.api.im.v1 import *
+
+from config import conf
 from bridge.context import ContextType
 from channel.chat_message import ChatMessage
-import json, re
 from common.log import logger
 from common.tmp_dir import TmpDir
 
-def get_file(file_id):
-        """
-        Use this method to get basic information about a file and prepare it for downloading.
-        """
+def get_message_resource(*, message_id, file_key, type, file_path):
+    """
+    Use this method to get basic information about resource in IM and prepare it for downloading.
+    """
+    # 创建client
+    client = lark.Client.builder() \
+        .app_id(conf().get('feishu_app_id')) \
+        .app_secret(conf().get('feishu_app_secret')) \
+        .log_level(lark.LogLevel.INFO) \
+        .build()
+
+    # 构造请求对象
+    request: GetMessageResourceRequest = GetMessageResourceRequest.builder() \
+        .message_id(message_id) \
+        .file_key(file_key) \
+        .type(type) \
+        .build()
+
+    # 发起请求
+    response: GetMessageResourceResponse = client.im.v1.message_resource.get(request)
+
+    # 处理失败返回
+    if not response.success():
+        lark.logger.error(
+            f"client.im.v1.message_resource.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
+        return
+
+    # 处理业务结果
+    f = open(file_path, "wb")
+    f.write(response.file.read())
+    f.close()
 
 def get_file_name(file):
     file_path = file.file_path
@@ -25,18 +57,19 @@ class FeishuMessage(ChatMessage):
         self.from_user_id = event.sender.sender_id.open_id
         self.to_user_id = event.message.chat_id
         self.other_user_id = self.to_user_id
+        self.user_dir = TmpDir().path() + str(self.from_user_id) + '/request/'
 
         if event.message.message_type == 'text':
             self.ctype = ContextType.TEXT
             self.content = json.loads(event.message.content)["text"]
-        elif event.message["voice"]:
+        elif event.message.message_type == 'audio':
             self.ctype = ContextType.VOICE
             self.content = TmpDir().path() + event.message["FileName"]  # content直接存临时目录路径
             self._prepare_fn = lambda: event.message.download(self.content)
-        elif event.message["photo"]:
+        elif event.message.message_type == 'image':
             self.ctype = ContextType.IMAGE
             file_id = event.message.photo[-1].file_id
-            file, error = get_file(file_id)
+            file, error = get_message_resource(file_id)
             if file:
                 self.content = TmpDir().path() + get_file_name(file)  # content直接存临时目录路径
                 self._prepare_fn = lambda: file.download(self.content)
@@ -44,52 +77,15 @@ class FeishuMessage(ChatMessage):
                 error_reply = f"[Lark] fetch get_file() error '{error}' ,because <{file_id}> is larger than 20MB, can't be downloaded" 
                 logger.error(error_reply)
                 raise NotImplementedError(error_reply)
-        elif event.message["video"]:
+        elif event.message.message_type == 'media':
             self.ctype = ContextType.VIDEO
             self.content = TmpDir().path() + event.message["FileName"]  # content直接存临时目录路径
             self._prepare_fn = lambda: event.message.download(self.content)
-        elif event.message["NOTE"] and event.message["MsgType"] == 10000:
-            if is_group and ("加入群聊" in event.message["Content"] or "加入了群聊" in event.message["Content"]):
-                # 这里只能得到nickname， actual_user_id还是机器人的id
-                if "加入了群聊" in event.message["Content"]:
-                    self.ctype = ContextType.JOIN_GROUP
-                    self.content = event.message["Content"]
-                    self.actual_user_nickname = re.findall(r"\"(.*?)\"", event.message["Content"])[-1]
-                elif "加入群聊" in event.message["Content"]:
-                    self.ctype = ContextType.JOIN_GROUP
-                    self.content = event.message["Content"]
-                    self.actual_user_nickname = re.findall(r"\"(.*?)\"", event.message["Content"])[0]
-
-            elif is_group and ("移出了群聊" in event.message["Content"]):
-                self.ctype = ContextType.EXIT_GROUP
-                self.content = event.message["Content"]
-                self.actual_user_nickname = re.findall(r"\"(.*?)\"", event.message["Content"])[0]
-                    
-            elif "你已添加了" in event.message["Content"]:  #通过好友请求
-                self.ctype = ContextType.ACCEPT_FRIEND
-                self.content = event.message["Content"]
-            elif "拍了拍我" in event.message["Content"]:
-                self.ctype = ContextType.PATPAT
-                self.content = event.message["Content"]
-                if is_group:
-                    self.actual_user_nickname = re.findall(r"\"(.*?)\"", event.message["Content"])[0]
-            else:
-                raise NotImplementedError("Unsupported note message: " + event.message["Content"])
-        elif event.message["document"]:
+        elif event.message.message_type == 'file':
             self.ctype = ContextType.FILE
-            file_id = event.message.document.file_id
-            file_name = event.message.document.file_name
-            file, error = get_file(file_id)
-            if file:
-                self.content = TmpDir().path() + file_name  # content直接存临时目录路径
-                self._prepare_fn = lambda: file.download(self.content)
-            elif error:
-                error_reply = f"[Lark] fetch get_file() error '{error}' ,because <{file_name}> is larger than 20MB, can't be downloaded" 
-                logger.error(error_reply)
-                raise NotImplementedError(error_reply)
-        elif 'https://' in event.message["text_html"]:
-            self.ctype = ContextType.SHARING
-            self.content = event.message["text_html"]
-
+            file_key = json.loads(event.message.content)["file_key"]
+            file_name = json.loads(event.message.content)["file_name"]
+            self.content = self.user_dir + file_name  # content直接存临时目录路径
+            self._prepare_fn = lambda: get_message_resource(message_id=self.msg_id, file_key=file_key, type=event.message.message_type, file_path=self.content)
         else:
             raise NotImplementedError("Unsupported message type: Type:{} MsgType:{}".format(event.message["Type"], event.message["MsgType"]))
