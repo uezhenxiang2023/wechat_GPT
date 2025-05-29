@@ -261,6 +261,7 @@ def asset_records(bd_file_path:str):
     return asset_records
 
 def screenplay_formatter(
+        session_id,
         fn_name: str = None,
         *,
         screenplay_title: str = None,
@@ -293,8 +294,12 @@ def screenplay_formatter(
             add_character(doc, paragraph_metadata)
         elif category == 'dialogue':
             add_dialogue(doc, paragraph_metadata)
-    docx_file_path = TmpDir().path() + f"{screenplay_title}.docx"
-    pdf_file_path = TmpDir().path() + f"{screenplay_title}.pdf"
+    user_dir = TmpDir().path() + str(session_id) + '/response/'
+    user_dir_exists = os.path.exists(user_dir)
+    if not user_dir_exists:
+        create_user_dir(user_dir)
+    docx_file_path = user_dir + f"{screenplay_title}.docx"
+    pdf_file_path = user_dir + f"{screenplay_title}.pdf"
     # 将文档存储到本地目录
     doc.save(docx_file_path)
     logger.info(f"[TELEGRAMBOT_{model}] {docx_file_path} is saved")

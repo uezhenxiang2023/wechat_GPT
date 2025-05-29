@@ -6,7 +6,7 @@
 """
 
 # -*- coding=utf-8 -*-
-import io, json
+import io, json, os, uuid
 from flask import Flask
 
 import requests
@@ -220,9 +220,13 @@ class FeiShuChanel(ChatChannel):
             self.send_image(image_storage, toUserName=receiver)
             logger.info("[Lark] sendImage, receiver={}".format(receiver))
         elif reply.type == ReplyType.FILE:  # 新增文件回复类型
-            file_storage = reply.content
-            self.send_file(file_storage, toUserName=receiver)
-            logger.info("[Lark] sendFile, receiver={}".format(receiver))
+            file_pathes = reply.content['function_response']['file_pathes']
+            reply_text = reply.content['reply_text']
+            for file_path in file_pathes:
+                self.send_file(file_path, toUserName=receiver)
+                logger.info("[Lark] sendFile={}, receiver={}".format(file_path, receiver))
+            self.send_text(reply_text, receiver)
+            logger.info("[Lark] sendMsg={}, receiver={}".format(reply_text, receiver))
         elif reply.type == ReplyType.VIDEO:  # 新增视频回复类型
             video_storage = reply.content
             self.send_video(video_storage, toUserName=receiver)
@@ -275,8 +279,109 @@ class FeiShuChanel(ChatChannel):
         """
         This function sends a response image back to the user.
         """
+        # 创建client
+        client = self.client
+        image_key = self.create_file(reply_content)
+        content = json.dumps(
+            {
+                "image_key": image_key
+            }
+        )
+
+        # 生成唯一的UUID
+        request_uuid = str(uuid.uuid4())
+
+        # 构造请求对象
+        request: CreateMessageRequest = CreateMessageRequest.builder() \
+            .receive_id_type("chat_id") \
+            .request_body(CreateMessageRequestBody.builder()
+                .receive_id(toUserName)
+                .msg_type("file")
+                .content(content)
+                .uuid(request_uuid)
+                .build()) \
+            .build()
+
+        # 发起请求
+        response: CreateMessageResponse = client.im.v1.message.create(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.im.v1.message.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
+            return
+
+        # 处理业务结果
+        lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+
+    def create_file(self, file_path):
+        """
+        This function uploads file to Lark OpenAPI.
+        """
+        # 创建client
+        client = self.client
+        # 构造请求对象
+        filename = os.path.basename(file_path)
+        name, ext = os.path.splitext(filename)
+        ext = ext.lstrip('.')
+        file = open(file_path, "rb")
+        request: CreateFileRequest = CreateFileRequest.builder() \
+            .request_body(CreateFileRequestBody.builder()
+                .file_type(ext)
+                .file_name(filename)
+                .file(file)
+                .build()) \
+            .build()
+
+        # 发起请求
+        response: CreateFileResponse = client.im.v1.file.create(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.im.v1.file.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
+            return
+
+        else:
+            # 处理业务结果
+            lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+            return response.data.file_key
 
     def send_file(self, reply_content, toUserName):
         """
         This function sends a response file back to the user.
         """
+        # 创建client
+        client = self.client
+        file_key = self.create_file(reply_content)
+        content = json.dumps(
+            {
+                "file_key": file_key
+            }
+        )
+
+        # 生成唯一的UUID
+        request_uuid = str(uuid.uuid4())
+
+        # 构造请求对象
+        request: CreateMessageRequest = CreateMessageRequest.builder() \
+            .receive_id_type("chat_id") \
+            .request_body(CreateMessageRequestBody.builder()
+                .receive_id(toUserName)
+                .msg_type("file")
+                .content(content)
+                .uuid(request_uuid)
+                .build()) \
+            .build()
+
+        # 发起请求
+        response: CreateMessageResponse = client.im.v1.message.create(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.im.v1.message.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
+            return
+
+        # 处理业务结果
+        lark.logger.info(lark.JSON.marshal(response.data, indent=4))

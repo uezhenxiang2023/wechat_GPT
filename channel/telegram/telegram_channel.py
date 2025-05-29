@@ -320,7 +320,7 @@ class TelegramChannel(ChatChannel):
                     self.send_file(f, toUserName=receiver)
                 logger.info("[TELEGRAMBOT] sendFile={}, receiver={}".format(file_path, receiver))
             self.send_text(reply_text, receiver)
-            logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(reply_text, receiver))
+            logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply_text, receiver))
         elif reply.type == ReplyType.VIDEO:  # 新增视频回复类型
             video_storage = reply.content
             self.send_video(video_storage, toUserName=receiver)
