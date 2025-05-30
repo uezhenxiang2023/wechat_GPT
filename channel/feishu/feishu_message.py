@@ -68,15 +68,9 @@ class FeishuMessage(ChatMessage):
             self._prepare_fn = lambda: event.message.download(self.content)
         elif event.message.message_type == 'image':
             self.ctype = ContextType.IMAGE
-            file_id = event.message.photo[-1].file_id
-            file, error = get_message_resource(file_id)
-            if file:
-                self.content = TmpDir().path() + get_file_name(file)  # content直接存临时目录路径
-                self._prepare_fn = lambda: file.download(self.content)
-            if error:
-                error_reply = f"[Lark] fetch get_file() error '{error}' ,because <{file_id}> is larger than 20MB, can't be downloaded" 
-                logger.error(error_reply)
-                raise NotImplementedError(error_reply)
+            image_key = json.loads(event.message.content)["image_key"]
+            self.content = self.user_dir + image_key  # content直接存临时目录路径
+            self._prepare_fn = lambda: get_message_resource(message_id=self.msg_id, file_key=image_key, type=event.message.message_type, file_path=self.content)
         elif event.message.message_type == 'media':
             self.ctype = ContextType.VIDEO
             self.content = TmpDir().path() + event.message["FileName"]  # content直接存临时目录路径

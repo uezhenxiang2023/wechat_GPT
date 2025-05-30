@@ -16,6 +16,7 @@ from common import memory, const
 from common.tmp_dir import create_user_dir
 from plugins.bigchao.script_breakdown import cache_media
 from plugins import *
+from config import conf
 
 try:
     from voice.audio_convert import any_to_wav
@@ -228,7 +229,8 @@ class ChatChannel(Channel):
                     logger.info(f'[{model}] query with file, path={image_path}')
                     mime_type = image_path[(image_path.rfind('.') + 1):]
                     type_id = 'image'
-                    if mime_type in const.IMAGE:
+                    channel_type = conf().get("channel_type")
+                    if mime_type in const.IMAGE or channel_type == 'feishu':
                         context['msg'].prepare()
                         img = Image.open(image_path)
                         image_file = img
@@ -237,10 +239,10 @@ class ChatChannel(Channel):
                             # Convert the image to RGB mode,whick removes the alpha channel
                             img = img.convert('RGB')
                             # Save the converted image
-                            img_path_no_alpha = image_path[:len(image_path)-3] + 'jpg'
+                            img_path_no_alpha = image_path + '.jpg' if channel_type == 'feishu' else image_path[:len(image_path)-3] + 'jpg'
                             img.save(img_path_no_alpha)
                             # Update img_path with the path to the converted image
-                            image_file = img_path_no_alpha
+                            image_path = img_path_no_alpha
                         cache_media(image_path, image_file, context)
                     else:
                         logger.warning(f'[{model}] query with unsupported image type:{mime_type}') 

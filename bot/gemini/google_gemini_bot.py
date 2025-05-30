@@ -474,7 +474,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
                             elif mime_type == 'application/pdf':
                                 file_content = Part.from_bytes(**first_data)
                                 resquest_contents.insert(0, file_content)
-                        elif data_type in ['JpegImageFile', 'File']:
+                        elif data_type in ['JpegImageFile', 'PngImageFile', 'File']:
                             file_cache['files'].append(text)
                             resquest_contents = file_cache['files']
                         elif data_type in ['FileData']:
