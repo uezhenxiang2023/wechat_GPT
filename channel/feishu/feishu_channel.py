@@ -6,15 +6,17 @@
 """
 
 # -*- coding=utf-8 -*-
-import io, json, os, uuid
+import io, json, os, uuid, requests
+from io import BytesIO
 from flask import Flask
 
-import requests
 from channel.feishu.feishu_message import FeishuMessage
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
 from common.singleton import singleton
+from common import const, tool_button
+from common.tmp_dir import TmpDir
 from config import conf
 from bridge.context import ContextType
 from channel.chat_channel import ChatChannel
@@ -23,6 +25,7 @@ import lark_oapi as lark
 from lark_oapi.api.im.v1 import *
 from lark_oapi.adapter.flask import *
 from channel.telegram.telegram_text_util import escape
+from common.tmp_dir import TmpDir, create_user_dir
 
 
 @singleton
@@ -45,6 +48,7 @@ class FeiShuChanel(ChatChannel):
         self.event_handler = (
             lark.EventDispatcherHandler.builder(self.CLIENT_ENCRYPT_KEY, self.CLIENT_VERIFICATION_TOKEN)
             .register_p2_im_message_receive_v1(self.do_p2_im_message_receive_v1)
+            .register_p2_application_bot_menu_v6(self.do_p2_application_bot_menu_v6)
             .build()
         )
         # Create LarkClient object for requesting OpenAPI, and create LarkWSClient object for receiving events using long connection.
@@ -87,6 +91,16 @@ class FeiShuChanel(ChatChannel):
                 raise Exception(
                     f"client.im.v1.message.reply failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}"
                 )"""
+    # Register event handler to handle bot menu.
+    # https://open.feishu.cn/document/client-docs/bot-v3/events/menu
+    def do_p2_application_bot_menu_v6(self, data: lark.application.v6.P2ApplicationBotMenuV6) -> None:
+        print(f'[ do_p2_application_bot_menu_v6 access ], data: {lark.JSON.marshal(data, indent=4)}')
+        event_key = data.event.event_key
+        open_id = data.event.operator.operator_id.open_id
+        if event_key == 'imaging':
+            self.image(open_id)
+        elif event_key == 'searching':
+            self.search(open_id)
 
     def handle_webhook_event(self):
         """Webhook event handler"""
@@ -98,6 +112,29 @@ class FeiShuChanel(ChatChannel):
         except Exception as e:
             logger.error(f"[Lark]Error handling webhook event: {str(e)}")
             return {"[Lark]error": str(e)}, 500
+    
+    def search(self, toUserName) -> None:
+        """
+        This function handles the search menu
+        """
+        if tool_button.searching:
+            text = "联网功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
+        elif not tool_button.searching:
+            text = "联网搜索功能已开启，需要我帮你查询点啥？"
+        tool_button.searching = not tool_button.searching
+        self.send_text(text, toUserName)
+        
+    
+    def image(self, toUserName) -> None:
+        """
+        This function handles image menu
+        """
+        if tool_button.imaging:
+            text = "图片生成功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
+        elif not tool_button.imaging:
+            text = "图片生成功能已开启，需要我帮你弄点啥图？"
+        tool_button.imaging = not tool_button.imaging
+        self.send_text(text, toUserName)
 
     def main(self):
         if self.websocket is True:
@@ -215,10 +252,34 @@ class FeiShuChanel(ChatChannel):
             self.send_image(image_storage, toUserName=receiver)
             logger.info("[Lark] sendImage url={}, receiver={}".format(img_url, receiver))
         elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
-            image_storage = reply.content
-            image_storage.seek(0)
-            self.send_image(image_storage, toUserName=receiver)
-            logger.info("[Lark] sendImage, receiver={}".format(receiver))
+            response = reply.content
+            parts = response.candidates[0].content.parts
+            if parts is None:
+                finish_reason = response.candidates[0].finish_reason
+                logger.error("[Lark] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
+                self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
+                logger.info("[Lark] sendMsg={}, receiver={}".format(reply.content, receiver))
+            else:
+                for part in parts:
+                    if part.text:
+                        reply_text = part.text
+                        self.send_text(reply_text, receiver)
+                        logger.info("[Lark_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(part.text, receiver))
+                    elif part.inline_data:
+                        image_type = part.inline_data.mime_type.split('/')[-1]
+                        image = BytesIO(part.inline_data.data)
+                        logger.info(f"[Lark_GEMINI-2.0-FLASH-EXP] reply={image}")
+                        image.seek(0)
+                        user_dir = TmpDir().path() + str(receiver) + '/response/'
+                        user_dir_exists = os.path.exists(user_dir)
+                        if not user_dir_exists:
+                            create_user_dir(user_dir)
+                        response_uuid = str(uuid.uuid4())
+                        image_path = user_dir + response_uuid + '.' + image_type
+                        with open(image_path, 'wb') as f:
+                            f.write(image.read())
+                        self.send_image(image_path, receiver)
+                        logger.info("[Lark_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(image, receiver))
         elif reply.type == ReplyType.FILE:  # 新增文件回复类型
             file_pathes = reply.content['function_response']['file_pathes']
             reply_text = reply.content['reply_text']
@@ -256,7 +317,7 @@ class FeiShuChanel(ChatChannel):
         )
         request = (
                 CreateMessageRequest.builder()
-                .receive_id_type("chat_id")
+                .receive_id_type("open_id")
                 .request_body(
                     CreateMessageRequestBody.builder()
                     .receive_id(toUserName)
@@ -281,7 +342,7 @@ class FeiShuChanel(ChatChannel):
         """
         # 创建client
         client = self.client
-        image_key = self.create_file(reply_content)
+        image_key = self.create_image(reply_content)
         content = json.dumps(
             {
                 "image_key": image_key
@@ -293,10 +354,10 @@ class FeiShuChanel(ChatChannel):
 
         # 构造请求对象
         request: CreateMessageRequest = CreateMessageRequest.builder() \
-            .receive_id_type("chat_id") \
+            .receive_id_type("open_id") \
             .request_body(CreateMessageRequestBody.builder()
                 .receive_id(toUserName)
-                .msg_type("file")
+                .msg_type("image")
                 .content(content)
                 .uuid(request_uuid)
                 .build()) \
@@ -310,9 +371,37 @@ class FeiShuChanel(ChatChannel):
             lark.logger.error(
                 f"client.im.v1.message.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
             return
-
         # 处理业务结果
         lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+    
+    def create_image(self, image_path):
+        """
+        This function uploads image to Lark OpenAPI.
+        """
+        # 创建client
+        client = self.client
+
+        # 构造请求对象
+        file = open(image_path, "rb")
+        request: CreateImageRequest = CreateImageRequest.builder() \
+            .request_body(CreateImageRequestBody.builder()
+                .image_type("message")
+                .image(file)
+                .build()) \
+            .build()
+
+        # 发起请求
+        response: CreateImageResponse = client.im.v1.image.create(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.im.v1.image.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
+            return
+        # 处理业务结果
+        else:
+            lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+            return response.data.image_key
 
     def create_file(self, file_path):
         """

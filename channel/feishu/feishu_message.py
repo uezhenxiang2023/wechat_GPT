@@ -56,7 +56,7 @@ class FeishuMessage(ChatMessage):
         self.is_group = is_group
         self.from_user_id = event.sender.sender_id.open_id
         self.to_user_id = event.message.chat_id
-        self.other_user_id = self.to_user_id
+        self.other_user_id = self.from_user_id
         self.user_dir = TmpDir().path() + str(self.from_user_id) + '/request/'
 
         if event.message.message_type == 'text':
