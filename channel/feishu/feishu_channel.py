@@ -238,19 +238,39 @@ class FeiShuChanel(ChatChannel):
         elif reply.type == ReplyType.VOICE:
             self.send_file(reply.content, toUserName=receiver)
             logger.info("[Lark] sendFile={}, receiver={}".format(reply.content, receiver))
-        elif reply.type == ReplyType.IMAGE_URL:  # 从网络下载图片
-            img_url = reply.content
-            logger.debug(f"[Lark] start download image, img_url={img_url}")
-            pic_res = requests.get(img_url, stream=True)
-            image_storage = io.BytesIO()
-            size = 0
-            for block in pic_res.iter_content(1024):
-                size += len(block)
-                image_storage.write(block)
-            logger.info(f"[Lark] download image success, size={size}, img_url={img_url}")
-            image_storage.seek(0)
-            self.send_image(image_storage, toUserName=receiver)
-            logger.info("[Lark] sendImage url={}, receiver={}".format(img_url, receiver))
+        elif reply.type == ReplyType.IMAGE_URL:  # 获取网络资源
+            response = reply.content
+            if not isinstance(response, str):
+                #获取网址
+                parts = response.candidates[0].content.parts
+                grouding_metadata = response.candidates[0].grounding_metadata
+                if parts is None:
+                    finish_reason = response.candidates[0].finish_reason
+                    logger.error("[Lark] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
+                    self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
+                    logger.info("[Lark] sendMsg={}, receiver={}".format(reply.content, receiver))
+                elif parts is not None:
+                    reply_text = "\n".join(part.text for part in parts)
+                if grouding_metadata is not None:
+                    inline_url = self.get_search_sources(grouding_metadata)
+                reply_content = reply_text + "\n\n" + inline_url
+                self.send_text(reply_content, receiver)
+                logger.info("[Lark] sendMsg={}, receiver={}".format(reply_content, receiver))
+
+            else:
+                # 下载图片
+                img_url = reply.content
+                logger.debug(f"[TELEGRAMBOT] start download image, img_url={img_url}")
+                pic_res = requests.get(img_url, stream=True)
+                image_storage = io.BytesIO()
+                size = 0
+                for block in pic_res.iter_content(1024):
+                    size += len(block)
+                    image_storage.write(block)
+                logger.info(f"[TELEGRAMBOT] download image success, size={size}, img_url={img_url}")
+                image_storage.seek(0)
+                self.send_image(image_storage, toUserName=receiver)
+                logger.info("[TELEGRAMBOT] sendImage url={}, receiver={}".format(img_url, receiver))
         elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
             response = reply.content
             parts = response.candidates[0].content.parts
@@ -305,6 +325,20 @@ class FeiShuChanel(ChatChannel):
             video_storage.seek(0)
             self.send_video(video_storage, toUserName=receiver)
             logger.info("[Lark] sendVideo url={}, receiver={}".format(video_url, receiver))
+
+    def get_search_sources(self, grounding_metadata):
+        """
+        Get search sources from the response Grounded with Google Search
+        """
+        sources = []
+        ground_chunks = grounding_metadata.grounding_chunks
+        for i, ground_chunk in enumerate(ground_chunks):
+            title = ground_chunk.web.title
+            uri = ground_chunk.web.uri
+            source = f'{i+1}.[{title}]({uri})'
+            sources.append(source)
+        inline_url = '\n'.join(sources)
+        return inline_url
 
     def send_text(self, reply_content, toUserName):
         """
@@ -454,7 +488,7 @@ class FeiShuChanel(ChatChannel):
 
         # 构造请求对象
         request: CreateMessageRequest = CreateMessageRequest.builder() \
-            .receive_id_type("chat_id") \
+            .receive_id_type("open_id") \
             .request_body(CreateMessageRequestBody.builder()
                 .receive_id(toUserName)
                 .msg_type("file")

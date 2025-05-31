@@ -259,7 +259,7 @@ class TelegramChannel(ChatChannel):
         elif reply.type == ReplyType.VOICE:
             self.send_file(reply.content, toUserName=receiver)
             logger.info("[TELEGRAMBOT] sendFile={}, receiver={}".format(reply.content, receiver))
-        elif reply.type == ReplyType.IMAGE_URL:  # 从网络下载图片、获取网址
+        elif reply.type == ReplyType.IMAGE_URL:  # 获取网络资源
             response = reply.content
             if not isinstance(response, str):
                 #获取网址
