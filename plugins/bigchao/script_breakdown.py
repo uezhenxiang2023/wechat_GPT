@@ -9,9 +9,7 @@ import re
 import json
 import time
 
-import docx
 import pandas as pd
-import matplotlib.pyplot as plt
 import lark_oapi as lark
 from pypdf import PdfReader
 from google.genai.types import Part
@@ -113,12 +111,12 @@ class CreateBase():
 
         # 处理失败返回
         if not response.success():
-            lark.logger.error(
+            logger.error(
                 f"client.bitable.v1.app.copy failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
             return
         else:
             # 处理业务结果
-            lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+            logger.info(lark.JSON.marshal(response.data, indent=4))
             return response.data.app.app_token
     
     def copy_status(self, app_token):
@@ -136,13 +134,13 @@ class CreateBase():
 
         # 处理失败返回
         if not response.success():
-            lark.logger.error(
+            logger.error(
                 f"client.bitable.v1.app.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
             return
 
         else:
             # 处理业务结果
-            lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+            logger.info(lark.JSON.marshal(response.data, indent=4))
             return response.msg
     
     def list_app_table(self):
@@ -161,7 +159,7 @@ class CreateBase():
 
         # 处理失败返回
         if not response.success():
-            lark.logger.error(
+            logger.error(
                 f"client.bitable.v1.app_table.list failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
             return
         else:
@@ -173,7 +171,7 @@ class CreateBase():
                     assects_bd_table = item.table_id
                 elif item.name[-6:] == 'scenes':
                     scenes_bd_table = item.table_id
-                    lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+                    logger.info(lark.JSON.marshal(response.data, indent=4))
             return scenes_bd_table, assects_bd_table
         
     def add_scene_table_record(self):
@@ -195,12 +193,12 @@ class CreateBase():
 
         # 处理失败返回
         if not response.success():
-            lark.logger.error(
+            logger.error(
                 f"client.bitable.v1.app_table_record.batch_create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
             return
         else:
             # 处理业务结果
-            lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+            logger.info(lark.JSON.marshal(response.data, indent=4))
 
     def add_asset_table_record(self):
         """向多维表格的资产数据表中批量添加记录"""
@@ -221,12 +219,12 @@ class CreateBase():
 
         # 处理失败返回
         if not response.success():
-            lark.logger.error(
+            logger.error(
                 f"client.bitable.v1.app_table_record.batch_create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
             return
         else:
             # 处理业务结果
-            lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+            logger.info(lark.JSON.marshal(response.data, indent=4))
 
 def scene_records(bd_file_path:str):
     """构建批量场景记录消息体"""

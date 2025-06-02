@@ -6,7 +6,7 @@
 """
 
 # -*- coding=utf-8 -*-
-import io, json, os, uuid, requests
+import io, json, os, uuid, requests, threading
 from io import BytesIO
 from flask import Flask
 
@@ -94,7 +94,7 @@ class FeiShuChanel(ChatChannel):
     # Register event handler to handle bot menu.
     # https://open.feishu.cn/document/client-docs/bot-v3/events/menu
     def do_p2_application_bot_menu_v6(self, data: lark.application.v6.P2ApplicationBotMenuV6) -> None:
-        print(f'[ do_p2_application_bot_menu_v6 access ], data: {lark.JSON.marshal(data, indent=4)}')
+        logger.info(f'[ do_p2_application_bot_menu_v6 access ], data: {lark.JSON.marshal(data, indent=4)}')
         event_key = data.event.event_key
         open_id = data.event.operator.operator_id.open_id
         if event_key == 'imaging':
@@ -104,6 +104,7 @@ class FeiShuChanel(ChatChannel):
 
     def handle_webhook_event(self):
         """Webhook event handler"""
+        logger.debug(f"Current thread: {threading.current_thread().name}")
         try:
             # 获取请求数据
             event_data = parse_req()
