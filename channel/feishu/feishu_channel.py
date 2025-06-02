@@ -124,6 +124,7 @@ class FeiShuChanel(ChatChannel):
             text = "联网搜索功能已开启，需要我帮你查询点啥？"
         tool_button.searching = not tool_button.searching
         self.send_text(text, toUserName)
+        logger.info(f'[Lark]{text}')
         
     
     def image(self, toUserName) -> None:
@@ -131,11 +132,12 @@ class FeiShuChanel(ChatChannel):
         This function handles image menu
         """
         if tool_button.imaging:
-            text = "图片生成功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
+            text = "图片编辑功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
         elif not tool_button.imaging:
-            text = "图片生成功能已开启，需要我帮你弄点啥图？"
+            text = "图片编辑功能已开启，需要我帮你弄点啥图？"
         tool_button.imaging = not tool_button.imaging
         self.send_text(text, toUserName)
+        logger.info(f'[Lark]{text}')
 
     def main(self):
         if self.websocket is True:
