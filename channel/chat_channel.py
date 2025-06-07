@@ -12,7 +12,7 @@ from bridge.context import *
 from bridge.reply import *
 from channel.channel import Channel
 from common.dequeue import Dequeue
-from common import memory, const
+from common import memory, const, tool_button
 from common.tmp_dir import create_user_dir
 from plugins.bigchao.script_breakdown import cache_media
 from plugins import *
@@ -224,8 +224,13 @@ class ChatChannel(Channel):
                 reply = super().build_reply_content(context.content, context)
             elif context.type == ContextType.IMAGE:
                 if model in const.GEMINI_GENAI_SDK:  
-                    # 文件消息,目前只针对gemini2.0+进行监听配置
+                    # 图片消息,目前只针对gemini2.0+进行监听配置
                     image_path = context.content
+                    dir_path = os.path.dirname(image_path)
+                    dir_exists = os.path.exists(dir_path)
+                    if not dir_exists:
+                        create_user_dir(dir_path)
+                    model = const.GEMINI_2_FLASH_IMAGE_GENERATION if tool_button.imaging is True else model
                     logger.info(f'[{model}] query with file, path={image_path}')
                     mime_type = image_path[(image_path.rfind('.') + 1):]
                     type_id = 'image'

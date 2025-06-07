@@ -22,11 +22,12 @@ from docx2pdf import convert
 from lark_oapi.api.bitable.v1 import *
 
 from config import conf
-from common import memory
+from common import memory, const, tool_button
 from common.log import logger
 from common.tmp_dir import TmpDir, create_user_dir
 
-model = conf().get('model').upper()
+model = conf().get('model')
+model_id = const.GEMINI_2_FLASH_IMAGE_GENERATION.upper() if tool_button.imaging is True else model.upper()
 app_id = conf().get('feishu_app_id')
 app_secret = conf().get('feishu_app_secret')
 
@@ -300,9 +301,9 @@ def screenplay_formatter(
     pdf_file_path = user_dir + f"{screenplay_title}.pdf"
     # 将文档存储到本地目录
     doc.save(docx_file_path)
-    logger.info(f"[TELEGRAMBOT_{model}] {docx_file_path} is saved")
+    logger.info(f"[TELEGRAMBOT_{model_id}] {docx_file_path} is saved")
     convert(docx_file_path, pdf_file_path)
-    logger.info(f"[TELEGRAMBOT_{model}] {pdf_file_path} is saved")
+    logger.info(f"[TELEGRAMBOT_{model_id}] {pdf_file_path} is saved")
     api_response = {
         'file_pathes': [docx_file_path, pdf_file_path]
     }
@@ -506,7 +507,7 @@ def screenplay_scenes_breakdown(
         try:
             words_per_scene = int(counter_dict.get(f"scene{scene_id}"))
         except Exception as e:
-            logger.error(f"[TELEGRAMBOT_{model}] scene_id={scene_id} not found in counter_dict, error={e}")
+            logger.error(f"[TELEGRAMBOT_{model_id}] scene_id={scene_id} not found in counter_dict, error={e}")
             continue
         pages_per_scene = round(words_per_scene / words_per_page, 2)
         estimated_duration = round(pages_per_scene * 1.2, 2)
@@ -529,7 +530,7 @@ def screenplay_scenes_breakdown(
         sheet_name=f'{screenplay_title}_scenes_breakdown',
         index=False
     )
-    logger.info(f"[TELEGRAMBOT_{model}] {file_path} is saved")
+    logger.info(f"[TELEGRAMBOT_{model_id}] {file_path} is saved")
     api_response = {
         'total_pages': total_pages,
         'total_words': total_words,
@@ -588,7 +589,7 @@ def screenplay_assets_breakdown(
         sheet_name=f'{screenplay_title}_assets_breakdown',
         index=False
     )
-    logger.info(f"[TELEGRAMBOT_{model}] {assets_breakdown_file_path} is saved")
+    logger.info(f"[TELEGRAMBOT_{model_id}] {assets_breakdown_file_path} is saved")
     # 为资产构建飞书多维表格的批量记录
     asset_records_list = asset_records(assets_breakdown_file_path)
 
@@ -608,14 +609,14 @@ def screenplay_assets_breakdown(
         sheet_name=f'{screenplay_title}_scenes_breakdown',
         index=False
     )
-    logger.info(f"[TELEGRAMBOT_{model}] {scenes_breakdown_file_path} is updated")
+    logger.info(f"[TELEGRAMBOT_{model_id}] {scenes_breakdown_file_path} is updated")
     # 为场景构建飞书多维表格的批量记录
     scene_records_list = scene_records(scenes_breakdown_file_path)
     # 创建多维表格
     base = CreateBase(screenplay_title, session_id, scene_records_list, asset_records_list)
     base.add_scene_table_record()
     base.add_asset_table_record()
-    logger.info(f"[TELEGRAMBOT_{model}][Lark_Base]{screenplay_title} is created")
+    logger.info(f"[TELEGRAMBOT_{model_id}][Lark_Base]{screenplay_title} is created")
 
 
     """# Send the scenes_breakdown.xlsx to the user
@@ -702,7 +703,7 @@ def cache_media(media_path, media_file, context):
         else:
             memory.USER_IMAGE_CACHE[session_id]["path"].append(media_path)
             memory.USER_IMAGE_CACHE[session_id]["files"].append(media_file)
-        logger.info(f"[{model}] {media_path} cached to memory")
+        logger.info(f"[{model_id}] {media_path} cached to memory")
         return None
 
 def convert_punctuation(text: str) -> str:

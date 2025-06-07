@@ -51,7 +51,7 @@ class TelegramChannel(ChatChannel):
         """
 
         # Print tool_button stasus to console
-        print(f'{update.message.from_user.first_name} wrote {update.message.text}\n[search] is {tool_button.searching}\n[image] is {tool_button.imaging}')
+        logger.info(f'[TELEGRAMBOT-search] is {tool_button.searching},[TELEGRAMBOT-image] is {tool_button.imaging}')
 
         self.handler_single_msg(update.message)
 
@@ -83,6 +83,7 @@ class TelegramChannel(ChatChannel):
             # To preserve the markdown, we attach entities (bold, italic...)
             #entities=update.message.entities
         )
+        logger.info(f'[TELEGRAMBOT]{text}')
 
     def image(self, update: Update, context: CallbackContext) -> None:
         """
@@ -103,6 +104,7 @@ class TelegramChannel(ChatChannel):
             parse_mode=ParseMode.MARKDOWN_V2,
             disable_web_page_preview=False
         )
+        logger.info(f'[TELEGRAMBOT_{const.GEMINI_2_FLASH_IMAGE_GENERATION}]{text}')
 
 
     def menu(self, update: Update, context: CallbackContext) -> None:
@@ -245,7 +247,7 @@ class TelegramChannel(ChatChannel):
         if reply.type == ReplyType.TEXT:
             try:
                 self.send_text(escape(reply.content), receiver)
-                logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(reply, receiver))
+                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply, receiver))
             except Exception as e:
                 logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, e))
                 self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
@@ -276,7 +278,7 @@ class TelegramChannel(ChatChannel):
                     inline_url = self.get_search_sources(grouding_metadata)
                 reply_content = reply_text + "\n\n" + inline_url
                 self.send_text(reply_content, receiver)
-                logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(reply_content, receiver))
+                logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(const.GEMINI_2_FLASH_IMAGE_GENERATION, reply_content, receiver))
 
             else:
                 # 下载图片
@@ -305,13 +307,13 @@ class TelegramChannel(ChatChannel):
                     if part.text:
                         reply_text = escape(part.text)
                         self.send_text(reply_text, receiver)
-                        logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(part.text, receiver))
+                        logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(const.GEMINI_2_FLASH_IMAGE_GENERATION, part.text, receiver))
                     elif part.inline_data:
                         image = BytesIO(part.inline_data.data)
-                        logger.info(f"[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] reply={image}")
+                        logger.info(f"[TELEGRAMBOT_{const.GEMINI_2_FLASH_IMAGE_GENERATION}] reply={image}")
                         image.seek(0)
                         self.send_image(image, receiver)
-                        logger.info("[TELEGRAMBOT_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(image, receiver))
+                        logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(const.GEMINI_2_FLASH_IMAGE_GENERATION, image, receiver))
         elif reply.type == ReplyType.FILE:  # 新增文件回复类型
             file_pathes = reply.content['function_response']['file_pathes']
             reply_text = escape(reply.content['reply_text'])

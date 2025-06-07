@@ -388,7 +388,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
             )
         )
         self.image_chat = self.client.chats.create(
-            model='gemini-2.0-flash-exp',
+            model=const.GEMINI_2_FLASH_IMAGE_GENERATION,
             config=GenerateContentConfig(
                 safety_settings=self.safety_settings,
                 response_modalities=['TEXT', 'Image'],
@@ -405,32 +405,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
 
     def reply(self, query, context: Context = None) -> Reply:
         try:
-            if context.type == ContextType.FILE:
-                mime_type = context.content[(context.content.rindex('.') + 1):]
-                if mime_type in const.AUDIO or mime_type in const.VIDEO or mime_type in const.DOCUMENT or mime_type in const.TXT:
-                    session_id = context["session_id"]
-                    session = self.sessions.session_query(query, session_id)
-                    return self.gemini_15_media(query, context, session)
-                elif mime_type in const.DOCUMENT:
-                    self._file_cache(context)
-                    doc_cache = memory.USER_FILE_CACHE.get(context['session_id'])
-                    return self._file_download(doc_cache)
-            elif context.type == ContextType.IMAGE:
-                if (self.model in const.GEMINI_15_FLASH_LIST or
-                    self.model in const.GEMINI_15_PRO_LIST or
-                    self.model in const.GEMINI_2_FLASH_LIST or
-                    self.model in const.GEMINI_25_PRO_LIST):
-                    session_id = context["session_id"]
-                    session = self.sessions.session_query(query, session_id)
-                    return self.gemini_15_media(query, context, session)
-                elif self.model in const.GEMINI_1_PRO_LIST:
-                    memory.USER_IMAGE_CACHE[context["session_id"]] = {
-                    "path": context.content,
-                    "msg": context.get("msg")
-                    }
-                    logger.info(f"{context.content} cached to memory")
-                    return None
-            elif context.type == ContextType.VIDEO:
+            if context.type == ContextType.VIDEO:
                 session_id = context["session_id"]
                 session = self.sessions.session_query(query, session_id)
                 return self.gemini_15_media(query, context, session)
@@ -439,6 +414,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
                 session = self.sessions.session_query(query, session_id)
                 return self.gemini_15_media(query, context, session)
             elif context.type == ContextType.TEXT:
+                self.Model_ID = const.GEMINI_2_FLASH_IMAGE_GENERATION.upper() if tool_button.imaging is True else self.model.upper()
                 logger.info(f"[{self.Model_ID}] query={query}")
                 session_id = context["session_id"]
                 session = self.sessions.session_query(query, session_id)
@@ -451,9 +427,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
                     if vision_res:
                         return vision_res
                 elif (self.model in const.GEMINI_15_PRO_LIST or
-                      self.model in const.GEMINI_15_FLASH_LIST or
-                      self.model in const.GEMINI_2_FLASH_LIST or
-                      self.model in const.GEMINI_25_PRO_LIST):
+                      self.model in const.GEMINI_15_FLASH_LIST):
                     gemini_messages = self._convert_to_gemini_15_messages(session.messages)
 
                 if self.model in const.GEMINI_GENAI_SDK:
@@ -490,8 +464,16 @@ class GoogleGeminiBot(Bot, GeminiVision):
                         response = self.chat.send_message(resquest_contents, config=self.search_config)
                     elif tool_button.searching is False:
                         if tool_button.imaging is True:
+                            # 将主会话内容补充到图片编辑会话中
+                            if self.chat._curated_history != []:
+                                self.image_chat._curated_history.extend(self.chat._curated_history)
+                                self.chat._curated_history.clear()
                             response = self.image_chat.send_message(resquest_contents)
                         elif tool_button.imaging is False:
+                            # 将图片编辑的会话内容补充到主会话中
+                            if self.image_chat._curated_history != []:
+                                self.chat._curated_history.extend(self.image_chat._curated_history)
+                                self.image_chat._curated_history.clear()
                             response = self.chat.send_message(resquest_contents)
 
                 elif self.model not in const.GEMINI_GENAI_SDK:
@@ -672,257 +654,6 @@ class GoogleGeminiBot(Bot, GeminiVision):
         msg.prepare()
         logger.info("[{}] file={} is downloaded locally".format(self.Model_ID, path))
         return None
-
-    """def screenplay_scenes_breakdown(
-            self, 
-            context, 
-            fn_name,
-            *, 
-            screenplay_title: str = None, 
-            total_pages: str = None, 
-            total_words: str = None, 
-            scenes_list: list = []
-        ):
-        screenplay_title_no_quotes = screenplay_title.replace('《','').replace('》','')
-        # 遍历./tmp目录下的文件,如果文件名中含有screenplay_title,则将其路径赋值给path
-        for root, dirs, files in os.walk('./tmp'):
-            for file in files:
-                if screenplay_title_no_quotes in file and file.endswith(('.docx', '.pdf')):
-                    path = os.path.join(root, file)
-                    break
-
-        if path[-5:] == '.docx':
-            reader = docx.Document(path)
-            texts = ''
-            line_list = []
-            num_id = 1
-            # 遍历文档中的段落
-            for paragraph in reader.paragraphs:
-                # 提取文本内容
-                scene_normal = paragraph.text.strip()
-                # 检查段落是否有序号
-                if paragraph._p.pPr and paragraph._p.pPr.numPr:           
-                    scene_normal = f"{num_id}. " + scene_normal
-                    num_id += 1
-                texts = texts + scene_normal + '\n'
-                line_list.append(scene_normal)
-            total_pages = len(texts)//500 + 1
-        elif path[-4:] == '.pdf':
-            reader = PdfReader(path)
-            total_pages = len(reader.pages)
-            texts = ''.join([page.extract_text() for page in reader.pages])
-            # 删除脚标
-            footer_pattern = rf"\[{re.escape(screenplay_title_no_quotes)}\]\s*◁[\s\x00-\x1f]*▷\s*\n?"
-            texts = re.sub(footer_pattern, "", texts, flags=re.DOTALL)
-            line_list = re.split(r'[。！？\n]|\s{2,}', texts)
-        total_words = len(texts)
-        words_per_page = total_words / total_pages
-        # 统计每一场的字数
-        paragraph = ""
-        sc_count = 0
-        counter_dict ={}
-        # 定义场次描述规则 
-        pattern = r"第.*场|场景.*|\d+\..*"
-        for i, v in enumerate(line_list):
-            # 只要每行的前3～7个字，符合场次描述规则
-            if any(re.match(pattern, v.strip()[:n]) is not None for n in (2, 3, 4, 5, 6, 7, 9, 10)):
-                counter_dict[f"scene{sc_count}"] = f'{len(paragraph)}'
-                sc_count += 1
-                paragraph = ""
-            paragraph += v.strip()
-        # 循环结束后，捕获最后一场戏的字数
-        counter_dict[f"scene{sc_count}"] = f'{len(paragraph)}'
-        del counter_dict["scene0"]
-        
-        for i, v in enumerate(scenes_list):
-            scene_id = v['scene_id']
-            try:
-                words_per_scene = int(counter_dict.get(f"scene{scene_id}"))
-            except Exception as e:
-                logger.error(f"[TELEGRAMBOT_{self.Model_ID}] scene_id={scene_id} not found in counter_dict, error={e}")
-                continue
-            pages_per_scene = round(words_per_scene / words_per_page, 2)
-            estimated_duration = round(pages_per_scene * 1.2, 2)
-            v.update(words = words_per_scene)
-            v.update(pages = pages_per_scene)
-            v.update(estimated_duration = estimated_duration)
-        
-        # Save the scenes list to an Excel file
-        scenes_list_str = json.dumps(scenes_list, ensure_ascii=False)
-        df_scenses_list = pd.read_json(scenes_list_str)
-        new_cols = ['scene_id', 'location', 'daynight', 'envirement', 'words', 'pages', 'estimated_duration', 'assets_id']
-        df_scenses_list = df_scenses_list.reindex(columns=new_cols)
-        file_path = TmpDir().path()+ f"{screenplay_title}_scenes_breakdown.xlsx"
-        df_scenses_list.to_excel(
-            file_path,
-            sheet_name=f'{screenplay_title}_scenes_breakdown', 
-            index=False
-        )
-        logger.info(f"[TELEGRAMBOT_{self.Model_ID}] {file_path} is saved")
-
-        api_response = {
-            'total_pages':total_pages,
-            'total_words':total_words,
-            'scenes_list':scenes_list
-        }
-        
-        # Create a function response part
-        function_response_part = []
-        function_response_obj = Part.from_function_response(
-            name=fn_name,
-            response=api_response,
-        )
-        function_response_dic = {
-            "functionResponse": {
-                "name": fn_name,
-                "response": {
-                    "name": fn_name,
-                    "content": api_response
-                }
-            }
-        }
-        function_response_part.append(function_response_obj)
-        # Create a function response text part
-        function_response_comment = "这是函数返回的场景表，总结后简单回复即可。不用包含总字数和详细的场景表内容"
-        function_response_text = Part.from_text(
-            text=function_response_comment
-        )
-        function_response_part.append(function_response_text)
-        # 将function_response_part转换为字符串
-        function_response_str = json.dumps(function_response_dic) + '\n' + function_response_comment 
-        return function_response_part, function_response_str
-    
-    def screenplay_assets_breakdown(self, context, fn_name, *, screenplay_title: str = None, assets_list: list = []):
-        for i, v in enumerate(assets_list):
-            ref_id = i+1
-            v.update(ref_url = f'RefURL_{ref_id}')
-        
-        assets_list_str = json.dumps(assets_list, ensure_ascii=False)
-        df_assets_list = pd.read_json(assets_list_str)
-        df_scenes_list = pd.read_excel(f'./tmp/{screenplay_title}_scenes_breakdown.xlsx')
-        for i, v in enumerate(df_assets_list['scene_ids']):
-            asset_pages = 0
-            for n in v:
-                # 从scenes_list中取出对应的scene_id所在的行
-                scene_row = df_scenes_list[df_scenes_list['scene_id'] == n]
-                # 取出该行asset_pages列的值
-                asset_page = scene_row['pages'].values[0]
-                asset_pages += asset_page
-            # 将assets_pages和estimated_asset_duration更新到assets_list中
-            df_assets_list.at[i, 'asset_pages'] = asset_pages
-            df_assets_list.at[i, 'estimated_asset_duration'] = round(asset_pages * 1.2, 2)
-
-        # Save the assets list to an Excel file
-        new_cols = ['asset_type', 'asset_id', 'name', "visual_effects_type", 'visual_effects_description', 'scene_ids', 'asset_pages', 'estimated_asset_duration', 'ref_url']
-        df_assets_list = df_assets_list.reindex(columns=new_cols)
-        assets_breaddown_file_path = TmpDir().path()+ f"{screenplay_title}_assets_breakdown.xlsx"
-        df_assets_list.to_excel(
-            assets_breaddown_file_path,
-            sheet_name=f'{screenplay_title}_assets_breakdown', 
-            index=False
-        )
-        logger.info(f"[TELEGRAMBOT_{self.Model_ID}] {assets_breaddown_file_path} is saved")
-
-        # 统计场景引用的资产,更新scenes_list
-        for i, v in enumerate(df_scenes_list['scene_id']):
-            assets_id = []
-            for asset_id_index, scene_ids in enumerate(df_assets_list['scene_ids']):
-                asset_scene_ids = [int(x) for x in scene_ids]
-                if v in asset_scene_ids:
-                    assets_id.append(df_assets_list['asset_id'][asset_id_index])
-            # 将assets_id添加到scenes_list中，转换为字符串形式
-            df_scenes_list.at[i, 'assets_id'] = str(assets_id)
-        scenes_breaddown_file_path = TmpDir().path()+ f"{screenplay_title}_scenes_breakdown.xlsx"
-        df_scenes_list.to_excel(
-            scenes_breaddown_file_path,
-            sheet_name=f'{screenplay_title}_scenes_breakdown', 
-            index=False
-        )
-        logger.info(f"[TELEGRAMBOT_{self.Model_ID}] {scenes_breaddown_file_path} is saved")
-
-        # Send the scenes_breakdown.xlsx to the user
-        with open(scenes_breaddown_file_path, 'rb') as f:
-            TelegramChannel().send_file(f, context["receiver"])
-        logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, scenes_breaddown_file_path, context["receiver"]))
-
-        # Create visualization figure of the assets list
-        plt.switch_backend('agg') # Use a non-interactive backend
-        plt.rcParams['font.sans-serif'] = ['SimHei'] # Set Chinese font
-        plt.rcParams['axes.unicode_minus'] = False # Fix the minus sign display issue
-        asset_types = set([asset['asset_type'] for asset in assets_list])
-        colormap = {
-            'cast': None,
-            'extra_silent': 'darkcyan',
-            'extra_atmosphere': 'darkblue',
-            'stunts': 'darkgrey',
-            'costume': None,
-            'makeup': None,
-            'location': 'darkgreen',
-            'set_dressing': 'darkred',
-            'vehicle': 'darkgrey',
-            'animal': 'darkgoldenrod',
-            'livestock': None,
-            'prop': 'darkorange',
-            'special_effects': None
-        }
-        for asset_type in asset_types:
-            figsize = (30, 5)
-            plt.figure(figsize=figsize)
-            subset_assets_list = df_assets_list[df_assets_list['asset_type'] == asset_type]
-            ax = subset_assets_list.plot(
-                figsize=figsize,
-                title=f'{screenplay_title}_Assets_Breakdown-{asset_type.upper()}',  
-                kind='bar', 
-                x='name', 
-                y='estimated_asset_duration', 
-                ylabel='资产预计时长(分钟)', 
-                color=colormap[asset_type],
-                legend=False
-            )
-            # Add value labels on top of the bars
-            for i, v in enumerate(subset_assets_list['estimated_asset_duration']):
-                ax.text(i, v, f'{v:.2f}', ha='center', va='bottom', fontsize=10)
-
-            figure_path = TmpDir().path() + f"{screenplay_title}_assets_breakdown-{asset_type.upper()}.png"
-            plt.savefig(figure_path, dpi=200, bbox_inches='tight')
-            plt.close()
-            logger.info(f"[TELEGRAMBOT_{self.Model_ID}] {figure_path} is saved")
-
-            # Send the visualization figure to the user
-            with open(figure_path, 'rb') as f:
-                f.seek(0)
-                TelegramChannel().send_image(f, context["receiver"])
-            logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self.Model_ID, figure_path, context["receiver"]))
-        
-        api_response = {
-            'asset_list':assets_list
-        }
- 
-        # Create a function response part
-        function_response_part = []
-        function_response_obj = Part.from_function_response(
-            name=fn_name,
-            response=api_response,
-        )
-        function_response_dic = {
-            "functionResponse": {
-                "name": fn_name,
-                "response": {
-                    "name": fn_name,
-                    "content": api_response
-                }
-            }
-        }
-        function_response_part.append(function_response_obj)
-        # Create a function response text part
-        function_response_comment = "这是函数返回的资产表，总结后简单回复即可，不用包含详细的资产表内容"
-        function_response_text = Part.from_text(
-            text=function_response_comment
-        )
-        function_response_part.append(function_response_text)
-        # 将function_response_part转换为字符串
-        function_response_str = json.dumps(function_response_dic) + '\n' + function_response_comment 
-        return function_response_part, function_response_str"""
 
     def gemini_15_media(self, query, context, session: BaiduWenxinSession):
         session_id = context.kwargs["session_id"]

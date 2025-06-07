@@ -137,7 +137,7 @@ class FeiShuChanel(ChatChannel):
             text = "图片编辑功能已开启，需要我帮你弄点啥图？"
         tool_button.imaging = not tool_button.imaging
         self.send_text(text, toUserName)
-        logger.info(f'[Lark]{text}')
+        logger.info(f'[Lark_{const.GEMINI_2_FLASH_IMAGE_GENERATION}]{text}')
 
     def main(self):
         if self.websocket is True:
@@ -263,17 +263,17 @@ class FeiShuChanel(ChatChannel):
             else:
                 # 下载图片
                 img_url = reply.content
-                logger.debug(f"[TELEGRAMBOT] start download image, img_url={img_url}")
+                logger.debug(f"[Lark] start download image, img_url={img_url}")
                 pic_res = requests.get(img_url, stream=True)
                 image_storage = io.BytesIO()
                 size = 0
                 for block in pic_res.iter_content(1024):
                     size += len(block)
                     image_storage.write(block)
-                logger.info(f"[TELEGRAMBOT] download image success, size={size}, img_url={img_url}")
+                logger.info(f"[Lark] download image success, size={size}, img_url={img_url}")
                 image_storage.seek(0)
                 self.send_image(image_storage, toUserName=receiver)
-                logger.info("[TELEGRAMBOT] sendImage url={}, receiver={}".format(img_url, receiver))
+                logger.info("[Lark] sendImage url={}, receiver={}".format(img_url, receiver))
         elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
             response = reply.content
             parts = response.candidates[0].content.parts
@@ -287,11 +287,11 @@ class FeiShuChanel(ChatChannel):
                     if part.text:
                         reply_text = part.text
                         self.send_text(reply_text, receiver)
-                        logger.info("[Lark_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(part.text, receiver))
+                        logger.info("[Lark_{}] sendMsg={}, receiver={}".format(const.GEMINI_2_FLASH_IMAGE_GENERATION, part.text, receiver))
                     elif part.inline_data:
                         image_type = part.inline_data.mime_type.split('/')[-1]
                         image = BytesIO(part.inline_data.data)
-                        logger.info(f"[Lark_GEMINI-2.0-FLASH-EXP] reply={image}")
+                        logger.info(f"[Lark_{const.GEMINI_2_FLASH_IMAGE_GENERATION}] reply={image}")
                         image.seek(0)
                         user_dir = TmpDir().path() + str(receiver) + '/response/'
                         user_dir_exists = os.path.exists(user_dir)
@@ -302,7 +302,7 @@ class FeiShuChanel(ChatChannel):
                         with open(image_path, 'wb') as f:
                             f.write(image.read())
                         self.send_image(image_path, receiver)
-                        logger.info("[Lark_GEMINI-2.0-FLASH-EXP] sendMsg={}, receiver={}".format(image, receiver))
+                        logger.info("[Lark_{}] sendMsg={}, receiver={}".format(const.GEMINI_2_FLASH_IMAGE_GENERATION, image, receiver))
         elif reply.type == ReplyType.FILE:  # 新增文件回复类型
             file_pathes = reply.content['function_response']['file_pathes']
             reply_text = reply.content['reply_text']
