@@ -15,7 +15,8 @@ from bridge.context import Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
 from common.singleton import singleton
-from common import const, tool_button
+from common import const
+from common .tool_button import tool_state
 from common.tmp_dir import TmpDir
 from config import conf
 from bridge.context import ContextType
@@ -24,7 +25,6 @@ from channel.chat_message import ChatMessage
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import *
 from lark_oapi.adapter.flask import *
-from channel.telegram.telegram_text_util import escape
 from common.tmp_dir import TmpDir, create_user_dir
 
 
@@ -68,6 +68,9 @@ class FeiShuChanel(ChatChannel):
     # Register event handler to handle received messages.
     # https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/events/receive
     def do_p2_im_message_receive_v1(self, data: P2ImMessageReceiveV1) -> None:
+        # Print tool_button stasus to console
+        toUserName = data.event.sender.sender_id.open_id
+        logger.info(f'[Lark-search] is {tool_state.get_search_state(toUserName)},[Lark-image] is {tool_state.get_image_state(toUserName)},requester={toUserName}')
         if data.event.message.chat_type == "p2p":
             self.handler_single_msg(data.event)
 
@@ -118,26 +121,26 @@ class FeiShuChanel(ChatChannel):
         """
         This function handles the search menu
         """
-        if tool_button.searching:
-            text = "联网功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
-        elif not tool_button.searching:
-            text = "联网搜索功能已开启，需要我帮你查询点啥？"
-        tool_button.searching = not tool_button.searching
+        if tool_state.get_search_state(toUserName):
+            text = "联网功能已关闭，可以通过消息输入框左侧的命令菜单随时开启。"
+        else:
+            text = "联网搜索功能已开启。"
+        tool_state.toggle_search(toUserName)
         self.send_text(text, toUserName)
-        logger.info(f'[Lark]{text}')
+        logger.info(f'[Lark]{text} requester={toUserName}')
         
     
     def image(self, toUserName) -> None:
         """
         This function handles image menu
         """
-        if tool_button.imaging:
-            text = "图片编辑功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
-        elif not tool_button.imaging:
-            text = "图片编辑功能已开启，需要我帮你弄点啥图？"
-        tool_button.imaging = not tool_button.imaging
+        if tool_state.get_image_state(toUserName):
+            text = "图片编辑功能已关闭，可以通过消息输入框左侧的命令菜单随时开启。"
+        else:
+            text = "图片编辑功能已开启。"
+        tool_state.toggle_imaging(toUserName)
         self.send_text(text, toUserName)
-        logger.info(f'[Lark_{const.GEMINI_2_FLASH_IMAGE_GENERATION}]{text}')
+        logger.info(f'[Lark_{const.GEMINI_2_FLASH_IMAGE_GENERATION}]{text} requester={toUserName}')
 
     def main(self):
         if self.websocket is True:
@@ -236,7 +239,7 @@ class FeiShuChanel(ChatChannel):
             self.send_text(error_response, toUserName=receiver)
             logger.info("[Lark] sendMsg={}, receiver={}".format(error_response, receiver))
         elif reply.type == ReplyType.INFO:
-            self.send_text(escape(reply.content), toUserName=receiver)
+            self.send_text(reply.content, toUserName=receiver)
             logger.info("[Lark] sendMsg={}, receiver={}".format(reply, receiver))
         elif reply.type == ReplyType.VOICE:
             self.send_file(reply.content, toUserName=receiver)

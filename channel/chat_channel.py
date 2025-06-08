@@ -12,8 +12,9 @@ from bridge.context import *
 from bridge.reply import *
 from channel.channel import Channel
 from common.dequeue import Dequeue
-from common import memory, const, tool_button
+from common import memory, const
 from common.tmp_dir import create_user_dir
+from common.tool_button import tool_state
 from plugins.bigchao.script_breakdown import cache_media
 from plugins import *
 from config import conf
@@ -230,7 +231,10 @@ class ChatChannel(Channel):
                     dir_exists = os.path.exists(dir_path)
                     if not dir_exists:
                         create_user_dir(dir_path)
-                    model = const.GEMINI_2_FLASH_IMAGE_GENERATION if tool_button.imaging is True else model
+                     # 使用用户特定的imaging状态
+                    session_id = context["session_id"]
+                    is_imaging = tool_state.get_image_state(session_id)
+                    model = const.GEMINI_2_FLASH_IMAGE_GENERATION if is_imaging else model
                     logger.info(f'[{model}] query with file, path={image_path}')
                     mime_type = image_path[(image_path.rfind('.') + 1):]
                     type_id = 'image'

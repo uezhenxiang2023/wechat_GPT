@@ -7,12 +7,12 @@ import string
 import logging
 from typing import Tuple
 
-import bridge.bridge
 import plugins
 from bridge.bridge import Bridge
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common import const
+from common.tool_button import tool_state
 from config import conf, load_config, global_config
 from plugins import *
 
@@ -65,6 +65,14 @@ COMMANDS = {
         "alias": ["reset", "重置会话"],
         "desc": "重置会话",
     },
+    "search": {
+        "alias": ["search", "联网搜索"],
+        "desc": "开启联网搜索功能",
+    },
+    "image": {
+        "alias": ["image", "图片编辑"],
+        "desc": "开启图片编辑功能",
+    }
 }
 
 ADMIN_COMMANDS = {
@@ -321,6 +329,26 @@ class Godcmd(Plugin):
                         ok, result = True, "会话已重置"
                     else:
                         ok, result = False, "当前对话机器人不支持重置会话"
+                elif cmd == "search":
+                    # 使用用户特定的搜索状态
+                    if tool_state.get_search_state(user):
+                        text = "联网功能已关闭，可以在对话框中输入#search随时开启。"
+                    else:
+                        text = "联网搜索功能已开启。"
+                    # 切换用户的搜索状态
+                    tool_state.toggle_search(user)
+                    ok, result = True, text
+                    logger.info(f'{text}, requester = {user}')
+                elif cmd == "image":
+                    # 使用用户特定的图片编辑状态
+                    if tool_state.get_image_state(user):
+                        text = "图片编辑功能已关闭，可以在对话框中输入#image随时开启。"
+                    else:
+                        text = "图片编辑功能已开启。"
+                    # 切换用户的图片编辑状态
+                    tool_state.toggle_imaging(user)
+                    ok, result = True, text
+                    logger.info(f'{text}, requester = {user}')
                 logger.debug("[Godcmd] command: %s by %s" % (cmd, user))
             elif any(cmd in info["alias"] for info in ADMIN_COMMANDS.values()):
                 if isadmin:

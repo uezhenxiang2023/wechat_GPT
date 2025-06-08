@@ -9,7 +9,8 @@ from bridge.reply import Reply, ReplyType
 from channel.chat_channel import ChatChannel
 from channel.chat_message import ChatMessage
 from channel.telegram.telegram_message import TelegramMessage
-from common import const, tool_button
+from common import const
+from common.tool_button import tool_state
 from common.log import logger
 from common.singleton import singleton
 from config import conf
@@ -49,9 +50,9 @@ class TelegramChannel(ChatChannel):
         """
         This function would be added to the dispatcher as a handler for messages coming from the Bot API
         """
-
+        chat_id = update.message.from_user.id
         # Print tool_button stasus to console
-        logger.info(f'[TELEGRAMBOT-search] is {tool_button.searching},[TELEGRAMBOT-image] is {tool_button.imaging}')
+        logger.info(f'[TELEGRAMBOT-search] is {tool_state.get_search_state(chat_id)},[TELEGRAMBOT-image] is {tool_state.get_image_state(chat_id)},requester={chat_id}')
 
         self.handler_single_msg(update.message)
 
@@ -59,14 +60,14 @@ class TelegramChannel(ChatChannel):
         """
         This function handles the /search command
         """
-
-        if tool_button.searching:
+        chat_id = update.message.from_user.id
+        if tool_state.get_search_state(chat_id):
             text = "联网功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
-        elif not tool_button.searching:
+        else:
             text = "联网搜索功能已开启，需要我帮你查询点啥？"
 
         text = escape(text)
-        tool_button.searching = not tool_button.searching
+        tool_state.toggle_search(chat_id)
         
         """title = 'mykhel-AC.com'
         #title = self.escape(title)
@@ -83,20 +84,20 @@ class TelegramChannel(ChatChannel):
             # To preserve the markdown, we attach entities (bold, italic...)
             #entities=update.message.entities
         )
-        logger.info(f'[TELEGRAMBOT]{text}')
+        logger.info(f'[TELEGRAMBOT]{text} requester={chat_id}')
 
     def image(self, update: Update, context: CallbackContext) -> None:
         """
         This function handles /image command
         """
-
-        if tool_button.imaging:
+        chat_id = update.message.from_user.id
+        if tool_state.get_image_state(chat_id):
             text = "图片生成功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
-        elif not tool_button.imaging:
+        else:
             text = "图片生成功能已开启，需要我帮你弄点啥图？"
 
         text = escape(text)
-        tool_button.imaging = not tool_button.imaging
+        tool_state.toggle_imaging(chat_id)
 
         context.bot.send_message(
             update.message.chat_id,
@@ -104,7 +105,7 @@ class TelegramChannel(ChatChannel):
             parse_mode=ParseMode.MARKDOWN_V2,
             disable_web_page_preview=False
         )
-        logger.info(f'[TELEGRAMBOT_{const.GEMINI_2_FLASH_IMAGE_GENERATION}]{text}')
+        logger.info(f'[TELEGRAMBOT_{const.GEMINI_2_FLASH_IMAGE_GENERATION}]{text} requester={chat_id}')
 
 
     def menu(self, update: Update, context: CallbackContext) -> None:

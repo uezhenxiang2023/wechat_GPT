@@ -24,7 +24,8 @@ from bot.gemini.google_genimi_vision import GeminiVision
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
-from common import const, memory, tool_button
+from common import const, memory
+from common.tool_button import tool_state
 
 from plugins.bigchao.script_breakdown import screenplay_scenes_breakdown, screenplay_assets_breakdown, screenplay_formatter
 
@@ -402,6 +403,42 @@ class GoogleGeminiBot(Bot, GeminiVision):
             response_modalities=['TEXT'],
             **self.generation_config
         )
+        # 用字典存储用户会话实例
+        self.user_chats = {}
+        self.user_image_chats = {}
+
+    def _get_user_chat(self, session_id):
+        """获取指定用户的chat实例,如果不存在则创建新的"""
+        if session_id not in self.user_chats:
+            self.user_chats[session_id] = self.client.chats.create(
+                model=self.model,
+                config=GenerateContentConfig(
+                    system_instruction=self.system_prompt,
+                    safety_settings=self.safety_settings,
+                    tools=[self.function_declarations],
+                    tool_config={
+                        'function_calling_config': {
+                            'mode': 'AUTO'
+                        }
+                    },
+                    response_modalities=['TEXT'],
+                    **self.generation_config
+                )
+            )
+        return self.user_chats[session_id]
+
+    def _get_user_image_chat(self, session_id):
+        """获取指定用户的image_chat实例,如果不存在则创建新的"""
+        if session_id not in self.user_image_chats:
+            self.user_image_chats[session_id] = self.client.chats.create(
+                model=const.GEMINI_2_FLASH_IMAGE_GENERATION,
+                config=GenerateContentConfig(
+                    safety_settings=self.safety_settings,
+                    response_modalities=['TEXT', 'Image'],
+                    **self.generation_config
+                )
+            )
+        return self.user_image_chats[session_id]
 
     def reply(self, query, context: Context = None) -> Reply:
         try:
@@ -414,9 +451,11 @@ class GoogleGeminiBot(Bot, GeminiVision):
                 session = self.sessions.session_query(query, session_id)
                 return self.gemini_15_media(query, context, session)
             elif context.type == ContextType.TEXT:
-                self.Model_ID = const.GEMINI_2_FLASH_IMAGE_GENERATION.upper() if tool_button.imaging is True else self.model.upper()
-                logger.info(f"[{self.Model_ID}] query={query}")
                 session_id = context["session_id"]
+                # 使用用户特定的状态
+                is_imaging = tool_state.get_image_state(session_id)
+                self.Model_ID = const.GEMINI_2_FLASH_IMAGE_GENERATION.upper() if is_imaging else self.model.upper()
+                logger.info(f"[{self.Model_ID}] query={query}, requester={session_id}")
                 session = self.sessions.session_query(query, session_id)
 
                 # Set up the model
@@ -431,6 +470,9 @@ class GoogleGeminiBot(Bot, GeminiVision):
                     gemini_messages = self._convert_to_gemini_15_messages(session.messages)
 
                 if self.model in const.GEMINI_GENAI_SDK:
+                    # 获取当前用户的chat实例
+                    user_chat = self._get_user_chat(session_id)
+                    user_image_chat = self._get_user_image_chat(session_id)
                     # 构建请求内容列表
                     resquest_contents = []
                     text = Part.from_text(text=query)
@@ -460,21 +502,21 @@ class GoogleGeminiBot(Bot, GeminiVision):
                             filedata.append(text)
                             resquest_contents = filedata
                         memory.USER_IMAGE_CACHE.pop(session_id)
-                    if tool_button.searching is True:
-                        response = self.chat.send_message(resquest_contents, config=self.search_config)
-                    elif tool_button.searching is False:
-                        if tool_button.imaging is True:
+                    if tool_state.get_search_state(session_id):
+                        response = user_chat.send_message(resquest_contents, config=self.search_config)
+                    else:
+                        if tool_state.get_image_state(session_id):
                             # 将主会话内容补充到图片编辑会话中
-                            if self.chat._curated_history != []:
-                                self.image_chat._curated_history.extend(self.chat._curated_history)
-                                self.chat._curated_history.clear()
-                            response = self.image_chat.send_message(resquest_contents)
-                        elif tool_button.imaging is False:
+                            if user_chat._curated_history != []:
+                                user_image_chat._curated_history.extend(user_chat._curated_history)
+                                user_chat._curated_history.clear()
+                            response = user_image_chat.send_message(resquest_contents)
+                        else:
                             # 将图片编辑的会话内容补充到主会话中
-                            if self.image_chat._curated_history != []:
-                                self.chat._curated_history.extend(self.image_chat._curated_history)
-                                self.image_chat._curated_history.clear()
-                            response = self.chat.send_message(resquest_contents)
+                            if user_image_chat._curated_history != []:
+                                user_chat._curated_history.extend(user_image_chat._curated_history)
+                                user_image_chat._curated_history.clear()
+                            response = user_chat.send_message(resquest_contents)
 
                 elif self.model not in const.GEMINI_GENAI_SDK:
                     chat_session = self.generative_model.start_chat(
@@ -483,13 +525,13 @@ class GoogleGeminiBot(Bot, GeminiVision):
                         enable_automatic_function_calling=True
                     )
                     response = chat_session.send_message(resquest_contents)
-                response, function_response = self.function_call_polling_loop(session_id, response)
+                response, function_response = self.function_call_polling_loop(session_id, response, user_chat)
 
-                if tool_button.imaging is True:
+                if tool_state.get_image_state(session_id):
                     return Reply(ReplyType.IMAGE, response)
-                elif tool_button.imaging is False:
+                else:
                     # 是否开启联网搜索
-                    if tool_button.searching is False:
+                    if not tool_state.get_search_state(session_id):
                         # 是否监测到函数响应内容
                         if function_response != []:
                             response = {
@@ -499,7 +541,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
                             return Reply(ReplyType.FILE, response)
                         else:
                             return Reply(ReplyType.TEXT, response.text)
-                    elif tool_button.searching is True:
+                    else:
                         grounding_metadata = response.candidates[0].grounding_metadata
                         # 响应中是否有网页链接
                         if grounding_metadata.grounding_chunks is None:
@@ -532,7 +574,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
         }
         return function_call_reply
 
-    def function_call_polling_loop(self, session_id, response):
+    def function_call_polling_loop(self, session_id, response, user_chat):
         """轮询模型响应结果中的函数调用"""
         function_calling = True
         function_response = []
@@ -562,7 +604,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
             if function_calls:
                 # new turn of model request with function response
                 if self.model in const.GEMINI_GENAI_SDK:
-                    response = self.chat.send_message(function_response_parts)
+                    response = user_chat.send_message(function_response_parts)
                 """else:
                 # gemini 2.0开始，chat方法自动维护消息历史，后续考虑暂停维护脚手架中旧版gemini的消息历史
                     gemini_messages = self._convert_to_gemini_15_messages(session.messages)

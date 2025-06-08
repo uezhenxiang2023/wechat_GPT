@@ -22,12 +22,18 @@ from docx2pdf import convert
 from lark_oapi.api.bitable.v1 import *
 
 from config import conf
-from common import memory, const, tool_button
+from common import memory, const
+from common.tool_button import tool_state
 from common.log import logger
 from common.tmp_dir import TmpDir, create_user_dir
 
 model = conf().get('model')
-model_id = const.GEMINI_2_FLASH_IMAGE_GENERATION.upper() if tool_button.imaging is True else model.upper()
+
+def get_model_id(session_id):
+    """根据用户session获取对应的模型ID"""
+    is_imaging = tool_state.get_image_state(session_id)
+    return const.GEMINI_2_FLASH_IMAGE_GENERATION if is_imaging else model.upper()
+
 app_id = conf().get('feishu_app_id')
 app_secret = conf().get('feishu_app_secret')
 
@@ -301,6 +307,7 @@ def screenplay_formatter(
     pdf_file_path = user_dir + f"{screenplay_title}.pdf"
     # 将文档存储到本地目录
     doc.save(docx_file_path)
+    model_id = get_model_id(session_id)
     logger.info(f"[TELEGRAMBOT_{model_id}] {docx_file_path} is saved")
     convert(docx_file_path, pdf_file_path)
     logger.info(f"[TELEGRAMBOT_{model_id}] {pdf_file_path} is saved")
@@ -530,6 +537,7 @@ def screenplay_scenes_breakdown(
         sheet_name=f'{screenplay_title}_scenes_breakdown',
         index=False
     )
+    model_id = get_model_id(session_id)
     logger.info(f"[TELEGRAMBOT_{model_id}] {file_path} is saved")
     api_response = {
         'total_pages': total_pages,
@@ -589,6 +597,7 @@ def screenplay_assets_breakdown(
         sheet_name=f'{screenplay_title}_assets_breakdown',
         index=False
     )
+    model_id = get_model_id(session_id)
     logger.info(f"[TELEGRAMBOT_{model_id}] {assets_breakdown_file_path} is saved")
     # 为资产构建飞书多维表格的批量记录
     asset_records_list = asset_records(assets_breakdown_file_path)
@@ -703,6 +712,7 @@ def cache_media(media_path, media_file, context):
         else:
             memory.USER_IMAGE_CACHE[session_id]["path"].append(media_path)
             memory.USER_IMAGE_CACHE[session_id]["files"].append(media_file)
+        model_id = get_model_id(session_id)
         logger.info(f"[{model_id}] {media_path} cached to memory")
         return None
 
