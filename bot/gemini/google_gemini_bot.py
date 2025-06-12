@@ -320,47 +320,50 @@ class GoogleGeminiBot(Bot, GeminiVision):
                         description = "从文档中提取出的剧本名称,如果没有，需要请用户提供",
                     ),
                     "paragraphs_metadata": types.Schema(
-                        type = Type.OBJECT,
+                        type = Type.ARRAY,
                         description = "剧本段落的原始数据",
-                        properties = {
-                            "scene_heading": types.Schema(
-                                type = Type.OBJECT,
-                                description = "场次标题的结构化对象，将场号、环境、场景名称和时间从段落中提取出来存储在结构化的对象中，方便后续调用API时传递参数。该值不能为空值",
-                                properties = {
-                                    "scene_id": types.Schema(
-                                        type = Type.INTEGER,
-                                        description = "段落所在的场号，包含正戏与彩蛋，彩蛋场号顺接正戏，比如正戏最后一场是95，彩蛋第一场就是96",
-                                    ),
-                                    "enviroment": types.Schema(
-                                        type = Type.STRING,
-                                        description = "段落发生的环境，大部分情况是内或外，内/外或外/内表明该场次同时包含了室内外的景，比如说车戏的时候，或者是门、窗内外的角色有互动的时候。如果场次标题中没有环境信息，根据段落内容进行推测。",
-                                        enum = ["内", "外", "内/外", "外/内"],
-                                    ),
-                                    "location": types.Schema(
-                                        type = Type.STRING,
-                                        description = "段落发生的场景名称，包含正戏与彩蛋",
-                                    ),
-                                    "daynight": types.Schema(
-                                        type = Type.STRING,
-                                        description = "段落发生的时间，如果场次标题中没有环境信息，根据段落内容进行推测。",
-                                        enum = ["日", "夜"],
-                                    ),
-                                },
-                            ),
-                            "paragraph_id": types.Schema(
-                                type = Type.INTEGER,
-                                description = "段落序号，段落通常以句号'。'、感叹号‘！’、问号‘？’、冒号‘：’或段落标记号‘¶’结束。",
-                            ),
-                            "content": types.Schema(
-                                type = Type.STRING,
-                                description = "从文档中提取出的段落内容",
-                            ),
-                            "category": types.Schema(
-                                type = Type.STRING,
-                                description = "段落类别，scene_setting是场景段落，通常出现在每一场的第一行，内容描写顺序是内外环境，场景名称，时间；action是动作段落，场景和事物的客观描述，通常是以句号结束；character是角色段落（特别注意，旁白、画外音也属于角色段落），通常以姓名或身份加冒号‘：’结束，比如“孙涛：”或“产房护士：”；有时会在角色名字或身份名和冒号‘：’之间加入动作或情绪描述，如“张智宇笑到：”，此时冒号前部分也是角色段落；有时character段落以“旁白或画外音”加冒号‘：’结束，如“旁白:”或；“央媒新闻播报的画外音”；偶尔会用字母代替角色或身份加冒号‘：’，如“A：你怎么来了”、“C:我来看看你和小丽”；有的情况需要在角色名、身份名或‘画外音’后加Extension扩展，比如（V.O.）和（O.S.），VO即Voice Over，场景之外角色的声音——旁白或独白，这个好理解，OS即Off Screen是指角色不在镜头内发出的声音，比如说一个角色在书房写作业，这时他的母亲在厨房大喊一声“出来吃饭了”，这就是OS；偶尔剧本内容提及屏幕出现的字幕内容，也会用冒号‘：’作为结束，如“黑屏，出字幕:根据国家相关法律法规，非发集资，教唆别人炒房，从中放高利贷，非法吸收存款，证券化炒房，属于扰乱金融市场，均构成金融犯罪。”这种情况，冒号前是action段落，冒号后是dialogue段落；dialogue是台词段落，通常紧跟角色段落；特别注意，画外音和屏幕字幕提示也属于dialogue段落",
-                                enum = ["scene_setting", "action", "character", "dialogue"],
-                            ),
-                        },
+                        items = types.Schema(
+                            type = Type.OBJECT,
+                            properties = {
+                                "scene_heading": types.Schema(
+                                    type = Type.OBJECT,
+                                    description = "场次标题的结构化对象，将场号、环境、场景名称和时间从段落中提取出来存储在结构化的对象中，方便后续调用API时传递参数。该值不能为空值",
+                                    properties = {
+                                        "scene_id": types.Schema(
+                                            type = Type.INTEGER,
+                                            description = "段落所在的场号，包含正戏与彩蛋，彩蛋场号顺接正戏，比如正戏最后一场是95，彩蛋第一场就是96",
+                                        ),
+                                        "enviroment": types.Schema(
+                                            type = Type.STRING,
+                                            description = "段落发生的环境，大部分情况是内或外，内/外或外/内表明该场次同时包含了室内外的景，比如说车戏的时候，或者是门、窗内外的角色有互动的时候。如果场次标题中没有环境信息，根据段落内容进行推测。",
+                                            enum = ["内", "外", "内/外", "外/内"],
+                                        ),
+                                        "location": types.Schema(
+                                            type = Type.STRING,
+                                            description = "段落发生的场景名称，包含正戏与彩蛋",
+                                        ),
+                                        "daynight": types.Schema(
+                                            type = Type.STRING,
+                                            description = "段落发生的时间，如果场次标题中没有环境信息，根据段落内容进行推测。",
+                                            enum = ["日", "夜"],
+                                        ),
+                                    },
+                                ),
+                                "paragraph_id": types.Schema(
+                                    type = Type.INTEGER,
+                                    description = "段落序号，段落通常以句号'。'、感叹号‘！’、问号‘？’、冒号‘：’或段落标记号‘¶’结束。",
+                                ),
+                                "content": types.Schema(
+                                    type = Type.STRING,
+                                    description = "从文档中提取出的段落内容",
+                                ),
+                                "category": types.Schema(
+                                    type = Type.STRING,
+                                    description = "段落类别，scene_setting是场景段落，通常出现在每一场的第一行，内容描写顺序是内外环境，场景名称，时间；action是动作段落，场景和事物的客观描述，通常是以句号结束；character是角色段落（特别注意，旁白、画外音也属于角色段落），通常以姓名或身份加冒号‘：’结束，比如“孙涛：”或“产房护士：”；有时会在角色名字或身份名和冒号‘：’之间加入动作或情绪描述，如“张智宇笑到：”，此时冒号前部分也是角色段落；有时character段落以“旁白或画外音”加冒号‘：’结束，如“旁白:”或；“央媒新闻播报的画外音”；偶尔会用字母代替角色或身份加冒号‘：’，如“A：你怎么来了”、“C:我来看看你和小丽”；有的情况需要在角色名、身份名或‘画外音’后加Extension扩展，比如（V.O.）和（O.S.），VO即Voice Over，场景之外角色的声音——旁白或独白，这个好理解，OS即Off Screen是指角色不在镜头内发出的声音，比如说一个角色在书房写作业，这时他的母亲在厨房大喊一声“出来吃饭了”，这就是OS；偶尔剧本内容提及屏幕出现的字幕内容，也会用冒号‘：’作为结束，如“黑屏，出字幕:根据国家相关法律法规，非发集资，教唆别人炒房，从中放高利贷，非法吸收存款，证券化炒房，属于扰乱金融市场，均构成金融犯罪。”这种情况，冒号前是action段落，冒号后是dialogue段落；dialogue是台词段落，通常紧跟角色段落；特别注意，画外音和屏幕字幕提示也属于dialogue段落",
+                                    enum = ["scene_setting", "action", "character", "dialogue"],
+                                ),
+                            },
+                        )
                     ),
                 },
             ),
@@ -373,33 +376,25 @@ class GoogleGeminiBot(Bot, GeminiVision):
                 ]
         )
         self.google_search_tool = Tool(google_search=GoogleSearch())
-        self.chat = self.client.chats.create(
-            model=self.model,
-            config=GenerateContentConfig(
-                system_instruction=self.system_prompt,
-                safety_settings=self.safety_settings,
-                tools=[self.function_declarations],
-                tool_config={
-                    'function_calling_config': {
-                        'mode': 'AUTO'
-                    }
-                },
-                response_modalities=['TEXT'],
-                **self.generation_config
-            )
-        )
-        self.image_chat = self.client.chats.create(
-            model=const.GEMINI_2_FLASH_IMAGE_GENERATION,
-            config=GenerateContentConfig(
-                safety_settings=self.safety_settings,
-                response_modalities=['TEXT', 'Image'],
-                **self.generation_config
-            )
-        )
+        
         self.search_config = GenerateContentConfig(
             system_instruction=self.system_prompt,
             safety_settings=self.safety_settings,
             tools=[self.google_search_tool],
+            response_modalities=['TEXT'],
+            **self.generation_config
+        )
+
+        self.print_config = GenerateContentConfig(
+            system_instruction=self.system_prompt,
+            safety_settings=self.safety_settings,
+            tools=[self.function_declarations],
+            tool_config={
+                'function_calling_config': {
+                    'mode': 'ANY',
+                    "allowedFunctionNames": ['screenplay_formatter']
+                }
+            },
             response_modalities=['TEXT'],
             **self.generation_config
         )
@@ -418,7 +413,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
                     tools=[self.function_declarations],
                     tool_config={
                         'function_calling_config': {
-                            'mode': 'AUTO'
+                            'mode': 'NONE'
                         }
                     },
                     response_modalities=['TEXT'],
@@ -475,6 +470,8 @@ class GoogleGeminiBot(Bot, GeminiVision):
                     user_image_chat = self._get_user_image_chat(session_id)
                     # 构建请求内容列表
                     resquest_contents = []
+                    if tool_state.get_print_state(session_id):
+                        query = f"大超子，帮忙给这个本子排版，编剧的名字是{query}"
                     text = Part.from_text(text=query)
                     resquest_contents.insert(0, text)
                     # 检查缓存中是否媒体文件
@@ -502,7 +499,10 @@ class GoogleGeminiBot(Bot, GeminiVision):
                             filedata.append(text)
                             resquest_contents = filedata
                         memory.USER_IMAGE_CACHE.pop(session_id)
-                    if tool_state.get_search_state(session_id):
+                    if tool_state.get_print_state(session_id):
+                        response = user_chat.send_message(resquest_contents, config=self.print_config)
+                        tool_state.toggle_printing(session_id) 
+                    elif tool_state.get_search_state(session_id):
                         response = user_chat.send_message(resquest_contents, config=self.search_config)
                     else:
                         if tool_state.get_image_state(session_id):
@@ -525,6 +525,9 @@ class GoogleGeminiBot(Bot, GeminiVision):
                         enable_automatic_function_calling=True
                     )
                     response = chat_session.send_message(resquest_contents)
+                if response.text == None and response.function_calls == []:
+                    logger.warning(f"[{self.Model_ID}] Response Text is None")
+                    return Reply(ReplyType.ERROR, f"[{self.Model_ID}] Response Text is None")
                 response, function_response = self.function_call_polling_loop(session_id, response, user_chat)
 
                 if tool_state.get_image_state(session_id):

@@ -70,7 +70,12 @@ class FeiShuChanel(ChatChannel):
     def do_p2_im_message_receive_v1(self, data: P2ImMessageReceiveV1) -> None:
         # Print tool_button stasus to console
         toUserName = data.event.sender.sender_id.open_id
-        logger.info(f'[Lark-search] is {tool_state.get_search_state(toUserName)},[Lark-image] is {tool_state.get_image_state(toUserName)},requester={toUserName}')
+        logger.info(
+            f'[Lark-search] is {tool_state.get_search_state(toUserName)},\
+            [Lark-image] is {tool_state.get_image_state(toUserName)},\
+            [Lark-print] is {tool_state.get_print_state(toUserName)},\
+            requester={toUserName}'
+        )
         if data.event.message.chat_type == "p2p":
             self.handler_single_msg(data.event)
 
@@ -104,6 +109,8 @@ class FeiShuChanel(ChatChannel):
             self.image(open_id)
         elif event_key == 'searching':
             self.search(open_id)
+        elif event_key == 'printing':
+            self.print(data, open_id)
 
     def handle_webhook_event(self):
         """Webhook event handler"""
@@ -141,6 +148,16 @@ class FeiShuChanel(ChatChannel):
         tool_state.toggle_imaging(toUserName)
         self.send_text(text, toUserName)
         logger.info(f'[Lark_{const.GEMINI_2_FLASH_IMAGE_GENERATION}]{text} requester={toUserName}')
+
+    def print(self, data, toUserName) -> None:
+        """
+        This function handles the print menu
+        """
+        tool_state.set_printing(toUserName, True)
+        status = tool_state.get_print_state(toUserName)
+        text = "剧本排版功能已开启,请先在对话框中点击“+”号上传pdf格式的剧本，然后在对话框中输入编剧姓名。"
+        self.send_text(text, toUserName)
+        logger.info(f'[Lark]printing_stasus={status},{text} requester={toUserName}')
 
     def main(self):
         if self.websocket is True:

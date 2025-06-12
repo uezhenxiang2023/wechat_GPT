@@ -235,7 +235,7 @@ class ChatChannel(Channel):
                     session_id = context["session_id"]
                     is_imaging = tool_state.get_image_state(session_id)
                     model = const.GEMINI_2_FLASH_IMAGE_GENERATION if is_imaging else model
-                    logger.info(f'[{model}] query with file, path={image_path}')
+                    logger.info(f'[{model.upper()}] query with file, path={image_path}')
                     mime_type = image_path[(image_path.rfind('.') + 1):]
                     type_id = 'image'
                     channel_type = conf().get("channel_type")
@@ -254,7 +254,7 @@ class ChatChannel(Channel):
                             image_path = img_path_no_alpha
                         cache_media(image_path, image_file, context)
                     else:
-                        logger.warning(f'[{model}] query with unsupported image type:{mime_type}') 
+                        logger.warning(f'[{model.upper()}] query with unsupported image type:{mime_type}') 
                 else:
                     memory.USER_IMAGE_CACHE[context["session_id"]] = {
                         "path": context.content,
@@ -272,7 +272,7 @@ class ChatChannel(Channel):
                     dir_exists = os.path.exists(dir_path)
                     if not dir_exists:
                         create_user_dir(dir_path)
-                    logger.info(f'[{model}] query with file, path={file_path}')
+                    logger.info(f'[{model.upper()}] query with file, path={file_path}')
                     mime_type = file_path[(file_path.rfind('.') + 1):]
                     type_id = 'application'
                     if mime_type in const.DOCUMENT:
@@ -295,7 +295,7 @@ class ChatChannel(Channel):
                         }
                         cache_media(file_path, file_part, context)
                     else:
-                        logger.warning(f'[{model}] query with unsupported file type:{mime_type}')                       
+                        logger.warning(f'[{model.upper()}] query with unsupported file type:{mime_type}')                       
                 else:
                     pass
             elif context.type == ContextType.VIDEO:   

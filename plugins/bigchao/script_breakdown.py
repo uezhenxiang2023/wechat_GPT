@@ -309,10 +309,10 @@ def screenplay_formatter(
     doc.save(docx_file_path)
     model_id = get_model_id(session_id)
     logger.info(f"[TELEGRAMBOT_{model_id}] {docx_file_path} is saved")
-    convert(docx_file_path, pdf_file_path)
-    logger.info(f"[TELEGRAMBOT_{model_id}] {pdf_file_path} is saved")
+    """convert(docx_file_path, pdf_file_path)
+    logger.info(f"[TELEGRAMBOT_{model_id}] {pdf_file_path} is saved")"""
     api_response = {
-        'file_pathes': [docx_file_path, pdf_file_path]
+        'file_pathes': [docx_file_path]
     }
     # Create a function response part
     function_response_part = []
@@ -322,7 +322,7 @@ def screenplay_formatter(
     )
     function_response_part.append(function_response_obj)
     # Create a function response text part
-    function_response_comment = "这是按照好莱坞工业标准，排版后的剧本，两种格式，pdf格式方便阅读，docx方便修改"
+    function_response_comment = "这是按照好莱坞工业标准，排版后的剧本。"
     function_response_text = Part.from_text(
         text=function_response_comment
     )

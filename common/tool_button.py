@@ -9,7 +9,8 @@ class UserToolState:
         if user_id not in self._user_states:
             self._user_states[user_id] = {
                 'searching': False,
-                'imaging': False
+                'imaging': False,
+                'printing': False
             }
         return self._user_states[user_id]
     
@@ -25,6 +26,12 @@ class UserToolState:
         state['imaging'] = not state['imaging']
         return state['imaging']
     
+    def toggle_printing(self, user_id):
+        """切换剧本排版状态"""
+        state = self.get_user_state(user_id)
+        state['printing'] = not state['printing']
+        return state['printing']
+    
     def get_search_state(self, user_id):
         """获取用户搜索状态"""
         return self.get_user_state(user_id)['searching']
@@ -32,6 +39,16 @@ class UserToolState:
     def get_image_state(self, user_id):
         """获取用户图像生成状态"""
         return self.get_user_state(user_id)['imaging']
+    
+    def get_print_state(self, user_id):
+        """获取剧本排版状态"""
+        return self.get_user_state(user_id)['printing']
+
+    def set_printing(self, user_id, status:bool):
+        """设置剧本排版状态"""
+        state = self.get_user_state(user_id)
+        state['printing'] = status
+        return state['printing']
     
     def clear_user_state(self, user_id):
         """清除用户状态"""
