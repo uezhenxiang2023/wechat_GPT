@@ -74,6 +74,7 @@ class FeiShuChanel(ChatChannel):
             f'[Lark-search] is {tool_state.get_search_state(toUserName)},\
             [Lark-image] is {tool_state.get_image_state(toUserName)},\
             [Lark-print] is {tool_state.get_print_state(toUserName)},\
+            [Lark-breakdown] is {tool_state.get_breakdown_state(toUserName)},\
             requester={toUserName}'
         )
         if data.event.message.chat_type == "p2p":
@@ -110,7 +111,9 @@ class FeiShuChanel(ChatChannel):
         elif event_key == 'searching':
             self.search(open_id)
         elif event_key == 'printing':
-            self.print(data, open_id)
+            self.print(open_id)
+        elif event_key == 'breakdowning':
+            self.breakdown(open_id)
 
     def handle_webhook_event(self):
         """Webhook event handler"""
@@ -129,10 +132,10 @@ class FeiShuChanel(ChatChannel):
         This function handles the search menu
         """
         if tool_state.get_search_state(toUserName):
-            text = "联网功能已关闭，可以通过消息输入框左侧的命令菜单随时开启。"
+            text = "联网搜索功能已关闭，可以在消息框输入#search或点击输入框上方的‘其他工具’菜单随时开启。"
         else:
             text = "联网搜索功能已开启。"
-        tool_state.toggle_search(toUserName)
+        tool_state.toggle_searching(toUserName)
         self.send_text(text, toUserName)
         logger.info(f'[Lark]{text} requester={toUserName}')
         
@@ -142,22 +145,37 @@ class FeiShuChanel(ChatChannel):
         This function handles image menu
         """
         if tool_state.get_image_state(toUserName):
-            text = "图片编辑功能已关闭，可以通过消息输入框左侧的命令菜单随时开启。"
+            text = "图片编辑功能已关闭，可以在消息框输入#image或点击输入框上方的‘其他工具’菜单随时开启。"
         else:
             text = "图片编辑功能已开启。"
         tool_state.toggle_imaging(toUserName)
         self.send_text(text, toUserName)
         logger.info(f'[Lark_{const.GEMINI_2_FLASH_IMAGE_GENERATION}]{text} requester={toUserName}')
 
-    def print(self, data, toUserName) -> None:
+    def print(self, toUserName) -> None:
         """
         This function handles the print menu
         """
-        tool_state.set_printing(toUserName, True)
+        if tool_state.get_print_state(toUserName):
+            text = "剧本排版功能已关闭，可以在消息框输入#print或点击输入框上方的‘剧本排版’菜单随时开启。"
+        else:
+            text = "剧本排版功能已开启,请先在输入框中点击“+”号上传pdf格式的剧本，然后在对话框中输入编剧姓名。、\n我会按照好莱坞编剧工会的标准格式进行排版，让您的剧本看起来更专业、读起来更舒服，大大提升获得‘绿灯’的几率。"
+        tool_state.toggle_printing(toUserName)
         status = tool_state.get_print_state(toUserName)
-        text = "剧本排版功能已开启,请先在对话框中点击“+”号上传pdf格式的剧本，然后在对话框中输入编剧姓名。"
         self.send_text(text, toUserName)
         logger.info(f'[Lark]printing_stasus={status},{text} requester={toUserName}')
+
+    def breakdown(self, toUserName) -> None:
+        """
+        This function handles breakdown menu
+        """
+        if tool_state.get_breakdown_state(toUserName):
+            text = "拆解顺分场表功能已关闭，可以在消息框输入#breakdown或点击输入框上方的‘顺分场表’菜单随时开启。"
+        else:
+            text = "拆解顺分场表功能已开启。"
+        tool_state.toggle_breakdowning(toUserName)
+        self.send_text(text, toUserName)
+        logger.info(f'[Lark]{text} requester={toUserName}')
 
     def main(self):
         if self.websocket is True:

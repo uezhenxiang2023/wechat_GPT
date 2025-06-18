@@ -10,11 +10,12 @@ class UserToolState:
             self._user_states[user_id] = {
                 'searching': False,
                 'imaging': False,
-                'printing': False
+                'printing': False,
+                'breakdowning': False
             }
         return self._user_states[user_id]
     
-    def toggle_search(self, user_id):
+    def toggle_searching(self, user_id):
         """切换用户的搜索状态"""
         state = self.get_user_state(user_id)
         state['searching'] = not state['searching']
@@ -32,6 +33,12 @@ class UserToolState:
         state['printing'] = not state['printing']
         return state['printing']
     
+    def toggle_breakdowning(self, user_id):
+        """切换顺分场表状态"""
+        state = self.get_user_state(user_id)
+        state['breakdowning'] = not state['breakdowning']
+        return state['breakdowning']
+
     def get_search_state(self, user_id):
         """获取用户搜索状态"""
         return self.get_user_state(user_id)['searching']
@@ -43,6 +50,10 @@ class UserToolState:
     def get_print_state(self, user_id):
         """获取剧本排版状态"""
         return self.get_user_state(user_id)['printing']
+    
+    def get_breakdown_state(self, user_id):
+        """获取顺分场状态"""
+        return self.get_user_state(user_id)['breakdowning']
 
     def set_printing(self, user_id, status:bool):
         """设置剧本排版状态"""

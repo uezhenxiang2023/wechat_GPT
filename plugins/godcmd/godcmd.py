@@ -72,6 +72,14 @@ COMMANDS = {
     "image": {
         "alias": ["image", "图片编辑"],
         "desc": "开启图片编辑功能",
+    },
+    "print": {
+        "alias": ["print", "剧本排版"],
+        "desc": "开启剧本排版功能",
+    },
+    "breakdown": {
+        "alias": ["breakdown", "顺分场表"],
+        "desc": "开启顺分场表功能",
     }
 }
 
@@ -332,21 +340,42 @@ class Godcmd(Plugin):
                 elif cmd == "search":
                     # 使用用户特定的搜索状态
                     if tool_state.get_search_state(user):
-                        text = "联网功能已关闭，可以在对话框中输入#search随时开启。"
+                        text = "联网搜索功能已关闭，可以在消息框输入#search或点击输入框上方的‘其他工具’菜单随时开启。"
                     else:
                         text = "联网搜索功能已开启。"
                     # 切换用户的搜索状态
-                    tool_state.toggle_search(user)
+                    tool_state.toggle_searching(user)
                     ok, result = True, text
                     logger.info(f'{text}, requester = {user}')
                 elif cmd == "image":
                     # 使用用户特定的图片编辑状态
                     if tool_state.get_image_state(user):
-                        text = "图片编辑功能已关闭，可以在对话框中输入#image随时开启。"
+                        text = "图片编辑功能已关闭，可以在消息框输入#image或点击输入框上方的‘其他工具’菜单随时开启。"
                     else:
                         text = "图片编辑功能已开启。"
                     # 切换用户的图片编辑状态
                     tool_state.toggle_imaging(user)
+                    ok, result = True, text
+                    logger.info(f'{text}, requester = {user}')
+                elif cmd == "print":
+                    # 使用用户特定的剧本排版状态
+                    if tool_state.get_print_state(user):
+                        text = "剧本排版功能已关闭，可以在消息框输入#print或点击输入框上方的‘剧本排版’菜单随时开启。"
+                    else:
+                        text = "剧本排版功能已开启,请先在输入框中点击“+”号上传pdf格式的剧本，然后在对话框中输入编剧姓名。\n我会按照好莱坞编剧工会的标准格式进行排版，让您的剧本看起来更专业、读起来更舒服，大大提升获得‘绿灯’的几率。。"
+                    # 切换用户的图片编辑状态
+                    tool_state.toggle_printing(user)
+                    status = tool_state.get_print_state(user)
+                    ok, result = True, text
+                    logger.info(f'rinting_tasus={status},{text}, requester = {user}')
+                elif cmd == "breakdown":
+                    # 使用用户特定的顺分场状态
+                    if tool_state.get_breakdown_state(user):
+                        text = "拆解顺分场表功能已关闭，可以在消息框输入#breakdown或点击输入框上方的‘顺分场表’菜单随时开启。"
+                    else:
+                        text = "拆解顺分场表功能已开启。"
+                    # 切换用户的搜索状态
+                    tool_state.toggle_breakdowning(user)
                     ok, result = True, text
                     logger.info(f'{text}, requester = {user}')
                 logger.debug("[Godcmd] command: %s by %s" % (cmd, user))

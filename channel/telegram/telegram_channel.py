@@ -67,7 +67,7 @@ class TelegramChannel(ChatChannel):
             text = "联网搜索功能已开启，需要我帮你查询点啥？"
 
         text = escape(text)
-        tool_state.toggle_search(chat_id)
+        tool_state.toggle_searching(chat_id)
         
         """title = 'mykhel-AC.com'
         #title = self.escape(title)
