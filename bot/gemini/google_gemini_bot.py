@@ -370,13 +370,13 @@ class GoogleGeminiBot(Bot, GeminiVision):
         )
         self.function_declarations = Tool(
             function_declarations=[
-                self.screenplay_scenes_breakdown_schema, 
+                self.screenplay_scenes_breakdown_schema,
                 self.screenplay_assets_breakdown_schema,
                 self.screenplay_formatter
                 ]
         )
         self.google_search_tool = Tool(google_search=GoogleSearch())
-        
+
         self.search_config = GenerateContentConfig(
             system_instruction=self.system_prompt,
             safety_settings=self.safety_settings,
@@ -393,6 +393,20 @@ class GoogleGeminiBot(Bot, GeminiVision):
                 'function_calling_config': {
                     'mode': 'ANY',
                     "allowedFunctionNames": ['screenplay_formatter']
+                }
+            },
+            response_modalities=['TEXT'],
+            **self.generation_config
+        )
+
+        self.breakdown_config = GenerateContentConfig(
+            system_instruction=self.system_prompt,
+            safety_settings=self.safety_settings,
+            tools=[self.function_declarations],
+            tool_config={
+                'function_calling_config': {
+                    'mode': 'ANY',
+                    "allowedFunctionNames": ["screenplay_scenes_breakdown", "screenplay_assets_breakdown"]
                 }
             },
             response_modalities=['TEXT'],
@@ -501,7 +515,10 @@ class GoogleGeminiBot(Bot, GeminiVision):
                         memory.USER_IMAGE_CACHE.pop(session_id)
                     if tool_state.get_print_state(session_id):
                         response = user_chat.send_message(resquest_contents, config=self.print_config)
-                        tool_state.toggle_printing(session_id) 
+                        tool_state.toggle_printing(session_id)
+                    elif tool_state.get_breakdown_state(session_id):
+                        response = user_chat.send_message(resquest_contents, config=self.breakdown_config)
+                        tool_state.toggle_breakdowning(session_id) 
                     elif tool_state.get_search_state(session_id):
                         response = user_chat.send_message(resquest_contents, config=self.search_config)
                     else:

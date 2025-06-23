@@ -104,10 +104,10 @@ class CreateBase():
 
         # 构造请求对象
         request: CopyAppRequest = CopyAppRequest.builder() \
-            .app_token("Uen7bebXNaxe1WscVAec3O3Zn5f") \
+            .app_token("TNw5b5hOTamlrWsG2IIcVQWMnee") \
             .request_body(CopyAppRequestBody.builder()
                 .name(f"{self.screenplay_title}_BD_database_{self.session_id}")
-                .folder_token("GO4Kf8RgSlXZzgdhtg8cJw1Tn9d")
+                .folder_token("G3gXfGIvDlU7bFdc6ZTcRSG9nYH")
                 .without_content(False)
                 .time_zone("Asia/Shanghai")
                 .build()) \
@@ -514,6 +514,7 @@ def screenplay_scenes_breakdown(
         try:
             words_per_scene = int(counter_dict.get(f"scene{scene_id}"))
         except Exception as e:
+            model_id = get_model_id(session_id)
             logger.error(f"[TELEGRAMBOT_{model_id}] scene_id={scene_id} not found in counter_dict, error={e}")
             continue
         pages_per_scene = round(words_per_scene / words_per_page, 2)
@@ -625,7 +626,7 @@ def screenplay_assets_breakdown(
     base = CreateBase(screenplay_title, session_id, scene_records_list, asset_records_list)
     base.add_scene_table_record()
     base.add_asset_table_record()
-    logger.info(f"[TELEGRAMBOT_{model_id}][Lark_Base]{screenplay_title} is created")
+    logger.info(f"[TELEGRAMBOT_{model_id}][Lark_Base]{screenplay_title}_BD_database_{session_id} is created")
 
 
     """# Send the scenes_breakdown.xlsx to the user
