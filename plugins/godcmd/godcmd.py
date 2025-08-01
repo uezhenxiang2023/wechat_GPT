@@ -362,7 +362,7 @@ class Godcmd(Plugin):
                     if tool_state.get_print_state(user):
                         text = "剧本排版功能已关闭，可以在消息框输入#print或点击输入框上方的‘剧本排版’菜单随时开启。"
                     else:
-                        text = "剧本排版功能已开启,请先在输入框中点击“+”号上传pdf格式的剧本，然后在对话框中输入编剧姓名。\n我会按照好莱坞编剧工会的标准格式进行排版，让您的剧本看起来更专业、读起来更舒服，大大提升获得‘绿灯’的几率。。"
+                        text = "剧本排版功能已开启,请先在输入框中点击“+”号上传pdf格式的剧本，然后在对话框中输入编剧姓名。\n我会按照好莱坞编剧工会的标准格式进行排版，让您的剧本看起来更专业、读起来更舒服，大大提升获得‘绿灯’的几率。"
                     # 切换用户的图片编辑状态
                     tool_state.toggle_printing(user)
                     status = tool_state.get_print_state(user)

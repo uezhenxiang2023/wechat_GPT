@@ -52,9 +52,60 @@ class TelegramChannel(ChatChannel):
         """
         chat_id = update.message.from_user.id
         # Print tool_button stasus to console
-        logger.info(f'[TELEGRAMBOT-search] is {tool_state.get_search_state(chat_id)},[TELEGRAMBOT-image] is {tool_state.get_image_state(chat_id)},requester={chat_id}')
+        logger.info(
+            f'[TELEGRAMBOT-search] is {tool_state.get_search_state(chat_id)},\
+            [TELEGRAMBOT-image] is {tool_state.get_image_state(chat_id)},\
+            [TELEGRAMBOT-print] is {tool_state.get_print_state(chat_id)},\
+            [TELEGRAMBOT-breakdown] is {tool_state.get_breakdown_state(chat_id)},\
+            requester={chat_id}')
 
         self.handler_single_msg(update.message)
+
+    def print(self, update: Update, context: CallbackContext) -> None:
+        """
+        This function handles the /print command
+        """
+        chat_id = update.message.from_user.id
+        if tool_state.get_print_state(chat_id):
+            text = "[INFO]\n剧本排版功能已关闭，可以在消息框输入#print或/print命令，也可以点击输入框左侧菜单选择‘print’随时开启。"
+        else:
+            text = "[INFO]\n剧本排版功能已开启,请先上传pdf格式的剧本，然后在对话框中输入编剧姓名。\n我会按照好莱坞编剧工会的标准格式进行排版，让您的剧本看起来更专业、读起来更舒服，大大提升获得‘绿灯’的几率。"
+
+        text = escape(text)
+        tool_state.toggle_printing(chat_id)
+
+        context.bot.send_message(
+            update.message.chat_id,
+            text,
+            parse_mode=ParseMode.MARKDOWN_V2,
+            disable_web_page_preview=False
+            # To preserve the markdown, we attach entities (bold, italic...)
+            #entities=update.message.entities
+        )
+        logger.info(f'[TELEGRAMBOT]{text} requester={chat_id}')
+    
+    def breakdown(self, update: Update, context: CallbackContext) -> None:
+        """
+        This function handles the /breakdown command
+        """
+        chat_id = update.message.from_user.id
+        if tool_state.get_breakdown_state(chat_id):
+            text = "[INFO]\n拆解顺分场表功能已关闭，可以在消息框输入#breakdown或/breakdown命令，也可以点击输入框左侧菜单选择‘breakdown’,随时开启。"
+        else:
+            text = "[INFO]\n拆解顺分场表功能已开启。"
+
+        text = escape(text)
+        tool_state.toggle_breakdowning(chat_id)
+
+        context.bot.send_message(
+            update.message.chat_id,
+            text,
+            parse_mode=ParseMode.MARKDOWN_V2,
+            disable_web_page_preview=False
+            # To preserve the markdown, we attach entities (bold, italic...)
+            #entities=update.message.entities
+        )
+        logger.info(f'[TELEGRAMBOT]{text} requester={chat_id}')
 
     def search(self, update: Update, context: CallbackContext) -> None:
         """
@@ -62,9 +113,9 @@ class TelegramChannel(ChatChannel):
         """
         chat_id = update.message.from_user.id
         if tool_state.get_search_state(chat_id):
-            text = "联网功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
+            text = "[INFO]\n联网功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
         else:
-            text = "联网搜索功能已开启，需要我帮你查询点啥？"
+            text = "[INFO]\n联网搜索功能已开启，需要我帮你查询点啥？"
 
         text = escape(text)
         tool_state.toggle_searching(chat_id)
@@ -86,15 +137,16 @@ class TelegramChannel(ChatChannel):
         )
         logger.info(f'[TELEGRAMBOT]{text} requester={chat_id}')
 
+
     def image(self, update: Update, context: CallbackContext) -> None:
         """
         This function handles /image command
         """
         chat_id = update.message.from_user.id
         if tool_state.get_image_state(chat_id):
-            text = "图片生成功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
+            text = "[INFO]\n图片生成功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
         else:
-            text = "图片生成功能已开启，需要我帮你弄点啥图？"
+            text = "[INFO]\n图片生成功能已开启，需要我帮你弄点啥图？"
 
         text = escape(text)
         tool_state.toggle_imaging(chat_id)
@@ -157,6 +209,8 @@ class TelegramChannel(ChatChannel):
         dispatcher = updater.dispatcher
 
         # Register commands
+        dispatcher.add_handler(CommandHandler("print", self.print))
+        dispatcher.add_handler(CommandHandler("breakdown", self.breakdown))
         dispatcher.add_handler(CommandHandler("search", self.search))
         dispatcher.add_handler(CommandHandler("image", self.image))
         dispatcher.add_handler(CommandHandler("menu", self.menu))
