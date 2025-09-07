@@ -32,6 +32,8 @@ from common.tmp_dir import TmpDir, create_user_dir
 class FeiShuChanel(ChatChannel):
     def __init__(self):
         super().__init__()
+        self.image_model = conf().get('text_to_image')
+        self.IMAGE_MODEL_ID = self.image_model.upper()
         self.app_id = conf().get('feishu_app_id')
         self.app_secret = conf().get('feishu_app_secret')
         self.encrypt_key = conf().get('feishu_encrypt_key')
@@ -150,7 +152,7 @@ class FeiShuChanel(ChatChannel):
             text = "[INFO]\n图片编辑功能已开启。"
         tool_state.toggle_imaging(toUserName)
         self.send_text(text, toUserName)
-        logger.info(f'[Lark_{const.GEMINI_2_FLASH_IMAGE_GENERATION}]{text} requester={toUserName}')
+        logger.info(f'[Lark_{self.IMAGE_MODEL_ID}]{text} requester={toUserName}')
 
     def print(self, toUserName) -> None:
         """
@@ -325,11 +327,11 @@ class FeiShuChanel(ChatChannel):
                     if part.text:
                         reply_text = part.text
                         self.send_text(reply_text, receiver)
-                        logger.info("[Lark_{}] sendMsg={}, receiver={}".format(const.GEMINI_2_FLASH_IMAGE_GENERATION, part.text, receiver))
+                        logger.info("[Lark_{}] sendMsg={}, receiver={}".format(self.IMAGE_MODEL_ID, part.text, receiver))
                     elif part.inline_data:
                         image_type = part.inline_data.mime_type.split('/')[-1]
                         image = BytesIO(part.inline_data.data)
-                        logger.info(f"[Lark_{const.GEMINI_2_FLASH_IMAGE_GENERATION}] reply={image}")
+                        logger.info(f"[Lark_{self.IMAGE_MODEL_ID}] reply={image}")
                         image.seek(0)
                         user_dir = TmpDir().path() + str(receiver) + '/response/'
                         user_dir_exists = os.path.exists(user_dir)
@@ -340,7 +342,7 @@ class FeiShuChanel(ChatChannel):
                         with open(image_path, 'wb') as f:
                             f.write(image.read())
                         self.send_image(image_path, receiver)
-                        logger.info("[Lark_{}] sendMsg={}, receiver={}".format(const.GEMINI_2_FLASH_IMAGE_GENERATION, image, receiver))
+                        logger.info("[Lark_{}] sendMsg={}, receiver={}".format(self.IMAGE_MODEL_ID, image, receiver))
         elif reply.type == ReplyType.FILE:  # 新增文件回复类型
             file_pathes = reply.content['function_response']['file_pathes']
             reply_text = reply.content['reply_text']

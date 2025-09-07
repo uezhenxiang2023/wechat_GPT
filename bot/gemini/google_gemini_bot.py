@@ -52,6 +52,8 @@ class GoogleGeminiBot(Bot, GeminiVision):
         self.api_key = conf().get("gemini_api_key")
         self.model = conf().get('model')
         self.Model_ID = self.model.upper()
+        self.image_model = conf().get('text_to_image')
+        self.IMAGE_MODEL_ID = self.image_model.upper()
         self.system_prompt = conf().get("character_desc")
         self.function_call_dicts = {
             "screenplay_scenes_breakdown": screenplay_scenes_breakdown,
@@ -440,7 +442,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
         """获取指定用户的image_chat实例,如果不存在则创建新的"""
         if session_id not in self.user_image_chats:
             self.user_image_chats[session_id] = self.client.chats.create(
-                model=const.GEMINI_2_FLASH_IMAGE_GENERATION,
+                model=self.image_model,
                 config=GenerateContentConfig(
                     safety_settings=self.safety_settings,
                     response_modalities=['TEXT', 'Image'],
@@ -463,8 +465,8 @@ class GoogleGeminiBot(Bot, GeminiVision):
                 session_id = context["session_id"]
                 # 使用用户特定的状态
                 is_imaging = tool_state.get_image_state(session_id)
-                self.Model_ID = const.GEMINI_2_FLASH_IMAGE_GENERATION.upper() if is_imaging else self.model.upper()
-                logger.info(f"[{self.Model_ID}] query={query}, requester={session_id}")
+                Model_ID = self.IMAGE_MODEL_ID if is_imaging else self.Model_ID
+                logger.info(f"[{Model_ID}] query={query}, requester={session_id}")
                 session = self.sessions.session_query(query, session_id)
 
                 # Set up the model
