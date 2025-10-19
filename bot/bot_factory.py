@@ -55,5 +55,9 @@ def create_bot(bot_type):
     elif bot_type == const.OPEN_AI_ASSISTANT:
         from bot.openai.open_ai_assistant import OpenAIAssistantBot
         return OpenAIAssistantBot()
+    
+    elif bot_type == const.ARK:
+        from bot.ark.volcengine_ark_bot import VolcengineArkBot
+        return VolcengineArkBot()
 
     raise RuntimeError

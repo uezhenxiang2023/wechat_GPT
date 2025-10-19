@@ -76,6 +76,9 @@ available_setting = {
     "qwen_node_id": "",  # 流程编排模型用到的id，如果没有用到qwen_node_id，请务必保持为空字符串
     # Google Gemini Api Key
     "gemini_api_key": "",
+    # Volcengine ARK 配置
+    "ark_api_key": "",
+    "thinking": "", # "disabled",不使用深度思考能力; "enabled",使用深度思考能力; "auto",模型自行判断是否使用深度思考能力
     # wework的通用配置
     "wework_smart": True,  # 配置wework是否使用已登录的企业微信，False为多开
     # 语音设置

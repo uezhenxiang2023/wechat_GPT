@@ -34,6 +34,8 @@ class Bridge(object):
             self.btype["chat"] = const.GEMINI
         if model_type in [const.OPEN_AI_ASSISTANT]:
             self.btype["chat"] = const.OPEN_AI_ASSISTANT
+        if model_type in const.DOUAO:
+            self.btype["chat"] = const.ARK
 
         if conf().get("use_linkai") and conf().get("linkai_api_key"):
             self.btype["chat"] = const.LINKAI
