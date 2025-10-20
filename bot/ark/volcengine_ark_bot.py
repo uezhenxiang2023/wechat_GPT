@@ -12,7 +12,7 @@ from volcenginesdkarkruntime import Ark
 from config import conf
 from bot.bot import Bot
 from bot.session_manager import SessionManager
-from bot.baidu.baidu_wenxin_session import BaiduWenxinSession
+from bot.chatgpt.chat_gpt_session import ChatGPTSession
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
@@ -28,8 +28,8 @@ class VolcengineArkBot(Bot):
         self.thinking = conf().get('thinking')
         self.image_model = conf().get('text_to_image')
         self.IMAGE_MODEL_ID = self.image_model.upper()
-        
-        self.sessions = SessionManager(BaiduWenxinSession, model=self.model or "gpt-3.5-turbo") # 复用文心的token计算方式
+        self.system_prompt = conf().get("character_desc") 
+        self.sessions = SessionManager(ChatGPTSession, model=self.model or "gpt-3.5-turbo") # 复用chatGPT的token计算方式
 
         self.client = Ark(
             api_key=self.api_key,
