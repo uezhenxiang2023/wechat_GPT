@@ -35,6 +35,8 @@ class FeiShuChanel(ChatChannel):
         super().__init__()
         self.image_model = conf().get('text_to_image')
         self.IMAGE_MODEL_ID = self.image_model.upper()
+        self.video_model = conf().get('text_to_video')
+        self.VIDEO_MODEL_ID = self.video_model.upper()
         self.app_id = conf().get('feishu_app_id')
         self.app_secret = conf().get('feishu_app_secret')
         self.encrypt_key = conf().get('feishu_encrypt_key')
@@ -76,6 +78,7 @@ class FeiShuChanel(ChatChannel):
         logger.info(
             f'[Lark-search] is {tool_state.get_search_state(toUserName)},\
             [Lark-image] is {tool_state.get_image_state(toUserName)},\
+            [Lark-edit] is {tool_state.get_edit_state(toUserName)},\
             [Lark-print] is {tool_state.get_print_state(toUserName)},\
             [Lark-breakdown] is {tool_state.get_breakdown_state(toUserName)},\
             requester={toUserName}'
@@ -111,6 +114,8 @@ class FeiShuChanel(ChatChannel):
         open_id = data.event.operator.operator_id.open_id
         if event_key == 'imaging':
             self.image(open_id)
+        elif event_key == 'editing':
+            self.edit(open_id)
         elif event_key == 'searching':
             self.search(open_id)
         elif event_key == 'printing':
@@ -154,6 +159,18 @@ class FeiShuChanel(ChatChannel):
         tool_state.toggle_imaging(toUserName)
         self.send_text(text, toUserName)
         logger.info(f'[Lark_{self.IMAGE_MODEL_ID}]{text} requester={toUserName}')
+
+    def edit(self, toUserName) -> None:
+        """
+        This function handles edit menu
+        """
+        if tool_state.get_edit_state(toUserName):
+            text = "[INFO]\n视频编辑功能已关闭，可以在消息框输入#edit或点击输入框上方的‘其他工具’菜单随时开启。"
+        else:
+            text = "[INFO]\n视频编辑功能已开启。"
+        tool_state.toggle_editing(toUserName)
+        self.send_text(text, toUserName)
+        logger.info(f'[Lark_{self.VIDEO_MODEL_ID}]{text} requester={toUserName}')
 
     def print(self, toUserName) -> None:
         """
@@ -364,7 +381,9 @@ class FeiShuChanel(ChatChannel):
             self.send_video(video_storage, toUserName=receiver)
             logger.info("[Lark] sendFile, receiver={}".format(receiver))
         elif reply.type == ReplyType.VIDEO_URL:  # 新增视频URL回复类型
-            video_url = reply.content
+            video_duration = reply.content[0]
+            video_url = reply.content[1]
+            file_name = self.extract_image_filename(video_url)
             logger.debug(f"[Lark] start download video, video_url={video_url}")
             video_res = requests.get(video_url, stream=True)
             video_storage = io.BytesIO()
@@ -374,8 +393,20 @@ class FeiShuChanel(ChatChannel):
                 video_storage.write(block)
             logger.info(f"[Lark] download video success, size={size}, video_url={video_url}")
             video_storage.seek(0)
-            self.send_video(video_storage, toUserName=receiver)
-            logger.info("[Lark] sendVideo url={}, receiver={}".format(video_url, receiver))
+            video_path = self.save_media_file(receiver, video_storage, file_name)
+            self.send_video(video_duration, video_path, receiver)
+            logger.info("[Lark] sendVideo url={}, receiver={}".format(video_path, receiver))
+    
+    def save_media_file(self, receiver, media_storage, file_name):
+        """将网页链接中的图片或视频文件存储到本地硬盘"""
+        user_dir = TmpDir().path() + str(receiver) + '/response/'
+        user_dir_exists = os.path.exists(user_dir)
+        if not user_dir_exists:
+            create_user_dir(user_dir)
+        media_path = user_dir + file_name
+        with open(media_path, 'wb') as f:
+            f.write(media_storage.read())
+        return media_path
 
     def get_search_sources(self, grounding_metadata):
         """
@@ -520,6 +551,41 @@ class FeiShuChanel(ChatChannel):
             # 处理业务结果
             lark.logger.info(lark.JSON.marshal(response.data, indent=4))
             return response.data.file_key
+        
+    def create_video(self, video_duration, video_path):
+        """
+        This function uploads video to Lark OpenAPI.
+        """
+        # 创建client
+        client = self.client
+        # 构造请求对象
+        duration = video_duration * 1000
+        filename = os.path.basename(video_path)
+        name, ext = os.path.splitext(filename)
+        ext = ext.lstrip('.')
+        file = open(video_path, "rb")
+        request: CreateFileRequest = CreateFileRequest.builder() \
+            .request_body(CreateFileRequestBody.builder()
+                .file_type(ext)
+                .file_name(filename)
+                .duration(duration)
+                .file(file)
+                .build()) \
+            .build()
+
+        # 发起请求
+        response: CreateFileResponse = client.im.v1.file.create(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.im.v1.file.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
+            return
+
+        else:
+            # 处理业务结果
+            lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+            return response.data.file_key
 
     def send_file(self, reply_content, toUserName):
         """
@@ -543,6 +609,45 @@ class FeiShuChanel(ChatChannel):
             .request_body(CreateMessageRequestBody.builder()
                 .receive_id(toUserName)
                 .msg_type("file")
+                .content(content)
+                .uuid(request_uuid)
+                .build()) \
+            .build()
+
+        # 发起请求
+        response: CreateMessageResponse = client.im.v1.message.create(request)
+
+        # 处理失败返回
+        if not response.success():
+            lark.logger.error(
+                f"client.im.v1.message.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
+            return
+
+        # 处理业务结果
+        lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+
+    def send_video(self, video_duration, video_path, toUserName):
+        """
+        This function sends a response video back to the user.
+        """
+        # 创建client
+        client = self.client
+        file_key = self.create_video(video_duration, video_path)
+        content = json.dumps(
+            {
+                "file_key": file_key
+            }
+        )
+
+        # 生成唯一的UUID
+        request_uuid = str(uuid.uuid4())
+
+        # 构造请求对象
+        request: CreateMessageRequest = CreateMessageRequest.builder() \
+            .receive_id_type("open_id") \
+            .request_body(CreateMessageRequestBody.builder()
+                .receive_id(toUserName)
+                .msg_type("media")
                 .content(content)
                 .uuid(request_uuid)
                 .build()) \

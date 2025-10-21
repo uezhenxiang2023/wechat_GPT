@@ -7,6 +7,7 @@ Bytedance volcengine_ark bot
 
 import os
 import base64
+import time
 
 from volcenginesdkarkruntime import Ark
 
@@ -30,6 +31,9 @@ class VolcengineArkBot(Bot):
         self.thinking = conf().get('thinking')
         self.image_model = conf().get('text_to_image')
         self.IMAGE_MODEL_ID = self.image_model.upper()
+        self.video_model = conf().get('text_to_video')
+        self.VIDEO_MODEL_ID = self.video_model.upper()
+        self.image_size = conf().get('image_create_size')
         self.system_prompt = conf().get("character_desc") 
         self.sessions = SessionManager(ChatGPTSession, model=self.model or "gpt-3.5-turbo") # 复用chatGPT的token计算方式
 
@@ -43,49 +47,96 @@ class VolcengineArkBot(Bot):
         try:
             if context.type == ContextType.TEXT:
                 session_id = context["session_id"]
-                # 使用用户特定的状态
+                # 使用用户特定的状态筛选模型
                 is_imaging = tool_state.get_image_state(session_id)
-                Model_ID = self.IMAGE_MODEL_ID if is_imaging else self.Model_ID
+                is_editing = tool_state.get_edit_state(session_id)
+                if is_imaging:
+                    Model_ID = self.IMAGE_MODEL_ID
+                elif is_editing:
+                    Model_ID = self.VIDEO_MODEL_ID
+                else:
+                    Model_ID = self.Model_ID
                 logger.info(f"[{Model_ID}] query={query}, requester={session_id}")
 
                 # 检查缓存中是否媒体文件
                 file_cache = memory.USER_IMAGE_CACHE.get(session_id)
-                if not is_imaging:
-                    # 关闭图片编辑功能
+                if not is_editing:
+                    # 关闭视频编辑功能
+                    if not is_imaging:
+                        # 关闭图片编辑功能
+                        if file_cache:
+                            # 图片理解应用
+                            text_content = {
+                                'type': 'text',
+                                'text': query
+                            }
+                            image_contents = []
+                            image_files = file_cache['files']
+                            image_pathes = file_cache['path']
+                            for i, v in enumerate(image_pathes):
+                                for m, n in enumerate(image_files):
+                                    if m == i:
+                                        image_content = self.encode_image_content(v, n)
+                                        image_contents.append(image_content)
+                                        break
+                            image_contents.append(text_content)
+                            query = image_contents
+                            memory.USER_IMAGE_CACHE.pop(session_id)
+                        session = self.sessions.session_query(query, session_id)
+                        messages = session.messages
+                        completion = self.client.chat.completions.create(
+                            # Get Model ID: https://www.volcengine.com/docs/82379/1330310 .
+                            model=self.model,
+                            messages=messages,
+                            thinking = {
+                                "type": self.thinking
+                            }
+                        )
+                        reply_text = completion.choices[0].message.content
+                        total_tokens = completion.usage.total_tokens
+                        self.sessions.session_reply(reply_text, session_id, total_tokens) 
+                        return Reply(ReplyType.TEXT, reply_text)
+                    elif is_imaging:
+                        # 开启图片编辑功能
+                        if file_cache:
+                            images = []
+                            image_files = file_cache['files']
+                            image_pathes = file_cache['path']
+                            for i, v in enumerate(image_pathes):
+                                for m, n in enumerate(image_files):
+                                    if m == i:
+                                        image = self.encode_image(v, n)
+                                        images.append(image)
+                                        break
+                            images_response = self.client.images.generate(
+                                model = self.image_model,
+                                prompt=query,
+                                image=images,
+                                response_format='url',
+                                size=self.image_size,
+                                watermark=True,
+                                sequential_image_generation='disabled'
+                            )
+                        else:
+                            images_response = self.client.images.generate(
+                                model = self.image_model,
+                                prompt=query,
+                                response_format='url',
+                                size=self.image_size,
+                                watermark=True,
+                                sequential_image_generation='disabled'
+                            )
+                        image_url = images_response.data[0].url
+                        return Reply(ReplyType.IMAGE_URL, image_url)
+                elif is_editing:
+                    # 开启视频编辑功能
                     if file_cache:
-                        text_content = {
-                            'type': 'text',
-                            'text': query
-                        }
-                        image_contents = []
-                        image_files = file_cache['files']
-                        image_pathes = file_cache['path']
-                        for i, v in enumerate(image_pathes):
-                            for m, n in enumerate(image_files):
-                                if m == i:
-                                    image_content = self.encode_image_content(v, n)
-                                    image_contents.append(image_content)
-                                    break
-                        image_contents.append(text_content)
-                        query = image_contents
-                        memory.USER_IMAGE_CACHE.pop(session_id)
-                    session = self.sessions.session_query(query, session_id)
-                    messages = session.messages
-                    completion = self.client.chat.completions.create(
-                        # Get Model ID: https://www.volcengine.com/docs/82379/1330310 .
-                        model=self.model,
-                        messages=messages,
-                        thinking = {
-                            "type": self.thinking
-                        }
-                    )
-                    reply_text = completion.choices[0].message.content
-                    total_tokens = completion.usage.total_tokens
-                    self.sessions.session_reply(reply_text, session_id, total_tokens) 
-                    return Reply(ReplyType.TEXT, reply_text)
-                elif is_imaging:
-                    # 开启图片编辑功能
-                    if file_cache:
+                        text_content = [
+                            {
+                                'type': 'text',
+                                'text': query + "--resolution 1080p  --duration 5 --camerafixed false --watermark true"
+                            }
+                        ]
                         images = []
                         image_files = file_cache['files']
                         image_pathes = file_cache['path']
@@ -95,26 +146,25 @@ class VolcengineArkBot(Bot):
                                     image = self.encode_image_content(v, n)
                                     images.append(image)
                                     break
-                        images_response = self.client.images.generate(
-                            model = self.image_model,
-                            prompt=query,
-                            image=images,
-                            response_format='url',
-                            size='2k',
-                            watermark=True,
-                            sequential_image_generation='disabled'
+                        text_content.extend(images)
+                        video_response = self.client.content_generation.tasks.create(
+                            model = self.video_model,
+                            content=text_content
                         )
                     else:
-                        images_response = self.client.images.generate(
-                            model = self.image_model,
-                            prompt=query,
-                            response_format='url',
-                            size='2k',
-                            watermark=True,
-                            sequential_image_generation='disabled'
+                        video_response = self.client.content_generation.tasks.create(
+                            model = self.video_model,
+                            content=[
+                                {
+                                    'type': 'text',
+                                    'text': query + "--resolution 480p  --duration 5 --camerafixed false --watermark true"
+                                }
+                            ]
                         )
-                    image_url = images_response.data[0].url
-                    return Reply(ReplyType.IMAGE_URL, image_url)
+                    task_id = video_response.id
+                    video_info = self.get_video_info(task_id)
+                    return Reply(ReplyType.VIDEO_URL, video_info)             
+
         except Exception as e:
             logger.error("[{}] fetch reply error, {}".format(self.Model_ID, e))
             return Reply(ReplyType.ERROR, f"[{self.Model_ID}] {e}")
@@ -150,3 +200,22 @@ class VolcengineArkBot(Bot):
         elif image_type == 'PngImageFile':
             image = f"data:image/png;base64,{base64_image}"
         return image
+    
+    def get_video_info(self, id):
+        print(f"----- [{self.VIDEO_MODEL_ID}]polling task status -----")
+        while True:
+            get_result = self.client.content_generation.tasks.get(task_id=id)
+            status = get_result.status
+            if status == "succeeded":
+                print(f"----- [{self.VIDEO_MODEL_ID}]task succeeded -----")
+                video_duration = get_result.duration
+                video_url = get_result.content.video_url
+                break
+            elif status == "failed":
+                print(f"----- [{self.VIDEO_MODEL_ID}]task failed -----")
+                print(f"Error: {get_result.error}")
+                break
+            else:
+                print(f"Current status: {status}, Retrying after 3 seconds...")
+                time.sleep(3)
+        return (video_duration, video_url)

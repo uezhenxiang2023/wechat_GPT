@@ -73,6 +73,10 @@ COMMANDS = {
         "alias": ["image", "图片编辑"],
         "desc": "开启图片编辑功能",
     },
+    "edit": {
+        "alias": ["edit", "视频编辑"],
+        "desc": "开启视频编辑功能",
+    },
     "print": {
         "alias": ["print", "剧本排版"],
         "desc": "开启剧本排版功能",
@@ -355,6 +359,16 @@ class Godcmd(Plugin):
                         text = "图片编辑功能已开启。"
                     # 切换用户的图片编辑状态
                     tool_state.toggle_imaging(user)
+                    ok, result = True, text
+                    logger.info(f'{text}, requester = {user}')
+                elif cmd == "edit":
+                    # 使用用户特定的视频编辑状态
+                    if tool_state.get_edit_state(user):
+                        text = "视频编辑功能已关闭，可以在消息框输入#edit或点击输入框上方的‘其他工具’菜单随时开启。"
+                    else:
+                        text = "视频编辑功能已开启。"
+                    # 切换用户的视频编辑状态
+                    tool_state.toggle_editing(user)
                     ok, result = True, text
                     logger.info(f'{text}, requester = {user}')
                 elif cmd == "print":

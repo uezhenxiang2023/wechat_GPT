@@ -10,6 +10,7 @@ class UserToolState:
             self._user_states[user_id] = {
                 'searching': False,
                 'imaging': False,
+                'editing': False,
                 'printing': False,
                 'breakdowning': False
             }
@@ -26,6 +27,12 @@ class UserToolState:
         state = self.get_user_state(user_id)
         state['imaging'] = not state['imaging']
         return state['imaging']
+    
+    def toggle_editing(self, user_id):
+        """切换用户的视频生成状态"""
+        state = self.get_user_state(user_id)
+        state['editing'] = not state['editing']
+        return state['editing']
     
     def toggle_printing(self, user_id):
         """切换剧本排版状态"""
@@ -46,6 +53,10 @@ class UserToolState:
     def get_image_state(self, user_id):
         """获取用户图像生成状态"""
         return self.get_user_state(user_id)['imaging']
+    
+    def get_edit_state(self, user_id):
+        """获取用户视频生成状态"""
+        return self.get_user_state(user_id)['editing']
     
     def get_print_state(self, user_id):
         """获取剧本排版状态"""
