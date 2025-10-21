@@ -9,6 +9,7 @@
 import io, json, os, uuid, requests, threading
 from io import BytesIO
 from flask import Flask
+from urllib.parse import urlparse
 
 from channel.feishu.feishu_message import FeishuMessage
 from bridge.context import Context
@@ -302,18 +303,25 @@ class FeiShuChanel(ChatChannel):
 
             else:
                 # 下载图片
-                img_url = reply.content
-                logger.debug(f"[Lark] start download image, img_url={img_url}")
-                pic_res = requests.get(img_url, stream=True)
+                file_name = self.extract_image_filename(response)
+                logger.debug(f"[Lark] start download image, img_url={response}")
+                pic_res = requests.get(response, stream=True)
                 image_storage = io.BytesIO()
                 size = 0
                 for block in pic_res.iter_content(1024):
                     size += len(block)
                     image_storage.write(block)
-                logger.info(f"[Lark] download image success, size={size}, img_url={img_url}")
+                logger.info(f"[Lark] download image success, size={size}, img_url={response}")
                 image_storage.seek(0)
-                self.send_image(image_storage, toUserName=receiver)
-                logger.info("[Lark] sendImage url={}, receiver={}".format(img_url, receiver))
+                user_dir = TmpDir().path() + str(receiver) + '/response/'
+                user_dir_exists = os.path.exists(user_dir)
+                if not user_dir_exists:
+                    create_user_dir(user_dir)
+                image_path = user_dir + file_name
+                with open(image_path, 'wb') as f:
+                    f.write(image_storage.read())
+                self.send_image(image_path, toUserName=receiver)
+                logger.info("[Lark] sendImage url={}, receiver={}".format(response, receiver))
         elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
             response = reply.content
             parts = response.candidates[0].content.parts
@@ -551,3 +559,14 @@ class FeiShuChanel(ChatChannel):
 
         # 处理业务结果
         lark.logger.info(lark.JSON.marshal(response.data, indent=4))
+
+    def extract_image_filename(self, url):
+        # 解析URL
+        parsed_url = urlparse(url)
+        # 获取路径部分
+        path = parsed_url.path
+        # 提取文件名
+        filename = os.path.basename(path)
+        # 如果文件名包含查询参数，只取问号前的部分
+        filename = filename.split('?')[0]
+        return filename

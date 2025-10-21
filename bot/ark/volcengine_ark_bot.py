@@ -1,11 +1,12 @@
 """
 Bytedance volcengine_ark bot
 
-@author zhayujie
+@author fort
 @Date 2025/10/19
 """
 
 import os
+import base64
 
 from volcenginesdkarkruntime import Ark
 
@@ -15,6 +16,7 @@ from bot.session_manager import SessionManager
 from bot.chatgpt.chat_gpt_session import ChatGPTSession
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
+from common import memory
 from common.log import logger
 from common.tool_button import tool_state
 
@@ -45,20 +47,106 @@ class VolcengineArkBot(Bot):
                 is_imaging = tool_state.get_image_state(session_id)
                 Model_ID = self.IMAGE_MODEL_ID if is_imaging else self.Model_ID
                 logger.info(f"[{Model_ID}] query={query}, requester={session_id}")
-                session = self.sessions.session_query(query, session_id)
-                messages = session.messages
-                completion = self.client.chat.completions.create(
-                    # Get Model ID: https://www.volcengine.com/docs/82379/1330310 .
-                    model=self.model,
-                    messages=messages,
-                    thinking = {
-                        "type": self.thinking
-                    }
-                )
-                reply_text = completion.choices[0].message.content
-                total_tokens = completion.usage.total_tokens
-                self.sessions.session_reply(reply_text, session_id, total_tokens) 
-                return Reply(ReplyType.TEXT, reply_text)
+
+                # 检查缓存中是否媒体文件
+                file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+                if not is_imaging:
+                    # 关闭图片编辑功能
+                    if file_cache:
+                        text_content = {
+                            'type': 'text',
+                            'text': query
+                        }
+                        image_contents = []
+                        image_files = file_cache['files']
+                        image_pathes = file_cache['path']
+                        for i, v in enumerate(image_pathes):
+                            for m, n in enumerate(image_files):
+                                if m == i:
+                                    image_content = self.encode_image_content(v, n)
+                                    image_contents.append(image_content)
+                                    break
+                        image_contents.append(text_content)
+                        query = image_contents
+                        memory.USER_IMAGE_CACHE.pop(session_id)
+                    session = self.sessions.session_query(query, session_id)
+                    messages = session.messages
+                    completion = self.client.chat.completions.create(
+                        # Get Model ID: https://www.volcengine.com/docs/82379/1330310 .
+                        model=self.model,
+                        messages=messages,
+                        thinking = {
+                            "type": self.thinking
+                        }
+                    )
+                    reply_text = completion.choices[0].message.content
+                    total_tokens = completion.usage.total_tokens
+                    self.sessions.session_reply(reply_text, session_id, total_tokens) 
+                    return Reply(ReplyType.TEXT, reply_text)
+                elif is_imaging:
+                    # 开启图片编辑功能
+                    if file_cache:
+                        images = []
+                        image_files = file_cache['files']
+                        image_pathes = file_cache['path']
+                        for i, v in enumerate(image_pathes):
+                            for m, n in enumerate(image_files):
+                                if m == i:
+                                    image = self.encode_image_content(v, n)
+                                    images.append(image)
+                                    break
+                        images_response = self.client.images.generate(
+                            model = self.image_model,
+                            prompt=query,
+                            image=images,
+                            response_format='url',
+                            size='2k',
+                            watermark=True,
+                            sequential_image_generation='disabled'
+                        )
+                    else:
+                        images_response = self.client.images.generate(
+                            model = self.image_model,
+                            prompt=query,
+                            response_format='url',
+                            size='2k',
+                            watermark=True,
+                            sequential_image_generation='disabled'
+                        )
+                    image_url = images_response.data[0].url
+                    return Reply(ReplyType.IMAGE_URL, image_url)
         except Exception as e:
             logger.error("[{}] fetch reply error, {}".format(self.Model_ID, e))
             return Reply(ReplyType.ERROR, f"[{self.Model_ID}] {e}")
+    
+    def encode_image_content(self, image_path, image_file):
+        "“将图片信息组装为Base64消息体，作为用户消息发给多模态模型，用于图片理解类任务”"
+        with open(image_path, 'rb') as file:
+            base64_image = base64.b64encode(file.read()).decode('utf-8')
+        image_type = type(image_file).__name__
+        if image_type == 'JpegImageFile':
+            image_content = {
+                'type': 'image_url',
+                'image_url': {
+                    'url': f"data:image/jpeg;base64,{base64_image}"
+                }
+            }
+        elif image_type == 'PngImageFile':
+            image_content = {
+                'type': 'image_url',
+                'image_url': {
+                    'url': f"data:image/png;base64,{base64_image}"
+                }
+            }
+        return image_content
+    
+    def encode_image(self, image_path, image_file):
+        "“将图片转为Base64编码的恶字符串，发给图片生成模型，用于图片生成类任务”"
+        with open(image_path, 'rb') as file:
+            base64_image = base64.b64encode(file.read()).decode('utf-8')
+        image_type = type(image_file).__name__
+        if image_type == 'JpegImageFile':
+            image = f"data:image/jpeg;base64,{base64_image}"
+        elif image_type == 'PngImageFile':
+            image = f"data:image/png;base64,{base64_image}"
+        return image

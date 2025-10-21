@@ -28,11 +28,12 @@ from common.log import logger
 from common.tmp_dir import TmpDir, create_user_dir
 
 model = conf().get('model')
+image_model = conf().get('text_to_image')
 
 def get_model_id(session_id):
     """根据用户session获取对应的模型ID"""
     is_imaging = tool_state.get_image_state(session_id)
-    return const.GEMINI_2_FLASH_IMAGE_GENERATION if is_imaging else model.upper()
+    return image_model.upper() if is_imaging else model.upper()
 
 app_id = conf().get('feishu_app_id')
 app_secret = conf().get('feishu_app_secret')

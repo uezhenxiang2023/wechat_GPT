@@ -224,8 +224,8 @@ class ChatChannel(Channel):
                 context["channel"] = e_context["channel"]
                 reply = super().build_reply_content(context.content, context)
             elif context.type == ContextType.IMAGE:
-                if model in const.GEMINI_GENAI_SDK:  
-                    # 图片消息,目前只针对gemini2.0+进行监听配置
+                if model in const.GEMINI_GENAI_SDK or model in const.DOUAO:  
+                    # 图片消息,目前只针对gemini2.0+和DOUBAO进行监听配置
                     image_path = context.content
                     dir_path = os.path.dirname(image_path)
                     dir_exists = os.path.exists(dir_path)
@@ -234,7 +234,7 @@ class ChatChannel(Channel):
                      # 使用用户特定的imaging状态
                     session_id = context["session_id"]
                     is_imaging = tool_state.get_image_state(session_id)
-                    model = const.GEMINI_2_FLASH_IMAGE_GENERATION if is_imaging else model
+                    model = conf().get('text_to_image') if is_imaging else model
                     logger.info(f'[{model.upper()}] query with file, path={image_path}')
                     mime_type = image_path[(image_path.rfind('.') + 1):]
                     type_id = 'image'
