@@ -73,6 +73,7 @@ class VolcengineArkBot(Bot):
                             image_contents = []
                             image_files = file_cache['files']
                             image_pathes = file_cache['path']
+                            memory.USER_IMAGE_CACHE.pop(session_id)
                             for i, v in enumerate(image_pathes):
                                 for m, n in enumerate(image_files):
                                     if m == i:
@@ -81,7 +82,6 @@ class VolcengineArkBot(Bot):
                                         break
                             image_contents.append(text_content)
                             query = image_contents
-                            memory.USER_IMAGE_CACHE.pop(session_id)
                         session = self.sessions.session_query(query, session_id)
                         messages = session.messages
                         completion = self.client.chat.completions.create(
@@ -102,18 +102,20 @@ class VolcengineArkBot(Bot):
                             images = []
                             image_files = file_cache['files']
                             image_pathes = file_cache['path']
+                            memory.USER_IMAGE_CACHE.pop(session_id)
                             for i, v in enumerate(image_pathes):
                                 for m, n in enumerate(image_files):
                                     if m == i:
                                         image = self.encode_image(v, n)
                                         images.append(image)
                                         break
+                            image_size = self.size_calculator(image_files)
                             images_response = self.client.images.generate(
                                 model = self.image_model,
                                 prompt=query,
                                 image=images,
                                 response_format='url',
-                                size=self.image_size,
+                                size=image_size,
                                 watermark=True,
                                 sequential_image_generation='disabled'
                             )
@@ -219,3 +221,31 @@ class VolcengineArkBot(Bot):
                 print(f"Current status: {status}, Retrying after 3 seconds...")
                 time.sleep(3)
         return (video_duration, video_url)
+    
+    def size_calculator(self, files):
+        """推断生成图片的最佳分辨率"""
+        # 预定义的宽高比和对应的分辨率
+        ratio_resolutions = {
+            1.0: '2048x2048',    # 1:1
+            1.33: '2304x1728',   # 4:3
+            0.75: '1728x2304',   # 3:4
+            1.78: '2560x1440',   # 16:9
+            0.56: '1440x2560',   # 9:16
+            1.5: '2496x1664',    # 3:2
+            0.67: '1664x2496',   # 2:3
+            2.33: '3024x1296'    # 21:9
+        }
+        
+        # 获取所有图片中最大尺寸的宽高比
+        sizes_list = []
+        for file in files:
+            size = file.size
+            sizes_list.append(size)
+        sorted_list = sorted(sizes_list, key=lambda x: x[0] * x[1], reverse=True)
+        best_size = sorted_list[0]
+        ratio = round(best_size[0] / best_size[1], 2)
+        
+        # 找到最接近的预定义宽高比
+        closest_ratio = min(ratio_resolutions.keys(), key=lambda x: abs(x - ratio))
+        
+        return ratio_resolutions[closest_ratio]
