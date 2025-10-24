@@ -33,6 +33,7 @@ class ChatChannel(Channel):
     sessions = {}  # 用于控制并发，每个session_id同时只能有一个context在处理
     lock = threading.Lock()  # 用于控制对sessions的访问
     handler_pool = ThreadPoolExecutor(max_workers=8)  # 处理消息的线程池
+    cache_locks = {}  # 为每个session添加缓存锁
 
     def __init__(self):
         _thread = threading.Thread(target=self.consume)
@@ -182,6 +183,15 @@ class ChatChannel(Channel):
         self._send_reply(context, reply)
 
     def _generate_reply(self, context: Context, reply: Reply = Reply()) -> Reply:
+        session_id = context["session_id"]
+                
+        # 确保session有对应的锁
+        if session_id not in self.cache_locks:
+            self.cache_locks[session_id] = threading.Lock()
+            
+        # 获取该session的缓存锁
+        cache_lock = self.cache_locks[session_id]
+
         e_context = PluginManager().emit_event(
             EventContext(
                 Event.ON_HANDLE_CONTEXT,
@@ -221,8 +231,9 @@ class ChatChannel(Channel):
                         return
             elif context.type == ContextType.TEXT:
                 # 文字消息
-                context["channel"] = e_context["channel"]
-                reply = super().build_reply_content(context.content, context)
+                with cache_lock: # 等待图片缓存完成后再处理文本
+                    context["channel"] = e_context["channel"]
+                    reply = super().build_reply_content(context.content, context)
             elif context.type == ContextType.IMAGE:
                 if model in const.GEMINI_GENAI_SDK or model in const.DOUAO:  
                     # 图片消息,目前只针对gemini2.0+和DOUBAO进行监听配置
@@ -240,19 +251,20 @@ class ChatChannel(Channel):
                     type_id = 'image'
                     channel_type = conf().get("channel_type")
                     if mime_type in const.IMAGE or channel_type == 'feishu':
-                        context['msg'].prepare()
-                        img = Image.open(image_path)
-                        image_file = img
-                        # check if the image has an alpha channel
-                        if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
-                            # Convert the image to RGB mode,whick removes the alpha channel
-                            img = img.convert('RGB')
-                            # Save the converted image
-                            img_path_no_alpha = image_path + '.jpg' if channel_type == 'feishu' else image_path[:len(image_path)-3] + 'jpg'
-                            img.save(img_path_no_alpha)
-                            # Update img_path with the path to the converted image
-                            image_path = img_path_no_alpha
-                        cache_media(image_path, image_file, context)
+                        with cache_lock: # 使用锁确保缓存完成
+                            context['msg'].prepare()
+                            img = Image.open(image_path)
+                            image_file = img
+                            # check if the image has an alpha channel
+                            if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
+                                # Convert the image to RGB mode,whick removes the alpha channel
+                                img = img.convert('RGB')
+                                # Save the converted image
+                                img_path_no_alpha = image_path + '.jpg' if channel_type == 'feishu' else image_path[:len(image_path)-3] + 'jpg'
+                                img.save(img_path_no_alpha)
+                                # Update img_path with the path to the converted image
+                                image_path = img_path_no_alpha
+                            cache_media(image_path, image_file, context)
                     else:
                         logger.warning(f'[{model.upper()}] query with unsupported image type:{mime_type}') 
                 else:
