@@ -17,7 +17,7 @@ from bot.session_manager import SessionManager
 from bot.chatgpt.chat_gpt_session import ChatGPTSession
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
-from common import memory
+from common import const, memory
 from common.log import logger
 from common.tool_button import tool_state
 
@@ -38,9 +38,7 @@ class VolcengineArkBot(Bot):
         self.sessions = SessionManager(ChatGPTSession, model=self.model or "gpt-3.5-turbo") # 复用chatGPT的token计算方式
 
         self.client = Ark(
-            api_key=self.api_key,
-            # The base URL for model invocation .
-            base_url="https://ark.cn-beijing.volces.com/api/v3",
+            api_key=self.api_key
         )
 
     def reply(self, query, context: Context = None) -> Reply:
@@ -70,13 +68,18 @@ class VolcengineArkBot(Bot):
                     memory.USER_IMAGE_CACHE.pop(session_id)
                     
                 session = self.sessions.session_query(query, session_id)
-                completion = self.client.chat.completions.create(
+                client_attr = 'bot_chat' if self.model in const.DOUBAO_BOT else 'chat'
+                # 如果调用bot,去掉messages列表中的system prompt
+                if client_attr == 'bot_chat' and session.messages[0].get('role') == 'system':
+                    session.messages.pop(0)
+                completion = getattr(self.client, client_attr).completions.create(
                     model=self.model,
                     messages=session.messages,
-                    thinking={"type": self.thinking}
+                    #thinking={"type": self.thinking}
                 )
                 reply_text = completion.choices[0].message.content
-                self.sessions.session_reply(reply_text, session_id, completion.usage.total_tokens)
+                total_tokens = completion.usage.total_tokens if client_attr == 'chat' else completion.bot_usage.model_usage[0].total_tokens
+                self.sessions.session_reply(reply_text, session_id, total_tokens)
                 return Reply(ReplyType.TEXT, reply_text)
             
             # 图片生成模式

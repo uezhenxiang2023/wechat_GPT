@@ -281,7 +281,7 @@ class FeiShuChanel(ChatChannel):
     # 统一的发送函数，每个Channel自行实现，根据reply的type字段发送不同类型的消息
     def send(self, reply: Reply, context: Context):
         receiver = context["receiver"]
-        error_response = "网络有点小烦忙，请过几秒再试一试，给您带来不便，大超子深表歉意"
+        error_response = "网络有点小繁忙，请过几秒再试一试，给您带来不便，大超子深表歉意"
         if reply.type == ReplyType.TEXT:
             try:
                 self.send_text(reply.content, toUserName=receiver)
