@@ -76,7 +76,8 @@ available_setting = {
     "qwen_app_id": "",
     "qwen_node_id": "",  # 流程编排模型用到的id，如果没有用到qwen_node_id，请务必保持为空字符串
     # Google Gemini Api Key
-    "gemini_api_key": "",
+    "gemini_api_key": "", # Free tier
+    "gemini_api_key_paid": "", # Paid tier 
     # Volcengine ARK 配置
     "ark_api_key": "",
     "thinking": "", # "disabled",不使用深度思考能力; "enabled",使用深度思考能力; "auto",模型自行判断是否使用深度思考能力

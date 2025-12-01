@@ -50,6 +50,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
         nest_asyncio.apply()
 
         self.api_key = conf().get("gemini_api_key")
+        self.paid_api_key = conf().get("gemini_api_key_paid")
         self.model = conf().get('model')
         self.Model_ID = self.model.upper()
         self.image_model = conf().get('text_to_image')
@@ -148,6 +149,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
 
         # Initialize a client according to new genai SDK
         self.client = genai.Client(api_key=self.api_key)
+        self.banana_client = genai.Client(api_key=self.paid_api_key)
 
          # schema for screenplay_scenes_breakdown need to be updated
         self.screenplay_scenes_breakdown_schema = FunctionDeclaration(
@@ -441,12 +443,16 @@ class GoogleGeminiBot(Bot, GeminiVision):
     def _get_user_image_chat(self, session_id):
         """获取指定用户的image_chat实例,如果不存在则创建新的"""
         if session_id not in self.user_image_chats:
-            self.user_image_chats[session_id] = self.client.chats.create(
+            self.user_image_chats[session_id] = self.banana_client.chats.create(
                 model=self.image_model,
                 config=GenerateContentConfig(
+                    system_instruction=self.system_prompt,
                     safety_settings=self.safety_settings,
                     response_modalities=['TEXT', 'Image'],
-                    **self.generation_config
+                    tools=[{"google_search": {}}],
+                    image_config=types.ImageConfig(
+                        aspect_ratio='16:9'
+                    )
                 )
             )
         return self.user_image_chats[session_id]
