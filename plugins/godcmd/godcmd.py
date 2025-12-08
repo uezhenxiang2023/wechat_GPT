@@ -13,6 +13,7 @@ from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common import const
 from common.tool_button import tool_state
+from common.model_status import model_state
 from config import conf, load_config, global_config
 from plugins import *
 
@@ -241,7 +242,7 @@ class Godcmd(Plugin):
         if content.startswith("#"):
             if len(content) == 1:
                 reply = Reply()
-                reply.type = ReplyType.ERROR
+                reply.type = ReplyType.TEXT
                 reply.content = f"空指令，输入#help查看指令列表\n"
                 e_context["reply"] = reply
                 e_context.action = EventAction.BREAK_PASS
@@ -251,8 +252,8 @@ class Godcmd(Plugin):
             user = e_context["context"]["receiver"]
             session_id = e_context["context"]["session_id"]
             isgroup = e_context["context"].get("isgroup", False)
-            bottype = Bridge().get_bot_type("chat")
-            bot = Bridge().get_bot("chat")
+            bottype = Bridge(user).get_bot_type("chat")
+            bot = Bridge(user).get_bot("chat")
             # 将命令和参数分割
             command_parts = content[1:].strip().split()
             cmd = command_parts[0]
@@ -286,15 +287,15 @@ class Godcmd(Plugin):
                     if not isadmin and not self.is_admin_in_group(e_context["context"]):
                         ok, result = False, "需要管理员权限执行"
                     elif len(args) == 0:
-                        model = conf().get("model") or const.GPT35
+                        model = model_state.get_basic_state(user) or const.GPT35
                         ok, result = True, "当前模型为: " + str(model)
                     elif len(args) == 1:
                         if args[0] not in const.MODEL_LIST:
                             ok, result = False, "模型名称不存在"
                         else:
-                            conf()["model"] = self.model_mapping(args[0])
-                            Bridge().reset_bot()
-                            model = conf().get("model") or const.GPT35
+                            model_state.toggle_basic_model(user, self.model_mapping(args[0]))
+                            Bridge(user).reset_bot(user)
+                            model = model_state.get_basic_state(user) or const.GPT35
                             ok, result = True, "模型设置为: " + str(model)
                 elif cmd == "id":
                     ok, result = True, user
@@ -502,7 +503,7 @@ class Godcmd(Plugin):
             if ok:
                 reply.type = ReplyType.INFO
             else:
-                reply.type = ReplyType.ERROR
+                reply.type = ReplyType.TEXT
             reply.content = result
             e_context["reply"] = reply
 

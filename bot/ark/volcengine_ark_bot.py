@@ -20,22 +20,16 @@ from bridge.reply import Reply, ReplyType
 from common import const, memory
 from common.log import logger
 from common.tool_button import tool_state
+from common.model_status import model_state
 
 class VolcengineArkBot(Bot):
 
     def __init__(self):
         super().__init__()
         self.api_key = conf().get("ark_api_key")
-        self.model = conf().get('model')
-        self.Model_ID = self.model.upper()
-        self.thinking = conf().get('thinking')
-        self.image_model = conf().get('text_to_image')
-        self.IMAGE_MODEL_ID = self.image_model.upper()
-        self.video_model = conf().get('text_to_video')
-        self.VIDEO_MODEL_ID = self.video_model.upper()
         self.image_size = conf().get('image_create_size')
         self.system_prompt = conf().get("character_desc") 
-        self.sessions = SessionManager(ChatGPTSession, model=self.model or "gpt-3.5-turbo") # 复用chatGPT的token计算方式
+        self.sessions = SessionManager(ChatGPTSession, model=const.DOUBAO_SEED_16 or "gpt-3.5-turbo") # 复用chatGPT的token计算方式
 
         self.client = Ark(
             api_key=self.api_key
@@ -43,6 +37,14 @@ class VolcengineArkBot(Bot):
 
     def reply(self, query, context: Context = None) -> Reply:
         try:
+            session_id = context["session_id"]
+            self.model = model_state.get_basic_state(session_id)
+            self.Model_ID = self.model.upper()
+            self.image_model = model_state.get_image_model(session_id)
+            self.IMAGE_MODEL_ID = self.image_model.upper()
+            self.video_model = model_state.get_video_state(session_id)
+            self.VIDEO_MODEL_ID = self.video_model.upper()
+
             if context.type != ContextType.TEXT:
                 return Reply(ReplyType.ERROR, "Only text context is supported")
 

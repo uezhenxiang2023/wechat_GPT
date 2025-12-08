@@ -26,6 +26,7 @@ from bridge.reply import Reply, ReplyType
 from common.log import logger
 from common import const, memory
 from common.tool_button import tool_state
+from common.model_status import model_state
 
 from plugins.bigchao.script_breakdown import screenplay_scenes_breakdown, screenplay_assets_breakdown, screenplay_formatter
 
@@ -51,10 +52,10 @@ class GoogleGeminiBot(Bot, GeminiVision):
 
         self.api_key = conf().get("gemini_api_key")
         self.paid_api_key = conf().get("gemini_api_key_paid")
-        self.model = conf().get('model')
+        """self.model = conf().get('model')
         self.Model_ID = self.model.upper()
         self.image_model = conf().get('text_to_image')
-        self.IMAGE_MODEL_ID = self.image_model.upper()
+        self.IMAGE_MODEL_ID = self.image_model.upper()"""
         self.system_prompt = conf().get("character_desc")
         self.function_call_dicts = {
             "screenplay_scenes_breakdown": screenplay_scenes_breakdown,
@@ -62,7 +63,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
             'screenplay_formatter': screenplay_formatter
         }
         # 复用文心的token计算方式
-        self.sessions = SessionManager(BaiduWenxinSession, model=self.model or "gpt-3.5-turbo")
+        self.sessions = SessionManager(BaiduWenxinSession, model=const.GEMINI_25_FLASH or "gpt-3.5-turbo")
 
         # Initialize a client according to old generativeai SDK
         generativeai.configure(api_key=self.api_key, transport='rest')
@@ -93,7 +94,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
         self.tool_config={'function_calling_config': 'AUTO'}
 
         self.generative_model = generativeai.GenerativeModel(
-                        model_name=self.model,
+                        model_name=const.GEMINI_25_FLASH,
                         generation_config=self.generation_config,
                         safety_settings=self.safety_settings,
                         system_instruction=self.system_prompt,
@@ -420,11 +421,11 @@ class GoogleGeminiBot(Bot, GeminiVision):
         self.user_chats = {}
         self.user_image_chats = {}
 
-    def _get_user_chat(self, session_id):
+    def _get_user_chat(self, session_id, model):
         """获取指定用户的chat实例,如果不存在则创建新的"""
         if session_id not in self.user_chats:
             self.user_chats[session_id] = self.client.chats.create(
-                model=self.model,
+                model=model,
                 config=GenerateContentConfig(
                     system_instruction=self.system_prompt,
                     safety_settings=self.safety_settings,
@@ -440,11 +441,11 @@ class GoogleGeminiBot(Bot, GeminiVision):
             )
         return self.user_chats[session_id]
 
-    def _get_user_image_chat(self, session_id):
+    def _get_user_image_chat(self, session_id, image_model):
         """获取指定用户的image_chat实例,如果不存在则创建新的"""
         if session_id not in self.user_image_chats:
             self.user_image_chats[session_id] = self.banana_client.chats.create(
-                model=self.image_model,
+                model=image_model,
                 config=GenerateContentConfig(
                     system_instruction=self.system_prompt,
                     safety_settings=self.safety_settings,
@@ -459,16 +460,19 @@ class GoogleGeminiBot(Bot, GeminiVision):
 
     def reply(self, query, context: Context = None) -> Reply:
         try:
+            session_id = context["session_id"]
+            self.model = model_state.get_basic_state(session_id)
+            self.Model_ID = self.model.upper()
+            self.image_model = model_state.get_image_model(session_id)
+            self.IMAGE_MODEL_ID = self.image_model.upper()
+
             if context.type == ContextType.VIDEO:
-                session_id = context["session_id"]
                 session = self.sessions.session_query(query, session_id)
                 return self.gemini_15_media(query, context, session)
             elif context.type == ContextType.SHARING:
-                session_id = context["session_id"]
                 session = self.sessions.session_query(query, session_id)
                 return self.gemini_15_media(query, context, session)
             elif context.type == ContextType.TEXT:
-                session_id = context["session_id"]
                 # 使用用户特定的状态
                 is_imaging = tool_state.get_image_state(session_id)
                 Model_ID = self.IMAGE_MODEL_ID if is_imaging else self.Model_ID
@@ -488,8 +492,8 @@ class GoogleGeminiBot(Bot, GeminiVision):
 
                 if self.model in const.GEMINI_GENAI_SDK:
                     # 获取当前用户的chat实例
-                    user_chat = self._get_user_chat(session_id)
-                    user_image_chat = self._get_user_image_chat(session_id)
+                    user_chat = self._get_user_chat(session_id, self.model)
+                    user_image_chat = self._get_user_image_chat(session_id, self.image_model)
                     # 构建请求内容列表
                     resquest_contents = []
                     if tool_state.get_print_state(session_id):

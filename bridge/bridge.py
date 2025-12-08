@@ -7,18 +7,18 @@ from common.singleton import singleton
 from config import conf
 from translate.factory import create_translator
 from voice.factory import create_voice
-
+from common.model_status import model_state
 
 @singleton
 class Bridge(object):
-    def __init__(self):
+    def __init__(self, session_id=None):
         self.btype = {
             "chat": const.CHATGPT,
             "voice_to_text": conf().get("voice_to_text", "openai"),
             "text_to_voice": conf().get("text_to_voice", "google"),
             "translate": conf().get("translate", "baidu"),
         }
-        model_type = conf().get("model") or const.GPT35
+        model_type = model_state.get_basic_state(session_id) or const.GPT35
         self.model = model_type.upper()
         if model_type in ["text-davinci-003"]:
             self.btype["chat"] = const.OPEN_AI
@@ -85,8 +85,8 @@ class Bridge(object):
             self.chat_bots[bot_type] = create_bot(bot_type)
         return self.chat_bots.get(bot_type)
 
-    def reset_bot(self):
+    def reset_bot(self, session_id):
         """
         重置bot路由
         """
-        self.__init__()
+        self.__init__(session_id)

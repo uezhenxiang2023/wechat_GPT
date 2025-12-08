@@ -31,7 +31,7 @@ from common.tmp_dir import TmpDir, create_user_dir
 
 @singleton
 class FeiShuChanel(ChatChannel):
-    def __init__(self):
+    def __init__(self, session_id=None):
         super().__init__()
         self.image_model = conf().get('text_to_image')
         self.IMAGE_MODEL_ID = self.image_model.upper()

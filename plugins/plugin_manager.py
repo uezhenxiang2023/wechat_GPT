@@ -16,7 +16,7 @@ from .event import *
 
 @singleton
 class PluginManager:
-    def __init__(self):
+    def __init__(self, session_id=None):
         self.plugins = SortedDict(lambda k, v: v.priority, reverse=True)
         self.listening_plugins = {}
         self.instances = {}
