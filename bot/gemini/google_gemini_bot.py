@@ -150,7 +150,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
 
         # Initialize a client according to new genai SDK
         self.client = genai.Client(api_key=self.api_key)
-        self.banana_client = genai.Client(api_key=self.paid_api_key)
+        self.paid_client = genai.Client(api_key=self.paid_api_key)
 
          # schema for screenplay_scenes_breakdown need to be updated
         self.screenplay_scenes_breakdown_schema = FunctionDeclaration(
@@ -420,6 +420,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
         # 用字典存储用户会话实例
         self.user_chats = {}
         self.user_image_chats = {}
+        self.user_video_chats = {}
 
     def _get_user_chat(self, session_id, model):
         """获取指定用户的chat实例,如果不存在则创建新的"""
@@ -444,7 +445,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
     def _get_user_image_chat(self, session_id, image_model):
         """获取指定用户的image_chat实例,如果不存在则创建新的"""
         if session_id not in self.user_image_chats:
-            self.user_image_chats[session_id] = self.banana_client.chats.create(
+            self.user_image_chats[session_id] = self.paid_client.chats.create(
                 model=image_model,
                 config=GenerateContentConfig(
                     system_instruction=self.system_prompt,
@@ -457,6 +458,42 @@ class GoogleGeminiBot(Bot, GeminiVision):
                 )
             )
         return self.user_image_chats[session_id]
+    
+    def _get_user_video_chat(self, session_id: str, video_model: str, prompt: str = None, image = None, video = None):
+        """
+        获取指定用户的video_chat实例，如果不存在则新建。
+
+        :param session_id: 用户会话的ID
+        :param video_model: 视频模型ID
+        :param prompt: 文本提示词
+        :param image: 图片素材
+        :param video: 视频素材
+        """
+        if session_id not in self.user_video_chats:
+            self.user_video_chats[session_id] = self.paid_client
+
+        operation = self.user_video_chats[session_id].models.generate_videos(
+            model=video_model,
+            prompt=prompt,
+            image=image,
+            video=video,
+            config=types.GenerateVideosConfig(
+                number_of_videos=1,
+                duration_seconds=conf().get("duration_seconds")
+            )
+        )
+
+        # 轮询生成状态
+        logger.info("Waiting for video generation to complete..." )
+        while not operation.done:
+            time.sleep(5)
+            operation = self.user_video_chats[session_id].operations.get(operation)
+        logger.info("Video generation is completed sucessfully." )
+
+        # 提取视频对象
+        res_video = operation.response.generated_videos[0].video
+        self.user_video_chats[session_id].files.download(file=res_video)
+        return res_video
 
     def reply(self, query, context: Context = None) -> Reply:
         try:
@@ -465,6 +502,8 @@ class GoogleGeminiBot(Bot, GeminiVision):
             self.Model_ID = self.model.upper()
             self.image_model = model_state.get_image_model(session_id)
             self.IMAGE_MODEL_ID = self.image_model.upper()
+            self.video_model = model_state.get_video_state(session_id)
+            self.VIDEO_MODEL = self.video_model.upper()
 
             if context.type == ContextType.VIDEO:
                 session = self.sessions.session_query(query, session_id)
@@ -475,7 +514,8 @@ class GoogleGeminiBot(Bot, GeminiVision):
             elif context.type == ContextType.TEXT:
                 # 使用用户特定的状态
                 is_imaging = tool_state.get_image_state(session_id)
-                Model_ID = self.IMAGE_MODEL_ID if is_imaging else self.Model_ID
+                is_editing = tool_state.get_edit_state(session_id)
+                Model_ID = self.VIDEO_MODEL if is_editing else (self.IMAGE_MODEL_ID if is_imaging else self.Model_ID)
                 logger.info(f"[{Model_ID}] query={query}, requester={session_id}")
                 session = self.sessions.session_query(query, session_id)
 
@@ -534,7 +574,10 @@ class GoogleGeminiBot(Bot, GeminiVision):
                     elif tool_state.get_search_state(session_id):
                         response = user_chat.send_message(resquest_contents, config=self.search_config)
                     else:
-                        if tool_state.get_image_state(session_id):
+                        if tool_state.get_edit_state(session_id):
+                            response = self._get_user_video_chat(session_id, self.video_model, query)
+                            return Reply(ReplyType.VIDEO, response)
+                        elif tool_state.get_image_state(session_id):
                             # 将主会话内容补充到图片编辑会话中
                             if user_chat._curated_history != []:
                                 user_image_chat._curated_history.extend(user_chat._curated_history)

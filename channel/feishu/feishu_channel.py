@@ -6,7 +6,7 @@
 """
 
 # -*- coding=utf-8 -*-
-import io, json, os, uuid, requests, threading
+import io, json, os, uuid, requests, threading, re
 from io import BytesIO
 from flask import Flask
 from urllib.parse import urlparse
@@ -377,9 +377,14 @@ class FeiShuChanel(ChatChannel):
             self.send_text(reply_text, receiver)
             logger.info("[Lark] sendMsg={}, receiver={}".format(reply_text, receiver))
         elif reply.type == ReplyType.VIDEO:  # 新增视频回复类型
-            video_storage = reply.content
-            self.send_video(video_storage, toUserName=receiver)
-            logger.info("[Lark] sendFile, receiver={}".format(receiver))
+            video_duration = conf().get("duration_seconds")
+            response = reply.content
+            file_uri = response.uri
+            file_name = re.search(r'/files/([^/:]+)', file_uri).group(1) + '.mp4'
+            video_storage = io.BytesIO(response.video_bytes)
+            video_path = self.save_media_file(receiver, video_storage, file_name)
+            self.send_video(video_duration, video_path, receiver)
+            logger.info("[Lark] sendFile video_name={}, receiver={}".format(file_name, receiver))
         elif reply.type == ReplyType.VIDEO_URL:  # 新增视频URL回复类型
             video_duration = reply.content[0]
             video_url = reply.content[1]
@@ -406,6 +411,7 @@ class FeiShuChanel(ChatChannel):
         media_path = user_dir + file_name
         with open(media_path, 'wb') as f:
             f.write(media_storage.read())
+        logger.info(f"[Lark] {media_path} downloads to local tmp dir successfully")
         return media_path
 
     def get_search_sources(self, grounding_metadata):

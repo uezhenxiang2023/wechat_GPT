@@ -41,6 +41,7 @@ available_setting = {
     "concurrency_in_session": 1,  # 同一会话最多有多少条消息在处理中，大于1可能乱序
     "image_create_size": "256x256",  # 图片大小,可选有 256x256, 512x512, 1024x1024 (dall-e-3默认为1024x1024)
     "text_to_video": "doubao-seedance-1-0-pro-250528", # 视频编辑模型
+    "duration_seconds": 4, # 视频默认时长
     "group_chat_exit_group": False, 
     # chatgpt会话参数
     "expires_in_seconds": 3600,  # 无操作会话的过期时间
