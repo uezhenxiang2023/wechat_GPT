@@ -8,6 +8,8 @@ Google gemini bot
 
 import os
 import time
+import base64
+from io import BytesIO
 
 import google.generativeai as generativeai
 from google.ai.generativelanguage_v1beta.types import content
@@ -27,6 +29,7 @@ from common.log import logger
 from common import const, memory
 from common.tool_button import tool_state
 from common.model_status import model_state
+from common.video_status import video_state
 
 from plugins.bigchao.script_breakdown import screenplay_scenes_breakdown, screenplay_assets_breakdown, screenplay_formatter
 
@@ -36,20 +39,6 @@ class GoogleGeminiBot(Bot, GeminiVision):
 
     def __init__(self):
         super().__init__()
-        # Add these imports at the top
-        import asyncio
-        import nest_asyncio
-
-        # Initialize event loop
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        # Allow nested event loops
-        nest_asyncio.apply()
-
         self.api_key = conf().get("gemini_api_key")
         self.paid_api_key = conf().get("gemini_api_key_paid")
         """self.model = conf().get('model')
@@ -445,55 +434,183 @@ class GoogleGeminiBot(Bot, GeminiVision):
     def _get_user_image_chat(self, session_id, image_model):
         """获取指定用户的image_chat实例,如果不存在则创建新的"""
         if session_id not in self.user_image_chats:
+            img_config=GenerateContentConfig(
+                system_instruction=self.system_prompt,
+                safety_settings=self.safety_settings,
+                response_modalities=['TEXT', 'Image'],
+                image_config=types.ImageConfig(
+                    aspect_ratio='16:9'
+                )
+            )
+            img_config.tools = [{"google_search": {}}] if image_model == 'gemini-3-pro-image-preview' else None
             self.user_image_chats[session_id] = self.paid_client.chats.create(
                 model=image_model,
-                config=GenerateContentConfig(
-                    system_instruction=self.system_prompt,
-                    safety_settings=self.safety_settings,
-                    response_modalities=['TEXT', 'Image'],
-                    tools=[{"google_search": {}}],
-                    image_config=types.ImageConfig(
-                        aspect_ratio='16:9'
-                    )
-                )
+                config=img_config
             )
         return self.user_image_chats[session_id]
     
-    def _get_user_video_chat(self, session_id: str, video_model: str, prompt: str = None, image = None, video = None):
+    def _convert_image_to_types(self, image):
+        """
+        将图片转换为base64编码和mime_type
+        
+        :param image: PIL Image对象
+        :return: google-genai定义的Image对象
+        """
+        image_format = image.format
+        image_bytes_io = BytesIO()
+        image.save(image_bytes_io, image_format)
+        #image_bytes = base64.b64encode(image_bytes_io.getvalue()).decode('utf-8')
+        image_bytes = image_bytes_io.getvalue()
+        mime_type = f'image/{image_format.lower()}'
+        genai_image = types.Image(image_bytes=image_bytes, mime_type=mime_type) 
+        return genai_image
+    
+    def _build_ref_images_obj(self, ref_images):
+        """
+        构建google-genai Image图片列表
+        
+        :param ref_images: PIL Image图片对象列表
+        """
+        ref_images_obj = []
+        for ref_image in ref_images:
+            ref_image_genai = self._convert_image_to_types(ref_image)
+            ref_image_obj = types.VideoGenerationReferenceImage(
+                image=ref_image_genai,
+                reference_type='asset'
+            )
+            ref_images_obj.append(ref_image_obj)
+        return ref_images_obj
+    
+    def _get_user_video_chat(self, session_id: str, video_model: str, *, prompt: str = None, image = None, last_image = None, ref_images: list = None, video = None):
         """
         获取指定用户的video_chat实例，如果不存在则新建。
 
         :param session_id: 用户会话的ID
         :param video_model: 视频模型ID
         :param prompt: 文本提示词
-        :param image: 图片素材
+        :param image: PIL Image起幅图片素材
+        :param last_image: PIL Image落幅图片素材
+        :param ref_images: PIL_Image图片元素列表
         :param video: 视频素材
         """
         if session_id not in self.user_video_chats:
             self.user_video_chats[session_id] = self.paid_client
+    
+        # 1. 预处理所有图片对象
+        image_genai = self._convert_image_to_types(image) if image else None
+        last_image_genai = self._convert_image_to_types(last_image) if last_image else None
+        ref_images_obj = self._build_ref_images_obj(ref_images) if ref_images else None
 
+        # 2. 构建 config，根据互斥规则进行清洗
+        # 默认配置
+        video_duration = 8 if video_state.get_video_resolution(session_id) == '1080p' else video_state.get_video_duration(session_id)
+        video_resolution = video_state.get_video_resolution(session_id) 
+        gen_config = types.GenerateVideosConfig(
+            number_of_videos=1,
+            duration_seconds=video_duration,
+            resolution=video_resolution, 
+            person_generation='allow_all'
+        )
+        
+        # 默认 source
+        gen_source = types.GenerateVideosSource(
+            prompt=prompt
+        )
+
+        # --- 核心逻辑：互斥参数处理 ---
+        
+        # 情况 1: 如果有起始帧 (Image-to-Video 或 Transition)
+        # 此时必须丢弃 reference_images，因为 API 不支持混用
+        if image_genai:
+            logger.info(f"[{video_model}]Detected Start Image. Using 'Image-to-Video' mode. (Reference Images ignored)")
+            gen_source.image = image_genai
+            gen_config.person_generation = 'allow_adult'
+            
+            # 如果同时还有结束帧，则启用过渡模式
+            if last_image_genai:
+                 logger.info(f"[{video_model}]Detected Last Image. Using 'Transition' mode.")
+                 gen_config.last_frame = last_image_genai
+                 gen_config.duration_seconds = 8
+            
+            # 强制清空 reference_images，防止报错
+            if ref_images_obj:
+                logger.info(f"[{video_model}]Reference images cannot be used with Start/End frames in Veo 3.1. They have been dropped.")
+                gen_config.reference_images = None
+
+        # 情况 2: 如果没有起始帧，但有参考图 (Reference-guided)
+        elif ref_images_obj:
+            logger.info(f"[{video_model}]No Start Image detected. Using 'Reference-guided' mode.")
+            gen_config.reference_images = ref_images_obj
+            gen_config.duration_seconds = 8
+            gen_config.person_generation = 'allow_adult'
+            # 此时 source.image 和 config.last_frame 自然为空，符合要求
+
+        # 情况 3: 只有 Prompt (Text-to-Video)
+        else:
+            logger.info(f"T[{video_model}]ext-to-Video mode.")
+
+        # --- 发送请求 ---
         operation = self.user_video_chats[session_id].models.generate_videos(
             model=video_model,
-            prompt=prompt,
-            image=image,
-            video=video,
-            config=types.GenerateVideosConfig(
-                number_of_videos=1,
-                duration_seconds=conf().get("duration_seconds")
-            )
+            source=gen_source,
+            config=gen_config
         )
 
         # 轮询生成状态
-        logger.info("Waiting for video generation to complete..." )
+        logger.info(f"[{video_model}]Waiting for video generation to complete..." )
         while not operation.done:
-            time.sleep(5)
+            time.sleep(10)
             operation = self.user_video_chats[session_id].operations.get(operation)
-        logger.info("Video generation is completed sucessfully." )
+        logger.info(f"[{video_model}]Video generation is completed sucessfully." )
 
         # 提取视频对象
         res_video = operation.response.generated_videos[0].video
         self.user_video_chats[session_id].files.download(file=res_video)
         return res_video
+
+    def _build_request_contents(self, query: str, session_id: str):
+        """
+        构建请求内容列表，包括处理文本和缓存的媒体文件
+        
+        :param query: 用户查询文本
+        :param session_id: 用户会话ID
+        :return: 构建好的请求内容列表
+        """
+        request_contents = []
+        
+        # 如果是打印状态，修改查询内容
+        if tool_state.get_print_state(session_id):
+            query = f"大超子，帮忙给这个本子排版，编剧的名字是{query}"
+        
+        # 创建文本Part对象并添加到列表
+        text = Part.from_text(text=query)
+        request_contents.insert(0, text)
+        
+        # 检查缓存中是否媒体文件
+        file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+        if file_cache:
+            first_data = file_cache['files'][0]
+            data_type = type(first_data).__name__
+            
+            if data_type == 'dict':
+                mime_type = first_data.get('mime_type')
+                if mime_type in ['application/docx', 'application/doc']:
+                    file_content = Part.from_text(text=first_data.get('data'))
+                    request_contents.insert(0, file_content)
+                elif mime_type == 'application/pdf':
+                    file_content = Part.from_bytes(**first_data)
+                    request_contents.insert(0, file_content)
+            elif data_type in ['JpegImageFile', 'PngImageFile', 'File']:
+                file_cache['files'].append(text)
+                request_contents = file_cache['files']
+            elif data_type in ['FileData']:
+                filedata = [{'fileData': first_data}]
+                filedata.append(text)
+                request_contents = filedata
+            
+            memory.USER_IMAGE_CACHE.pop(session_id)
+        
+        return request_contents
 
     def reply(self, query, context: Context = None) -> Reply:
         try:
@@ -535,36 +652,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
                     user_chat = self._get_user_chat(session_id, self.model)
                     user_image_chat = self._get_user_image_chat(session_id, self.image_model)
                     # 构建请求内容列表
-                    resquest_contents = []
-                    if tool_state.get_print_state(session_id):
-                        query = f"大超子，帮忙给这个本子排版，编剧的名字是{query}"
-                    text = Part.from_text(text=query)
-                    resquest_contents.insert(0, text)
-                    # 检查缓存中是否媒体文件
-                    file_cache = memory.USER_IMAGE_CACHE.get(session_id)
-                    if file_cache:
-                        first_data = file_cache['files'][0]
-                        data_type = type(first_data).__name__
-                        if data_type == 'dict':
-                            mime_type = first_data.get('mime_type')
-                            if mime_type in ['application/docx', 'application/doc']:
-                                file_content = Part.from_text(text=first_data.get('data'))
-                                resquest_contents.insert(0, file_content)
-                            elif mime_type == 'application/pdf':
-                                file_content = Part.from_bytes(**first_data)
-                                resquest_contents.insert(0, file_content)
-                        elif data_type in ['JpegImageFile', 'PngImageFile', 'File']:
-                            file_cache['files'].append(text)
-                            resquest_contents = file_cache['files']
-                        elif data_type in ['FileData']:
-                            filedata = [
-                                {
-                                'fileData': first_data
-                            }
-                            ]
-                            filedata.append(text)
-                            resquest_contents = filedata
-                        memory.USER_IMAGE_CACHE.pop(session_id)
+                    resquest_contents = self._build_request_contents(query, session_id)
                     if tool_state.get_print_state(session_id):
                         response = user_chat.send_message(resquest_contents, config=self.print_config)
                         tool_state.toggle_printing(session_id)
@@ -575,7 +663,27 @@ class GoogleGeminiBot(Bot, GeminiVision):
                         response = user_chat.send_message(resquest_contents, config=self.search_config)
                     else:
                         if tool_state.get_edit_state(session_id):
-                            response = self._get_user_video_chat(session_id, self.video_model, query)
+                            # 如果请求列表只有一项内容则意味着没有图片参考；如果有两项内容代表第一项是图片要单独提取出来
+                            request_contents_count = len(resquest_contents)
+                            if request_contents_count == 1:
+                                image = None
+                                last_image = None
+                                ref_images = None
+                            elif request_contents_count == 2:
+                                image = resquest_contents[0]
+                                last_image = None
+                                ref_images = None
+                            elif request_contents_count == 3:
+                                image = resquest_contents[0]
+                                last_image = resquest_contents[1]
+                                ref_images = None
+                            elif request_contents_count == 4:
+                                image = None
+                                last_image = None
+                                # 抛出内容列表中的文本提示词
+                                resquest_contents.pop()
+                                ref_images = resquest_contents
+                            response = self._get_user_video_chat(session_id, self.video_model, prompt=query, image=image, last_image=last_image, ref_images=ref_images)
                             return Reply(ReplyType.VIDEO, response)
                         elif tool_state.get_image_state(session_id):
                             # 将主会话内容补充到图片编辑会话中
@@ -583,6 +691,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
                                 user_image_chat._curated_history.extend(user_chat._curated_history)
                                 user_chat._curated_history.clear()
                             response = user_image_chat.send_message(resquest_contents)
+                            return Reply(ReplyType.IMAGE, response)
                         else:
                             # 将图片编辑的会话内容补充到主会话中
                             if user_image_chat._curated_history != []:
@@ -602,27 +711,24 @@ class GoogleGeminiBot(Bot, GeminiVision):
                     return Reply(ReplyType.ERROR, f"[{self.Model_ID}] Response Text is None")
                 response, function_response = self.function_call_polling_loop(session_id, response, user_chat)
 
-                if tool_state.get_image_state(session_id):
-                    return Reply(ReplyType.IMAGE, response)
-                else:
-                    # 是否开启联网搜索
-                    if not tool_state.get_search_state(session_id):
-                        # 是否监测到函数响应内容
-                        if function_response != []:
-                            response = {
-                                'reply_text': response.text,
-                                'function_response': function_response[0].function_response.response
-                            }
-                            return Reply(ReplyType.FILE, response)
-                        else:
-                            return Reply(ReplyType.TEXT, response.text)
+                # 是否开启联网搜索
+                if not tool_state.get_search_state(session_id):
+                    # 是否监测到函数响应内容
+                    if function_response != []:
+                        response = {
+                            'reply_text': response.text,
+                            'function_response': function_response[0].function_response.response
+                        }
+                        return Reply(ReplyType.FILE, response)
                     else:
-                        grounding_metadata = response.candidates[0].grounding_metadata
-                        # 响应中是否有网页链接
-                        if grounding_metadata.grounding_chunks is None:
-                            return Reply(ReplyType.TEXT, response.text)
-                        else:
-                            return Reply(ReplyType.IMAGE_URL, response)
+                        return Reply(ReplyType.TEXT, response.text)
+                else:
+                    grounding_metadata = response.candidates[0].grounding_metadata
+                    # 响应中是否有网页链接
+                    if grounding_metadata.grounding_chunks is None:
+                        return Reply(ReplyType.TEXT, response.text)
+                    else:
+                        return Reply(ReplyType.IMAGE_URL, response)
             else:
                 logger.warning(f"[{self.Model_ID}] Unsupported message type, type={context.type}")
                 return Reply(ReplyType.ERROR, f"[{self.Model_ID}] Unsupported message type, type={context.type}")

@@ -1,14 +1,29 @@
-openai
-HTMLParser>=0.0.2
-PyQRCode>=1.2.1
-qrcode>=7.4.2
-pypng
-requests>=2.28.2
-chardet>=5.1.0
+pandas
 Pillow
-pre-commit
-web.py
-setuptools>=61.2
-elevenlabs==1.0.3
-anthropic
+
+# google General Availability SDK for Gemini 2.0+
+google-genai
+
+# google legacy SDK ended on November 30, 2025
 google-generativeai
+
+# 飞书应用
+lark-oapi
+
+# Telegram 应用
+python-telegram-bot
+
+# 火山方舟
+volcengine-python-sdk
+
+# RAG based documents file
+python-docx
+pypdf
+docx2pdf
+
+# Patch asyncio to allow nested event loops
+nest_asyncio
+
+#install plugin
+dulwich
+flask

@@ -14,6 +14,7 @@ from bridge.reply import Reply, ReplyType
 from common import const
 from common.tool_button import tool_state
 from common.model_status import model_state
+from common.video_status import video_state
 from config import conf, load_config, global_config
 from plugins import *
 
@@ -85,6 +86,14 @@ COMMANDS = {
     "breakdown": {
         "alias": ["breakdown", "顺分场表"],
         "desc": "开启顺分场表功能",
+    },
+    "duration": {
+        "alias": ["duration", "时长"],
+        "desc": "生成视频的长度(秒)",
+    },
+    "resolution": {
+        "alias": ["resolution", "分辨率"],
+        "desc": "生成视频的分辨率",
     }
 }
 
@@ -393,6 +402,24 @@ class Godcmd(Plugin):
                     tool_state.toggle_breakdowning(user)
                     ok, result = True, text
                     logger.info(f'{text}, requester = {user}')
+                elif cmd == "duration":
+                    if len(args) == 0:
+                        video_duration = video_state.get_video_duration(user)
+                        ok, result = True, "当前视频长度为: " + str(video_duration) + "秒"
+                    elif len(args) == 1:
+                        video_state.set_video_duration(user, int(args[0]))
+                        ok, result = True, "你的视频长度已设置为" + args[0] + "秒"  
+                    else:
+                        ok, result = False, "请发送 #duration 加视频时长参数，可选参数为4、6、8。例如#duration 8"
+                elif cmd == "resolution":
+                    if len(args) == 0:
+                        video_resolution = video_state.get_video_resolution(user)
+                        ok, result = True, "当前视频分辨率为: " + video_resolution
+                    elif len(args) == 1:
+                        video_state.set_video_resolution(user, args[0]) 
+                        ok, result = True, "你的视频分辨率已设置为" + args[0]  
+                    else:
+                        ok, result = False, "请发送 #resolution 视频分辨率参数，可选数值为720p、1080p。例如#resolution 1080p"
                 logger.debug("[Godcmd] command: %s by %s" % (cmd, user))
             elif any(cmd in info["alias"] for info in ADMIN_COMMANDS.values()):
                 if isadmin:
