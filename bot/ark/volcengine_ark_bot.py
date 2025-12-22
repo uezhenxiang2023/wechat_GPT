@@ -21,6 +21,7 @@ from common import const, memory
 from common.log import logger
 from common.tool_button import tool_state
 from common.model_status import model_state
+from common.video_status import video_state
 
 class VolcengineArkBot(Bot):
 
@@ -110,9 +111,10 @@ class VolcengineArkBot(Bot):
             
             # 视频生成模式
             else:
+                duration_seconds = video_state.get_video_duration(session_id)
                 content = [{
                     'type': 'text',
-                    'text': f"{query} --resolution {'1080p' if file_cache else '480p'} --duration 5 --camerafixed false --watermark true"
+                    'text': f"{query} --resolution {'1080p' if file_cache else '480p'} --duration {duration_seconds} --camerafixed false --watermark true"
                 }]
                 
                 if file_cache:

@@ -64,10 +64,11 @@ class TelegramChannel(ChatChannel):
         chat_id = update.effective_chat.id
         # Print tool_button stasus to console
         logger.info(
-            f'[TELEGRAMBOT-search] is {tool_state.get_search_state(chat_id)},\
-            [TELEGRAMBOT-image] is {tool_state.get_image_state(chat_id)},\
-            [TELEGRAMBOT-print] is {tool_state.get_print_state(chat_id)},\
+            f'[TELEGRAMBOT-print] is {tool_state.get_print_state(chat_id)},\
             [TELEGRAMBOT-breakdown] is {tool_state.get_breakdown_state(chat_id)},\
+            [TELEGRAMBOT-search] is {tool_state.get_search_state(chat_id)},\
+            [TELEGRAMBOT-image] is {tool_state.get_image_state(chat_id)},\
+            [TELEGRAMBOT-video] is {tool_state.get_breakdown_state(chat_id)},\
             requester={chat_id}')
         
         # 使用 run_in_executor 将同步的业务逻辑扔到子线程
@@ -149,7 +150,25 @@ class TelegramChannel(ChatChannel):
             chat_id=chat_id,
             text=text
         )
-        logger.info(f'[TELEGRAMBOT_{const.GEMINI_2_FLASH_IMAGE_GENERATION}]{text} requester={chat_id}')
+        logger.info(f'[TELEGRAMBOT_{conf().get('text_to_image')}]{text} requester={chat_id}')
+
+    async def video(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """
+        This function handles /video command
+        """
+        chat_id = update.effective_chat.id
+        if tool_state.get_edit_state(chat_id):
+            text = "[INFO]\n视频生成功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
+        else:
+            text = "[INFO]\n视频生成功能已开启，需要我帮你弄点啥视频？"
+
+        tool_state.toggle_editing(chat_id)
+
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=text
+        )
+        logger.info(f'[TELEGRAMBOT_{conf().get('text_to_video')}]{text} requester={chat_id}')
 
 
     async def menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -204,6 +223,7 @@ class TelegramChannel(ChatChannel):
         self.application.add_handler(CommandHandler("breakdown", self.breakdown))
         self.application.add_handler(CommandHandler("search", self.search))
         self.application.add_handler(CommandHandler("image", self.image))
+        self.application.add_handler(CommandHandler("video", self.video))
         self.application.add_handler(CommandHandler("menu", self.menu))
 
         # Register handler for inline buttons
@@ -347,7 +367,7 @@ class TelegramChannel(ChatChannel):
                 await self.application.bot.send_message(chat_id=receiver, text=reply.content)
                 logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply, receiver))
             elif reply.type == ReplyType.VOICE:
-                self.send_file(reply.content, toUserName=receiver)
+                await self.application.bot.send_voice(chat_id=receiver, voice=reply.content)
                 logger.info("[TELEGRAMBOT] sendFile={}, receiver={}".format(reply.content, receiver))
             elif reply.type == ReplyType.IMAGE_URL:  # 获取网络资源
                 response = reply.content
@@ -386,7 +406,7 @@ class TelegramChannel(ChatChannel):
                         image_storage.write(block)
                     logger.info(f"[TELEGRAMBOT] download image success, size={size}, img_url={img_url}")
                     image_storage.seek(0)
-                    self.send_image(image_storage, toUserName=receiver)
+                    await self.application.bot.send_photo( chat_id=receiver, photo=image_storage)
                     logger.info("[TELEGRAMBOT] sendImage url={}, receiver={}".format(img_url, receiver))
             elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
                 response = reply.content
@@ -414,16 +434,12 @@ class TelegramChannel(ChatChannel):
                 reply_text = escape(reply.content['reply_text'])
                 for file_path in file_pathes:
                     with open(file_path, "rb") as f:
-                        self.send_file(f, toUserName=receiver)
+                        await self.application.bot.send_document(chat_id=receiver, document=f)
                     logger.info("[TELEGRAMBOT] sendFile={}, receiver={}".format(file_path, receiver))
-                self.send_text(reply_text, receiver)
+                await self.application.bot.send_message(chat_id=receiver, text=reply_text)
                 logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply_text, receiver))
             elif reply.type == ReplyType.VIDEO:  # 新增视频回复类型
                 video_storage = reply.content
-                self.send_video(video_storage, toUserName=receiver)
-                logger.info("[TELEGRAMBOT] sendFile, receiver={}".format(receiver))
-            elif reply.type == ReplyType.VIDEO_URL:  # 新增视频URL回复类型
-                video_url = reply.content
                 logger.debug(f"[TELEGRAMBOT] start download video, video_url={video_url}")
                 video_res = requests.get(video_url, stream=True)
                 video_storage = io.BytesIO()
@@ -433,18 +449,24 @@ class TelegramChannel(ChatChannel):
                     video_storage.write(block)
                 logger.info(f"[TELEGRAMBOT] download video success, size={size}, video_url={video_url}")
                 video_storage.seek(0)
-                self.send_video(video_storage, toUserName=receiver)
+                await self.application.bot.send_video(chat_id=receiver, video=video_storage)
+                logger.info("[TELEGRAMBOT] sendFile, receiver={}".format(receiver))
+            elif reply.type == ReplyType.VIDEO_URL:  # 新增视频URL回复类型
+                video_duration = reply.content[0]
+                video_url = reply.content[1]          
+                await self.application.bot.send_video(
+                    chat_id=receiver, 
+                    video=video_url, 
+                    duration=video_duration,
+                    read_timeout=120,
+                    write_timeout=120,
+                    connect_timeout=60
+                )
                 logger.info("[TELEGRAMBOT] sendVideo url={}, receiver={}".format(video_url, receiver))
         except Exception as e:
             logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, e))
             # 发送失败时，尝试给用户回个错误提示
             await self.application.bot.send_message(chat_id=receiver, text=const.ERROR_RESPONSE)
-
-    async def send_text(self, reply_content, toUserName):
-        """
-        This function sends a response text message back to the user.
-        """
-        await self.application.bot.send_message(chat_id=toUserName, text=reply_content)
 
     def get_search_sources(self, grounding_metadata):
         """
@@ -471,19 +493,3 @@ class TelegramChannel(ChatChannel):
             sources.append(source)
         inline_url = '\n'.join(sources)
         return inline_url
-
-    def send_image(self, reply_content, toUserName):
-        """
-        This function sends a response image back to the user.
-        """
-        updater = Updater(self.bot_token, request_kwargs={'proxy_url': self.proxy_url})
-        bot = updater.bot
-        bot.send_photo(chat_id=toUserName, photo=reply_content)
-
-    def send_file(self, reply_content, toUserName):
-        """
-        This function sends a response file back to the user.
-        """
-        updater = Updater(self.bot_token, request_kwargs={'proxy_url': self.proxy_url})
-        bot = updater.bot
-        bot.send_document(chat_id=toUserName, document=reply_content)

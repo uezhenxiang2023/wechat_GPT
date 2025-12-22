@@ -15,6 +15,7 @@ from common.dequeue import Dequeue
 from common import memory, const
 from common.tmp_dir import create_user_dir
 from common.tool_button import tool_state
+from common.model_status import model_state
 from plugins.bigchao.script_breakdown import cache_media
 from plugins import *
 from config import conf
@@ -199,7 +200,7 @@ class ChatChannel(Channel):
             )
         )
         reply = e_context["reply"]
-        model = conf().get('model')
+        model = model_state.get_basic_state(session_id)
         if not e_context.is_pass():
             logger.debug("[WX] ready to handle context: type={}, content={}".format(context.type, context.content))
             if context.type == ContextType.VOICE:  # 语音消息
@@ -245,7 +246,12 @@ class ChatChannel(Channel):
                      # 使用用户特定的imaging状态
                     session_id = context["session_id"]
                     is_imaging = tool_state.get_image_state(session_id)
-                    model = conf().get('text_to_image') if is_imaging else model
+                    is_video = tool_state.get_edit_state(session_id)
+                    model = (
+                        model_state.get_video_state(session_id) if is_video
+                        else model_state.get_image_model(session_id) if is_imaging
+                        else model_state.get_basic_state(session_id)
+                    )
                     logger.info(f'[{model.upper()}] query with file, path={image_path}')
                     mime_type = image_path[(image_path.rfind('.') + 1):]
                     type_id = 'image'

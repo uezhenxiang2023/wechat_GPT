@@ -24,16 +24,21 @@ from lark_oapi.api.bitable.v1 import *
 from config import conf
 from common import memory, const
 from common.tool_button import tool_state
+from common.model_status import model_state
 from common.log import logger
 from common.tmp_dir import TmpDir, create_user_dir
 
-model = conf().get('model')
-image_model = conf().get('text_to_image')
 
 def get_model_id(session_id):
     """根据用户session获取对应的模型ID"""
+    model = model_state.get_basic_state(session_id)
     is_imaging = tool_state.get_image_state(session_id)
-    return image_model.upper() if is_imaging else model.upper()
+    image_model = model_state.get_image_model(session_id)
+    is_video = tool_state.get_edit_state(session_id)
+    video_model = model_state.get_video_state(session_id)
+    
+
+    return video_model.upper() if is_video else (image_model.upper() if is_imaging else model.upper())
 
 app_id = conf().get('feishu_app_id')
 app_secret = conf().get('feishu_app_secret')
