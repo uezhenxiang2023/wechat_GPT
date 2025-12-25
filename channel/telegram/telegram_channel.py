@@ -454,10 +454,9 @@ class TelegramChannel(ChatChannel):
             elif reply.type == ReplyType.VIDEO_URL:  # 新增视频URL回复类型
                 video_duration = reply.content[0]
                 video_url = reply.content[1]          
-                await self.application.bot.send_video(
+                await self.application.bot.send_document(
                     chat_id=receiver, 
-                    video=video_url, 
-                    duration=video_duration,
+                    document=video_url, 
                     read_timeout=120,
                     write_timeout=120,
                     connect_timeout=60

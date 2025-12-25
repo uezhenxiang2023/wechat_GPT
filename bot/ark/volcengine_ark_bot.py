@@ -112,9 +112,10 @@ class VolcengineArkBot(Bot):
             # 视频生成模式
             else:
                 duration_seconds = video_state.get_video_duration(session_id)
+                resolution = video_state.get_video_resolution(session_id)
                 content = [{
                     'type': 'text',
-                    'text': f"{query} --resolution {'1080p' if file_cache else '480p'} --duration {duration_seconds} --camerafixed false --watermark true"
+                    'text': f"{query} --resolution {resolution if file_cache else '480p'} --duration {duration_seconds} --camerafixed false --watermark true"
                 }]
                 
                 if file_cache:

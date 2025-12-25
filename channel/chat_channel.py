@@ -283,39 +283,35 @@ class ChatChannel(Channel):
                 context["channel"] = e_context["channel"]
                 reply = super().build_reply_content(context.content, context)
             elif context.type == ContextType.FILE:
-                if model in const.GEMINI_GENAI_SDK:  
-                    # 文件消息,目前只针对gemini2.0+进行监听配置
-                    file_path = context.content
-                    dir_path = os.path.dirname(file_path)
-                    dir_exists = os.path.exists(dir_path)
-                    if not dir_exists:
-                        create_user_dir(dir_path)
-                    logger.info(f'[{model.upper()}] query with file, path={file_path}')
-                    mime_type = file_path[(file_path.rfind('.') + 1):]
-                    type_id = 'application'
-                    if mime_type in const.DOCUMENT:
-                        # 将文件下载到本地/tmp目录
-                        context['msg'].prepare()
-                        if mime_type == 'pdf':
-                            with open(file_path, 'rb') as file:
-                                pdf_data = file.read()
-                                b64 = base64.b64encode(pdf_data).decode('utf-8')
-                        elif mime_type == 'docx':
-                            doc = docx.Document(file_path)
-                            full_text = []
-                            for paragraph in doc.paragraphs:
-                                full_text.append(paragraph.text)
-                            docx_text = '\n'.join(full_text)
-                            b64 = docx_text
-                        file_part = {
-                            'mime_type': f'{type_id}/{mime_type}',
-                            'data': b64
-                        }
-                        cache_media(file_path, file_part, context)
-                    else:
-                        logger.warning(f'[{model.upper()}] query with unsupported file type:{mime_type}')                       
+                file_path = context.content
+                dir_path = os.path.dirname(file_path)
+                dir_exists = os.path.exists(dir_path)
+                if not dir_exists:
+                    create_user_dir(dir_path)
+                logger.info(f'[{model.upper()}] query with file, path={file_path}')
+                mime_type = file_path[(file_path.rfind('.') + 1):]
+                type_id = 'application'
+                if mime_type in const.DOCUMENT:
+                    # 将文件下载到本地/tmp目录
+                    context['msg'].prepare()
+                    if mime_type == 'pdf':
+                        with open(file_path, 'rb') as file:
+                            pdf_data = file.read()
+                            b64 = base64.b64encode(pdf_data).decode('utf-8')
+                    elif mime_type == 'docx':
+                        doc = docx.Document(file_path)
+                        full_text = []
+                        for paragraph in doc.paragraphs:
+                            full_text.append(paragraph.text)
+                        docx_text = '\n'.join(full_text)
+                        b64 = docx_text
+                    file_part = {
+                        'mime_type': f'{type_id}/{mime_type}',
+                        'data': b64
+                    }
+                    cache_media(file_path, file_part, context)
                 else:
-                    pass
+                    logger.warning(f'[{model.upper()}] query with unsupported file type:{mime_type}')                       
             elif context.type == ContextType.VIDEO:   
                 # 视频消息，当前无默认逻辑
                 pass
