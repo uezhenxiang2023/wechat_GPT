@@ -20,7 +20,7 @@ from channel.telegram.telegram_text_util import escape
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackContext, CallbackQueryHandler, Updater
-from telegram.helpers import escape_markdown
+from telegram.request import HTTPXRequest
 
 @singleton
 class TelegramChannel(ChatChannel):
@@ -28,7 +28,7 @@ class TelegramChannel(ChatChannel):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.bot_token = conf().get("telegram_bot_token")
-        self.proxy_url = conf().get("telegram_proxy_url")
+
 
         # Pre-assign menu text
         self.FIRST_MENU = "<b>Menu 1</b>\n\nA beautiful menu with a shiny inline button."
@@ -215,8 +215,24 @@ class TelegramChannel(ChatChannel):
         """
         Start the bot.
         """
+        # 准备 Request 对象
+        request_params = {
+            "connection_pool_size":1024, # 链接窗口数量
+            "pool_timeout":120,          #链接排队时间
+            "read_timeout":60,
+            "write_timeout":60,
+            "connect_timeout":60
+        }
+            
+        request_instance = HTTPXRequest(**request_params)
+
         # Create the Application and pass it your bot's token.
-        self.application = Application.builder().token(self.bot_token).build()
+        self.application = (
+            Application.builder()
+            .token(self.bot_token)
+            .request(request_instance)
+            .build()
+        )
 
         # Register commands
         self.application.add_handler(CommandHandler("print", self.print))
