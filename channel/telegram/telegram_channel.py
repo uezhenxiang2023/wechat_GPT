@@ -28,6 +28,7 @@ class TelegramChannel(ChatChannel):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.bot_token = conf().get("telegram_bot_token")
+        self.proxy_url =conf().get("telegram_proxy_url")
 
 
         # Pre-assign menu text
@@ -224,6 +225,11 @@ class TelegramChannel(ChatChannel):
             "connect_timeout":60
         }
             
+        if self.proxy_url:
+            request_params["proxy"] = self.proxy_url
+            logger.info(f"[TELEGRAM] 使用代理: {self.proxy_url}")
+
+        
         request_instance = HTTPXRequest(**request_params)
 
         # Create the Application and pass it your bot's token.
