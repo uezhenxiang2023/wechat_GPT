@@ -61,8 +61,9 @@ class TelegramChannel(ChatChannel):
         """
         This function would be added to the dispatcher as a handler for messages coming from the Bot API
         """
-
+        logger.info(f"[TELEGRAM] 收到消息: {update.effective_message.text}")
         chat_id = update.effective_chat.id
+
         # Print tool_button stasus to console
         logger.info(
             f'[TELEGRAMBOT-print] is {tool_state.get_print_state(chat_id)},\
@@ -211,6 +212,16 @@ class TelegramChannel(ChatChannel):
             reply_markup=markup
         )
 
+    # 定义心跳任务
+    async def heartbeat(self, context: ContextTypes.DEFAULT_TYPE):
+        try:
+            # 主动请求一下 Telegram 服务器 (获取机器人信息是开销最小的请求)
+            await context.bot.get_me()
+            logger.debug("[HEARTBEAT] ❤️ 依然在线")
+        except Exception as e:
+            # 如果这里报错，说明连接已经断了
+            # 报错本身会触发 httpx 内部的连接重置，从而在下一次 Polling 时恢复正常
+            logger.warning(f"[HEARTBEAT] 💔 心跳检测失败 (尝试激活重连): {e}")
 
     def main(self) -> None:
         """
@@ -219,10 +230,10 @@ class TelegramChannel(ChatChannel):
         # 准备 Request 对象
         request_params = {
             "connection_pool_size":1024, # 链接窗口数量
-            "pool_timeout":120,          #链接排队时间
-            "read_timeout":60,
-            "write_timeout":60,
-            "connect_timeout":60
+            "pool_timeout":1,          # 链接排队时间
+            "read_timeout":5,
+            "write_timeout":5,
+            "connect_timeout":5
         }
             
         if self.proxy_url:
@@ -239,6 +250,13 @@ class TelegramChannel(ChatChannel):
             .request(request_instance)
             .build()
         )
+
+        # 每隔 5 分钟 (300秒) 执行一次
+        # 这就像每隔一会儿戳一下服务器：“喂，由于什么原因断了吗？”
+        # 如果断了，这个操作会强制抛出错误，进而唤醒僵尸连接
+        if self.application.job_queue:
+            self.application.job_queue.run_repeating(self.heartbeat, interval=300, first=10)
+            logger.info("[TELEGRAM] 心跳保活任务已启动")
 
         # Register commands
         self.application.add_handler(CommandHandler("print", self.print))
@@ -276,7 +294,11 @@ class TelegramChannel(ChatChannel):
         logger.info(f"[TELEGRAMBOT] 主循环已捕获: {self.main_loop}")
 
         # Run the bot until you press Ctrl-C
-        self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        self.application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            timeout=5,
+            drop_pending_updates=True
+        )
 
     def startup(self):
         self.main()
