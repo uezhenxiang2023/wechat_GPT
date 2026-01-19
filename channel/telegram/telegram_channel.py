@@ -3,6 +3,7 @@ import requests
 import logging
 import asyncio
 import html
+import time
 
 from io import BytesIO
 
@@ -61,6 +62,8 @@ class TelegramChannel(ChatChannel):
         """
         This function would be added to the dispatcher as a handler for messages coming from the Bot API
         """
+        # 每次收到消息，刷新一下时间
+        self.last_update_time = time.time()
         logger.info(f"[TELEGRAM] 收到消息: {update.effective_message.text}")
         chat_id = update.effective_chat.id
 
@@ -215,13 +218,38 @@ class TelegramChannel(ChatChannel):
     # 定义心跳任务
     async def heartbeat(self, context: ContextTypes.DEFAULT_TYPE):
         try:
-            # 主动请求一下 Telegram 服务器 (获取机器人信息是开销最小的请求)
+            # 1. 常规心跳
             await context.bot.get_me()
             logger.debug("[HEARTBEAT] ❤️ 依然在线")
+            
+            # 2. 【新增】看门狗逻辑：检测 Polling 是否假死
+            # 获取 updater 状态
+            if not self.application.updater.running:
+                 logger.warning("[WATCHDOG] ⚠️ Updater 停止了！尝试重启...")
+                 await self.application.updater.start_polling()
+                 return
+
+            # 如果您想做得更绝一点（针对“没报错但收不到消息”）：
+            # 这种通常很难在应用层检测，除非我们引入“自发自收”机制
+            # 但针对您日志里的 Timed out，下面的重置逻辑通常有效：
+            
         except Exception as e:
-            # 如果这里报错，说明连接已经断了
-            # 报错本身会触发 httpx 内部的连接重置，从而在下一次 Polling 时恢复正常
-            logger.warning(f"[HEARTBEAT] 💔 心跳检测失败 (尝试激活重连): {e}")
+            logger.warning(f"[HEARTBEAT] 💔 心跳检测失败: {e}")
+            
+            # 【终极手段】如果心跳都断了，说明网络层肯定出问题了。
+            # 我们可以尝试主动停止 updater 再重启，强迫它重建所有连接
+            try:
+                logger.warning("[WATCHDOG] 正在强制重启 Polling...")
+                await self.application.updater.stop()
+                await asyncio.sleep(5) # 等几秒
+                await self.application.updater.start_polling(
+                    allowed_updates=Update.ALL_TYPES,
+                    timeout=5, # 记得和 main 里保持一致
+                    drop_pending_updates=True
+                )
+                logger.info("[WATCHDOG] Polling 重启成功！")
+            except Exception as restart_error:
+                logger.error(f"[WATCHDOG] 重启失败: {restart_error}")
 
     def main(self) -> None:
         """
