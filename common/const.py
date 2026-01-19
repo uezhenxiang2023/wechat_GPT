@@ -79,7 +79,7 @@ GEMINI_GENAI_SDK = [
     VEO_31_FAST
 ]
 DOUBAO_SEED_16 = "doubao-seed-1-6-251015"
-DOUBAO_SEED_18 = "doubao-seed-1-8-251215"
+DOUBAO_SEED_18 = "doubao-seed-1-8-251228"
 DOUBAO_SEEDDREAM_4 = "doubao-seedream-4-0-250828"
 DOUBAO_SEEDDREAM_45 ='doubao-seedream-4-5-251128'
 DOUBAO_SEEDDANCE_10_PRO = "doubao-seedance-1-0-pro-250528"
