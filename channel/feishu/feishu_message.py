@@ -81,5 +81,14 @@ class FeishuMessage(ChatMessage):
             file_name = json.loads(event.message.content)["file_name"]
             self.content = self.user_dir + file_name  # content直接存临时目录路径
             self._prepare_fn = lambda: get_message_resource(message_id=self.msg_id, file_key=file_key, type=event.message.message_type, file_path=self.content)
+        elif event.message.message_type == 'post':
+            contents = json.loads(event.message.content)['content']
+            for items in contents:
+                for item in items:
+                    if item['tag'] == 'img':
+                        self.ctype = ContextType.IMAGE
+                        image_key = item["image_key"]
+                        self.content = self.user_dir + image_key  # content直接存临时目录路径
+                        self._prepare_fn = lambda: get_message_resource(message_id=self.msg_id, file_key=image_key, type='image', file_path=self.content)
         else:
             raise NotImplementedError("Unsupported message type: Type:{} MsgType:{}".format(event.message["Type"], event.message["MsgType"]))
