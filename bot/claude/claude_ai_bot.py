@@ -1,5 +1,5 @@
 import time
-import anthropic
+from anthropic import Anthropic
 import base64
 import re
 import docx
@@ -19,7 +19,10 @@ from PIL import Image
 class ClaudeAIBot(Bot, OpenAIImage):
     def __init__(self):
         super().__init__()
-        self.client = anthropic.Anthropic(api_key=conf().get("claude_api_key"))
+        self.client = Anthropic(
+            api_key=conf().get("claude_api_key"),
+            base_url=conf().get("claude_base_url")
+        )
         self.model = conf().get("model")
         self.MODEL_ID = self.model.upper()
         self.sessions = SessionManager(ClaudeAiSession, model=conf().get("model") or "gpt-3.5-turbo")
@@ -56,7 +59,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
         session_id = context["session_id"]
         if retry_count >= 2:
             # exit from retry 2 times
-            logger.warn(f"[{self.MODEL_ID}] failed after maximum number of retry times")
+            logger.warning(f"[{self.MODEL_ID}] failed after maximum number of retry times")
             return Reply(ReplyType.ERROR, "请再问我一次吧")
 
         try:
