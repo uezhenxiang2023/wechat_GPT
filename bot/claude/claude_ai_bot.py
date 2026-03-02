@@ -15,6 +15,8 @@ from common import memory
 from config import conf
 from PIL import Image
 
+from common.model_status import model_state
+
 
 class ClaudeAIBot(Bot, OpenAIImage):
     def __init__(self):
@@ -23,8 +25,8 @@ class ClaudeAIBot(Bot, OpenAIImage):
             api_key=conf().get("claude_api_key"),
             base_url=conf().get("claude_base_url")
         )
-        self.model = conf().get("model")
-        self.MODEL_ID = self.model.upper()
+        #self.model = conf().get("model")
+        #self.MODEL_ID = self.model.upper()
         self.sessions = SessionManager(ClaudeAiSession, model=conf().get("model") or "gpt-3.5-turbo")
         self.system_prompt = conf().get("character_desc")
         self.claude_api_cookie = conf().get("claude_api_cookie")
@@ -57,9 +59,11 @@ class ClaudeAIBot(Bot, OpenAIImage):
         :return: 回复
         """
         session_id = context["session_id"]
+        self.model = model_state.get_basic_state(session_id)
+        self.Model_ID = self.model.upper()
         if retry_count >= 2:
             # exit from retry 2 times
-            logger.warning(f"[{self.MODEL_ID}] failed after maximum number of retry times")
+            logger.warning(f"[{self.Model_ID}] failed after maximum number of retry times")
             return Reply(ReplyType.ERROR, "请再问我一次吧")
 
         try:
@@ -70,7 +74,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
             else:
                 system_prompt = self.system_prompt
             session = self.sessions.session_query(query, session_id)
-            logger.info(f"[{self.MODEL_ID}] query={query}")
+            logger.info(f"[{self.Model_ID}] query={query}")
             claude_message = self._convert_to_claude_messages(session.messages)
 
             response = self.client.messages.create(
@@ -81,7 +85,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
                 messages=claude_message
             )
             reply_content = response.content[0].text
-            logger.info(f"[{self.MODEL_ID}] reply={reply_content}, total_tokens=invisible")
+            logger.info(f"[{self.Model_ID}] reply={reply_content}, total_tokens=invisible")
             self.sessions.session_reply(reply_content, session_id, 100)
             return Reply(ReplyType.TEXT, reply_content)
 

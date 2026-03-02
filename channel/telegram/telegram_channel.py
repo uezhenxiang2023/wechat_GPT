@@ -79,7 +79,7 @@ class TelegramChannel(ChatChannel):
         # 使用 run_in_executor 将同步的业务逻辑扔到子线程
         # 这样 handler_single_msg 里的耗时操作（如 GPT 请求）就不会卡死机器人
         loop = asyncio.get_running_loop()
-        loop.run_in_executor(
+        await loop.run_in_executor(
             None, 
             self.handler_single_msg, 
             update.message
@@ -218,8 +218,8 @@ class TelegramChannel(ChatChannel):
     # 定义心跳任务
     async def heartbeat(self, context: ContextTypes.DEFAULT_TYPE):
         try:
-            # 1. 常规心跳
-            await context.bot.get_me()
+            # 1. 常规心跳，不用 context.bot，直接用独立请求
+            await self.application.bot.get_me()
             logger.debug("[HEARTBEAT] ❤️ 依然在线")
             
             # 2. 【新增】看门狗逻辑：检测 Polling 是否假死
@@ -257,11 +257,11 @@ class TelegramChannel(ChatChannel):
         """
         # 准备 Request 对象
         request_params = {
-            "connection_pool_size":1024, # 链接窗口数量
-            "pool_timeout":1,          # 链接排队时间
-            "read_timeout":5,
-            "write_timeout":5,
-            "connect_timeout":5
+            "connection_pool_size":8, # 链接窗口数量
+            "pool_timeout":30,          # 链接排队时间
+            "read_timeout":30,
+            "write_timeout":30,
+            "connect_timeout":10
         }
             
         if self.proxy_url:
@@ -279,11 +279,11 @@ class TelegramChannel(ChatChannel):
             .build()
         )
 
-        # 每隔 5 分钟 (300秒) 执行一次
+        # 每隔 1 分钟 (60秒) 执行一次
         # 这就像每隔一会儿戳一下服务器：“喂，由于什么原因断了吗？”
         # 如果断了，这个操作会强制抛出错误，进而唤醒僵尸连接
         if self.application.job_queue:
-            self.application.job_queue.run_repeating(self.heartbeat, interval=300, first=10)
+            self.application.job_queue.run_repeating(self.heartbeat, interval=60, first=10)
             logger.info("[TELEGRAM] 心跳保活任务已启动")
 
         # Register commands
