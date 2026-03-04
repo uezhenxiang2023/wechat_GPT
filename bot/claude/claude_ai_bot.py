@@ -1,9 +1,8 @@
+import io
 import time
-from anthropic import Anthropic
 import base64
-import re
-import docx
-from pypdf import PdfReader
+
+from anthropic import Anthropic
 from bot.bot import Bot
 from bot.claude.claude_ai_session import ClaudeAiSession
 from bot.openai.open_ai_image import OpenAIImage
@@ -13,8 +12,8 @@ from bridge.reply import Reply, ReplyType
 from common.log import logger
 from common import memory
 from config import conf
-from PIL import Image
 
+from common.tool_button import tool_state
 from common.model_status import model_state
 
 
@@ -25,8 +24,6 @@ class ClaudeAIBot(Bot, OpenAIImage):
             api_key=conf().get("claude_api_key"),
             base_url=conf().get("claude_base_url")
         )
-        #self.model = conf().get("model")
-        #self.MODEL_ID = self.model.upper()
         self.sessions = SessionManager(ClaudeAiSession, model=conf().get("model") or "gpt-3.5-turbo")
         self.system_prompt = conf().get("character_desc")
         self.claude_api_cookie = conf().get("claude_api_cookie")
@@ -67,21 +64,23 @@ class ClaudeAIBot(Bot, OpenAIImage):
             return Reply(ReplyType.ERROR, "请再问我一次吧")
 
         try:
-            file_cache = memory.USER_FILE_CACHE.get(session_id)
-            if file_cache:
-                file_prompt = self.read_file(file_cache)
-                system_prompt = file_prompt + self.system_prompt
-            else:
-                system_prompt = self.system_prompt
-            session = self.sessions.session_query(query, session_id)
+            # 先构建多模态 content 块（含媒体+文本）
+            current_content = self._build_current_content(query, session_id)
             logger.info(f"[{self.Model_ID}] query={query}")
-            claude_message = self._convert_to_claude_messages(session.messages)
+
+            # 将多模态 content 块写入 session，而不是纯字符串 query
+            #
+            self.sessions.session_query(current_content, session_id)  # ← 传入列表，保留媒体块
+            
+            # 从 session 获取完整消息历史
+            session = self.sessions.build_session(session_id)
+            claude_message = session.messages
 
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=1000,
                 temperature=0.0,
-                system=system_prompt,
+                system=self.system_prompt,
                 messages=claude_message
             )
             reply_content = response.content[0].text
@@ -93,116 +92,85 @@ class ClaudeAIBot(Bot, OpenAIImage):
             logger.exception(e)
             # retry
             time.sleep(5)
-            logger.warn(f"[{self.MODEL_ID}] do retry, times={retry_count}")
+            logger.warning(f"[{self.Model_ID}] do retry, times={retry_count}")
             # Pop last role message avoiding the same two adjacent role messages during retrying.
-            session.messages.pop()
+            self.sessions.messages.pop()
             return self._chat(query, context, retry_count + 1)
         
-    def _convert_to_claude_messages(self, messages: list):
-        res = []
-        image_content = []
-        for item in messages:
-            if item.get('role') == 'user':
-                role = 'user'
-                #如果user内容是图片,构建图片列表
-                if type(item.get('content')).__name__ == 'dict':
-                    image_content.append(item['content'])
-                    continue
-                elif type(item.get('content')).__name__ == 'str':
-                    text_content = {'type': 'text', 'text': item['content']}
-                #只要图片列表中有内容，就将文字请求补充进去
-                if image_content != []:
-                    image_content.append(text_content)
-                    content = image_content.copy()
+    def _build_current_content(self, query: str, session_id: str) -> list:
+        """
+        构建当前轮次的多模态 content 块列表。
+        媒体块在前，文本在后。消费并清除缓存。
+        """
+        current_content = []
+
+        file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+        if file_cache:
+            for cached_file in file_cache.get("files", []):
+                data_type = type(cached_file).__name__
+
+                if data_type in ("JpegImageFile", "PngImageFile", "Image"):
+                    try:
+                        import io
+                        img = cached_file
+                        if img.mode in ("RGBA", "LA", "P"):
+                            img = img.convert("RGB")
+                            fmt, media_type = "JPEG", "image/jpeg"
+                        elif data_type == "PngImageFile":
+                            fmt, media_type = "PNG", "image/png"
+                        else:
+                            fmt, media_type = "JPEG", "image/jpeg"
+
+                        buf = io.BytesIO()
+                        img.save(buf, format=fmt)
+                        img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+                        current_content.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": img_b64
+                            }
+                        })
+                        logger.debug(f"[{self.Model_ID}] image block added, format={fmt}")
+                    except Exception as e:
+                        logger.error(f"[{self.Model_ID}] failed to encode image: {e}")
+
+                elif data_type == "dict":
+                    mime_type = cached_file.get("mime_type", "")
+                    raw_data = cached_file.get("data", "")
+
+                    if mime_type == "application/pdf":
+                        current_content.append({
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": raw_data
+                            }
+                        })
+                        logger.debug(f"[{self.Model_ID}] PDF document block added")
+
+                    elif mime_type in ("application/docx", "application/doc"):
+                        current_content.append({
+                            "type": "text",
+                            "text": f"<document>\n{raw_data}\n</document>"
+                        })
+                        logger.debug(f"[{self.Model_ID}] DOCX text block added")
+
+                    else:
+                        logger.warning(f"[{self.Model_ID}] unsupported mime_type: {mime_type}")
+
                 else:
-                    content = [text_content]
-            elif item.get('role') == 'assistant':
-                role = 'assistant'
-                content = item['content']
-                #只要assistant有回复，就将image_content清空，准备放入新一轮user内容中的图片
-                image_content.clear()
-            res.append({'role': role, 'content': content})
-        return res
-    
-    def _file_cache(self, query, context):
-        memory.USER_FILE_CACHE[context['session_id']] = {
-            "path": context.content,
-            "msg": context.get("msg")
-        }
-        logger.info("file={} is assigned to {}".format(context.content, self.MODEL_ID))
-        return None
-    
-    def read_file(self,file_cache):
-        msg = file_cache.get("msg")
-        path = file_cache.get("path")
-        msg.prepare()
-        if path[-5:] == '.docx':
-            reader = docx.Document(path)
-            texts = ''.join([(para.text + '\n') for para in reader.paragraphs])
-            number_of_pages = int(len(texts)/600) + 1
-        elif path[-4:] == '.pdf':
-            reader = PdfReader(path)
-            number_of_pages = len(reader.pages)
-            texts = ''.join([page.extract_text() for page in reader.pages])
-        total_characters = len(texts)
-        line_list = texts.splitlines()
-        # 统计每一场的字数
-        paragraph = ""
-        sc_count = 0
-        counter_dict ={}
-        # 定义场次描述规则 
-        pattern = r"第.*场|场景.*"
-        for i, v in enumerate(line_list):
-            # 只要每行的前3～7个字，符合场次描述规则
-            if any(re.match(pattern, v[:n]) is not None for n in (3, 4, 5, 6, 7)):
-                counter_dict[f"第{sc_count}场"] = f'{len(paragraph)}字'
-                sc_count += 1
-                paragraph = ""
-            paragraph += v.strip()
-        # 循环结束后，捕获最后一场戏的字数
-        counter_dict[f"第{sc_count}场"] = f'{len(paragraph)}字'
-        del counter_dict["第0场"]
-        file_prompt = f'''\
-        Here are some information for you to reference for your task:\n
-        <ScreenPlay>\n
-        <Number_of_Pages>
-        {number_of_pages}
-        </Number_of_Pages>\n
-        <Total_Characters>
-        {total_characters}
-        </Total_Characters>\n
-        <Scene_Characters>
-        {counter_dict}
-        </Scene_Characters>\n
-        <Detail_Conent>
-        {texts}
-        </Detail_Conent>\n
-        </ScreenPlay>
-        Please just response with the exact result,that means excluding any friendly preamble before providing the requested output.
-        '''
-        return file_prompt
+                    logger.warning(f"[{self.Model_ID}] unsupported cached file type: {data_type}")
 
-    def claude_vision(self, query, context):
-        session_id = context.kwargs["session_id"]
-        msg = context.kwargs["msg"]
-        img_path = context.content
-        msg.prepare()
-        logger.info(f"[{self.MODEL_ID}] query with images, path={img_path}")
-        img = Image.open(img_path)
-        # check if the image has an alpha channel
-        if img.mode in ('RGBA','LA') or (img.mode == 'P' and 'transparency' in img.info):
-            # Convert the image to RGB mode,whick removes the alpha channel
-            img = img.convert('RGB')
-            # Save the converted image
-            img_path_no_alpha = img_path[:len(img_path)-3] + 'jpg'
-            img.save(img_path_no_alpha)
-            # Update img_path with the path to the converted image
-            img_path = img_path_no_alpha
+            memory.USER_IMAGE_CACHE.pop(session_id)
 
-        with open(img_path, "rb") as image_file:
-            binary_data = image_file.read()
-            base_64_encoded_data = base64.b64encode(binary_data)
-            base64_string = base_64_encoded_data.decode('utf-8')
-        image_query = {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64_string}}
-        self.sessions.session_query(image_query, session_id)
-        #return Reply(ReplyType.TEXT, f"[CLAUDI] query with images, path={img_path}")
+        # 文本块追加在末尾
+        current_content.append({
+            "type": "text",
+            "text": query
+        })
+
+        return current_content

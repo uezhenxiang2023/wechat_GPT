@@ -4,6 +4,7 @@ import logging
 import asyncio
 import html
 import time
+import httpx
 
 from io import BytesIO
 
@@ -64,7 +65,9 @@ class TelegramChannel(ChatChannel):
         """
         # 每次收到消息，刷新一下时间
         self.last_update_time = time.time()
-        logger.info(f"[TELEGRAM] 收到消息: {update.effective_message.text}")
+        photo = update.effective_message.photo
+        text = update.effective_message.text
+        logger.info(f"[TELEGRAM] 收到消息: {photo if photo else text}")
         chat_id = update.effective_chat.id
 
         # Print tool_button stasus to console
@@ -228,10 +231,6 @@ class TelegramChannel(ChatChannel):
                  logger.warning("[WATCHDOG] ⚠️ Updater 停止了！尝试重启...")
                  await self.application.updater.start_polling()
                  return
-
-            # 如果您想做得更绝一点（针对“没报错但收不到消息”）：
-            # 这种通常很难在应用层检测，除非我们引入“自发自收”机制
-            # 但针对您日志里的 Timed out，下面的重置逻辑通常有效：
             
         except Exception as e:
             logger.warning(f"[HEARTBEAT] 💔 心跳检测失败: {e}")
@@ -241,7 +240,16 @@ class TelegramChannel(ChatChannel):
             try:
                 logger.warning("[WATCHDOG] 正在强制重启 Polling...")
                 await self.application.updater.stop()
-                await asyncio.sleep(5) # 等几秒
+                # 等待网络恢复，最多等 3 分钟
+                for i in range(18):  # 18 * 10秒 = 3分钟
+                    await asyncio.sleep(10)
+                    try:
+                        async with httpx.AsyncClient(proxy=self.proxy_url) as client:
+                            await client.get("https://api.telegram.org", timeout=5)
+                        logger.info("[WATCHDOG] 网络已恢复，准备重启 Polling...")
+                        break
+                    except Exception:
+                        logger.warning(f"[WATCHDOG] 网络未恢复，等待中... ({(i+1)*10}s)")
                 await self.application.updater.start_polling(
                     allowed_updates=Update.ALL_TYPES,
                     timeout=5, # 记得和 main 里保持一致
@@ -257,7 +265,7 @@ class TelegramChannel(ChatChannel):
         """
         # 准备 Request 对象
         request_params = {
-            "connection_pool_size":8, # 链接窗口数量
+            "connection_pool_size":32, # 链接窗口数量
             "pool_timeout":30,          # 链接排队时间
             "read_timeout":30,
             "write_timeout":30,

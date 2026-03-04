@@ -236,8 +236,8 @@ class ChatChannel(Channel):
                     context["channel"] = e_context["channel"]
                     reply = super().build_reply_content(context.content, context)
             elif context.type == ContextType.IMAGE:
-                if model in const.GEMINI_GENAI_SDK or model in const.DOUAO:  
-                    # 图片消息,目前只针对gemini2.0+和DOUBAO进行监听配置
+                if model in const.GEMINI_GENAI_SDK + const.CLAUDE_SDK + const.DOUAO:  
+                    # 图片消息,目前只针对claude、gemini2.0+和DOUBAO进行监听配置
                     image_path = context.content
                     dir_path = os.path.dirname(image_path)
                     dir_exists = os.path.exists(dir_path)

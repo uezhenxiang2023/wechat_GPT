@@ -30,7 +30,7 @@ class Bridge(object):
             self.btype["chat"] = const.XUNFEI
         if model_type in [const.QWEN]:
             self.btype["chat"] = const.QWEN
-        if model_type in (const.GEMINI_1_PRO_LIST + const.GEMINI_15_PRO_LIST + const.GEMINI_15_FLASH_LIST + const.GEMINI_2_FLASH_LIST + const.GEMINI_25_PRO_LIST):
+        if model_type in (const.GEMINI_1_PRO_LIST + const.GEMINI_15_PRO_LIST + const.GEMINI_15_FLASH_LIST + const.GEMINI_GENAI_SDK):
             self.btype["chat"] = const.GEMINI
         if model_type in [const.OPEN_AI_ASSISTANT]:
             self.btype["chat"] = const.OPEN_AI_ASSISTANT
@@ -44,7 +44,7 @@ class Bridge(object):
             if not conf().get("text_to_voice") or conf().get("text_to_voice") in ["openai", const.TTS_1, const.TTS_1_HD]:
                 self.btype["text_to_voice"] = const.LINKAI
 
-        if model_type in (const.CLAUDE_2_LIST + const.CLAUDE_3_LIST + const.CLAUDE_35_LIST + const.CLAUDE_46_LIST):
+        if model_type in const.CLAUDE_SDK:
             self.btype["chat"] = const.CLAUDEAI
         self.bots = {}
         self.chat_bots = {}
