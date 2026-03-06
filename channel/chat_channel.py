@@ -33,7 +33,7 @@ class ChatChannel(Channel):
     futures = {}  # 记录每个session_id提交到线程池的future对象, 用于重置会话时把没执行的future取消掉，正在执行的不会被取消
     sessions = {}  # 用于控制并发，每个session_id同时只能有一个context在处理
     lock = threading.Lock()  # 用于控制对sessions的访问
-    handler_pool = ThreadPoolExecutor(max_workers=8)  # 处理消息的线程池
+    handler_pool = ThreadPoolExecutor(max_workers=16)  # 处理消息的线程池
     cache_locks = {}  # 为每个session添加缓存锁
 
     def __init__(self):
