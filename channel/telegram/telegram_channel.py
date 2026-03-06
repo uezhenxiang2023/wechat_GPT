@@ -242,6 +242,7 @@ class TelegramChannel(ChatChannel):
                      timeout=5,
                      drop_pending_updates=True
                  )
+                 self.last_update_time = time.time()
                  return
             
         except Exception as e:
@@ -268,6 +269,7 @@ class TelegramChannel(ChatChannel):
                     drop_pending_updates=True
                 )
                 logger.info("[WATCHDOG] Polling 重启成功！")
+                self.last_update_time = time.time()
             except Exception as restart_error:
                 logger.error(f"[WATCHDOG] 重启失败: {restart_error}")
 
