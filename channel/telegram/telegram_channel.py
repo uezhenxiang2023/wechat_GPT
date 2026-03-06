@@ -28,6 +28,7 @@ from telegram.request import HTTPXRequest
 class TelegramChannel(ChatChannel):
     def __init__(self, session_id=None):
         super().__init__()
+        self.last_update_time = time.time()
         self.logger = logging.getLogger(__name__)
         self.bot_token = conf().get("telegram_bot_token")
         self.proxy_url =conf().get("telegram_proxy_url")
@@ -221,15 +222,26 @@ class TelegramChannel(ChatChannel):
     # 定义心跳任务
     async def heartbeat(self, context: ContextTypes.DEFAULT_TYPE):
         try:
-            # 1. 常规心跳，不用 context.bot，直接用独立请求
+            # 用 get_me() 验证网络连通性，不干扰 Polling 的 offset
             await self.application.bot.get_me()
+
+            # 检查是否长时间没收到任何消息（Polling 假死检测）
+            POLLING_TIMEOUT = 1800  # 超过30分钟没收到更新就认为Polling假死
+            time_since_last = time.time() - self.last_update_time
+            if time_since_last > POLLING_TIMEOUT:
+                logger.warning(f"[WATCHDOG] ⚠️ 已 {int(time_since_last)}s 未收到任何更新，疑似 Polling 假死，强制重启...")
+                raise Exception("Polling 疑似假死")  # 主动触发下面的重启逻辑
             logger.debug("[HEARTBEAT] ❤️ 依然在线")
             
             # 2. 【新增】看门狗逻辑：检测 Polling 是否假死
             # 获取 updater 状态
             if not self.application.updater.running:
                  logger.warning("[WATCHDOG] ⚠️ Updater 停止了！尝试重启...")
-                 await self.application.updater.start_polling()
+                 await self.application.updater.start_polling(
+                     allowed_updates=Update.ALL_TYPES,
+                     timeout=5,
+                     drop_pending_updates=True
+                 )
                  return
             
         except Exception as e:
