@@ -138,7 +138,7 @@ class TelegramMessage(ChatMessage):
             except Exception as e:
                 logger.error(f"[TELEGRAMBOT] File download error: {e}")
                 raise NotImplementedError(str(e))
-        elif 'https://' in telegram_message["text_html"]:
+        elif telegram_message["text_html"] and 'https://' in telegram_message["text_html"]:
             self.ctype = ContextType.SHARING
             self.content = telegram_message["text_html"]
 
