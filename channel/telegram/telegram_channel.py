@@ -224,36 +224,48 @@ class TelegramChannel(ChatChannel):
         try:
             # 用 get_me() 验证网络连通性，不干扰 Polling 的 offset
             await self.application.bot.get_me()
-
-            # 检查是否长时间没收到任何消息（Polling 假死检测）
-            POLLING_TIMEOUT = 1800  # 超过30分钟没收到更新就认为Polling假死
-            time_since_last = time.time() - self.last_update_time
-            if time_since_last > POLLING_TIMEOUT:
-                logger.warning(f"[WATCHDOG] ⚠️ 已 {int(time_since_last)}s 未收到任何更新，疑似 Polling 假死，强制重启...")
-                raise Exception("Polling 疑似假死")  # 主动触发下面的重启逻辑
             logger.debug("[HEARTBEAT] ❤️ 依然在线")
-            
-            # 2. 【新增】看门狗逻辑：检测 Polling 是否假死
-            # 获取 updater 状态
+
+            # 检查 updater 是否意外停止
             if not self.application.updater.running:
-                 logger.warning("[WATCHDOG] ⚠️ Updater 停止了！尝试重启...")
-                 await self.application.updater.start_polling(
-                     allowed_updates=Update.ALL_TYPES,
-                     timeout=5,
-                     drop_pending_updates=True
-                 )
-                 self.last_update_time = time.time()
-                 return
-            
+                logger.warning("[WATCHDOG] ⚠️ Updater 停止了！尝试重启...")
+                raise Exception("Updater 意外停止")
+
         except Exception as e:
-            logger.warning(f"[HEARTBEAT] 💔 心跳检测失败: {e}")
-            
-            # 【终极手段】如果心跳都断了，说明网络层肯定出问题了。
-            # 我们可以尝试主动停止 updater 再重启，强迫它重建所有连接
+            # 区分是网络问题还是 Updater 停止
+            if str(e) == "Updater 意外停止":
+                logger.warning("[WATCHDOG] ⚠️ 进入重启流程（Updater 停止触发）")
+            else:
+                logger.warning(f"[HEARTBEAT] 💔 心跳检测失败: {e}")
             try:
                 logger.warning("[WATCHDOG] 正在强制重启 Polling...")
-                await self.application.updater.stop()
-                # 等待网络恢复，最多等 3 分钟
+
+                # 第一步：停止 updater
+                try:
+                    await self.application.updater.stop()
+                except Exception as stop_err:
+                    logger.warning(f"[WATCHDOG] stop() 时报错（忽略）: {stop_err}")
+
+                # 第二步：等待连接池完全释放
+                await asyncio.sleep(3)
+
+                # 第三步：强制关闭旧的 httpx 连接池，避免连接槽被占满
+                # 第三步：强制关闭旧的 httpx 连接池，并重新初始化
+                try:
+                    await self.application.bot._request[0].shutdown()  # 替换 aclose()，走官方关闭流程
+                    logger.info("[WATCHDOG] 旧连接池已关闭")
+                except Exception as close_err:
+                    logger.warning(f"[WATCHDOG] 关闭连接池时报错（忽略）: {close_err}")
+
+                try:
+                    await self.application.bot._request[0].initialize()  # ← 新增，重建 httpx client
+                    logger.info("[WATCHDOG] 连接池已重新初始化")
+                except Exception as init_err:
+                    logger.warning(f"[WATCHDOG] 重新初始化连接池时报错（忽略）: {init_err}")
+
+                await asyncio.sleep(1)
+
+                # 第四步：等待网络恢复，最多等 3 分钟
                 for i in range(18):  # 18 * 10秒 = 3分钟
                     await asyncio.sleep(10)
                     try:
@@ -263,13 +275,15 @@ class TelegramChannel(ChatChannel):
                         break
                     except Exception:
                         logger.warning(f"[WATCHDOG] 网络未恢复，等待中... ({(i+1)*10}s)")
+
+                # 第五步：重启 Polling
                 await self.application.updater.start_polling(
                     allowed_updates=Update.ALL_TYPES,
-                    timeout=5, # 记得和 main 里保持一致
-                    drop_pending_updates=True
+                    timeout=5,
+                    drop_pending_updates=False
                 )
                 logger.info("[WATCHDOG] Polling 重启成功！")
-                self.last_update_time = time.time()
+
             except Exception as restart_error:
                 logger.error(f"[WATCHDOG] 重启失败: {restart_error}")
 
