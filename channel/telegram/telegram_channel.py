@@ -479,43 +479,76 @@ class TelegramChannel(ChatChannel):
                 logger.info("[TELEGRAMBOT] sendFile={}, receiver={}".format(reply.content, receiver))
             elif reply.type == ReplyType.IMAGE_URL:  # 获取网络资源
                 response = reply.content
-                if not isinstance(response, str):
-                    #获取网址
-                    parts = response.candidates[0].content.parts
-                    grouding_metadata = response.candidates[0].grounding_metadata
-                    if parts is None:
-                        finish_reason = response.candidates[0].finish_reason
-                        logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
-                        await self.application.bot.send_message(chat_id=receiver, text=receiver)
-                        logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
-                    elif parts is not None:
-                        reply_text = "\n".join(part.text for part in parts)
-                        safe_reply_text = html.escape(reply_text)
-                    if grouding_metadata is not None:
-                        inline_url = self.get_search_sources(grouding_metadata)
-                    reply_content = safe_reply_text + "\n\n" + inline_url
+                if hasattr(response, 'candidates'):
+                    if not isinstance(response, str):
+                        #获取网址
+                        parts = response.candidates[0].content.parts
+                        grouding_metadata = response.candidates[0].grounding_metadata
+                        if parts is None:
+                            finish_reason = response.candidates[0].finish_reason
+                            logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
+                            await self.application.bot.send_message(chat_id=receiver, text=receiver)
+                            logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
+                        elif parts is not None:
+                            reply_text = "\n".join(part.text for part in parts)
+                            safe_reply_text = html.escape(reply_text)
+                        if grouding_metadata is not None:
+                            inline_url = self.get_search_sources(grouding_metadata)
+                        reply_content = safe_reply_text + "\n\n" + inline_url
+                        await self.application.bot.send_message(
+                            chat_id=receiver, 
+                            text=reply_content,
+                            parse_mode='HTML',
+                            disable_web_page_preview=True
+                        )
+                        logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(const.GEMINI_2_FLASH_IMAGE_GENERATION, reply_content, receiver))
+                    else:
+                        # 下载图片
+                        img_url = reply.content
+                        logger.debug(f"[TELEGRAMBOT] start download image, img_url={img_url}")
+                        pic_res = requests.get(img_url, stream=True)
+                        image_storage = io.BytesIO()
+                        size = 0
+                        for block in pic_res.iter_content(1024):
+                            size += len(block)
+                            image_storage.write(block)
+                        logger.info(f"[TELEGRAMBOT] download image success, size={size}, img_url={img_url}")
+                        image_storage.seek(0)
+                        await self.application.bot.send_photo( chat_id=receiver, photo=image_storage)
+                        logger.info("[TELEGRAMBOT] sendImage url={}, receiver={}".format(img_url, receiver))
+                elif hasattr(response, 'content'):
+                    # ——— Claude web_search response ———
+                    import html as html_module
+
+                    # 提取文本
+                    reply_text = ""
+                    for block in reply.content.content:
+                        if hasattr(block, "text"):
+                            reply_text += block.text
+
+                    # markdown 转 HTML：** → <b>，* → <i>
+                    import re
+                    reply_text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', reply_text)
+                    reply_text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', reply_text)
+                    safe_reply_text = html_module.escape(reply_text)
+                    # escape 之后 bold/italic 标签也被转义了，还原回来
+                    safe_reply_text = safe_reply_text.replace('&lt;b&gt;', '<b>').replace('&lt;/b&gt;', '</b>')
+                    safe_reply_text = safe_reply_text.replace('&lt;i&gt;', '<i>').replace('&lt;/i&gt;', '</i>')
+
+                    # 提取引用来源
+                    inline_url = self._get_claude_search_sources(reply.content)
+
+                    reply_content = safe_reply_text
+                    if inline_url:
+                        reply_content += f"\n\n{inline_url}"
+
                     await self.application.bot.send_message(
-                        chat_id=receiver, 
+                        chat_id=receiver,
                         text=reply_content,
                         parse_mode='HTML',
                         disable_web_page_preview=True
                     )
-                    logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(const.GEMINI_2_FLASH_IMAGE_GENERATION, reply_content, receiver))
-
-                else:
-                    # 下载图片
-                    img_url = reply.content
-                    logger.debug(f"[TELEGRAMBOT] start download image, img_url={img_url}")
-                    pic_res = requests.get(img_url, stream=True)
-                    image_storage = io.BytesIO()
-                    size = 0
-                    for block in pic_res.iter_content(1024):
-                        size += len(block)
-                        image_storage.write(block)
-                    logger.info(f"[TELEGRAMBOT] download image success, size={size}, img_url={img_url}")
-                    image_storage.seek(0)
-                    await self.application.bot.send_photo( chat_id=receiver, photo=image_storage)
-                    logger.info("[TELEGRAMBOT] sendImage url={}, receiver={}".format(img_url, receiver))
+                    logger.info(f"[TELEGRAMBOT_CLAUDE] sendMsg={reply_content}, receiver={receiver}")
             elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
                 response = reply.content
                 parts = response.candidates[0].content.parts
@@ -600,3 +633,25 @@ class TelegramChannel(ChatChannel):
             sources.append(source)
         inline_url = '\n'.join(sources)
         return inline_url
+    
+    def _get_claude_search_sources(self, response) -> str:
+        """从 Claude web_search response 的 TextBlock.citations 提取来源，返回 HTML 格式"""
+        import html as html_module
+        seen_urls = set()
+        sources = []
+        i = 1
+        for block in response.content:
+            if block.type != "text":
+                continue
+            citations = getattr(block, "citations", None)
+            if not citations:
+                continue
+            for citation in citations:
+                url = getattr(citation, "url", None)
+                title = getattr(citation, "title", None) or url
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    safe_title = html_module.escape(title)
+                    sources.append(f'{i}. <a href="{url}">{safe_title}</a>')
+                    i += 1
+        return '\n'.join(sources)

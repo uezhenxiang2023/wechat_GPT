@@ -76,26 +76,46 @@ class ClaudeAIBot(Bot, OpenAIImage):
             session = self.sessions.build_session(session_id)
             claude_message = session.messages
 
-            response = self.client.messages.create(
+            # 判断联网搜索状态
+            is_searching = tool_state.get_search_state(session_id)
+
+            create_kwargs = dict(
                 model=self.model,
                 max_tokens=1000,
                 temperature=0.0,
                 system=self.system_prompt,
                 messages=claude_message
             )
-            reply_content = response.content[0].text
+
+            if is_searching:
+                create_kwargs["tools"] = [
+                    {
+                        "type": "web_search_20250305", 
+                        "name": "web_search",
+                        "max_uses": 2
+                    }
+                ]
+
+            response = self.client.messages.create(**create_kwargs)
+
+            # 提取文本回复
+            reply_content = ""
+            for block in response.content:
+                if hasattr(block, "text"):
+                    reply_content += block.text
+
             logger.info(f"[{self.Model_ID}] reply={reply_content}, total_tokens=invisible")
             self.sessions.session_reply(reply_content, session_id, 100)
-            return Reply(ReplyType.TEXT, reply_content)
+
+            # 联网搜索时走 IMAGE_URL 分支，把 response 整体传给 channel 处理
+            if is_searching:
+                return Reply(ReplyType.IMAGE_URL, response)
+            else:
+                return Reply(ReplyType.TEXT, reply_content)
 
         except Exception as e:
-            logger.exception(e)
-            # retry
-            time.sleep(5)
-            logger.warning(f"[{self.Model_ID}] do retry, times={retry_count}")
-            # Pop last role message avoiding the same two adjacent role messages during retrying.
-            self.sessions.messages.pop()
-            return self._chat(query, context, retry_count + 1)
+            logger.error("[{}] fetch reply error, {}".format(self.Model_ID, e))
+            return Reply(ReplyType.ERROR, f"[{self.Model_ID}] {e}")
         
     def _build_current_content(self, query: str, session_id: str) -> list:
         """
