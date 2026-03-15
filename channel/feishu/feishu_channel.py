@@ -302,22 +302,38 @@ class FeiShuChanel(ChatChannel):
         elif reply.type == ReplyType.IMAGE_URL:  # 获取网络资源
             response = reply.content
             if not isinstance(response, str):
-                #获取网址
-                parts = response.candidates[0].content.parts
-                grouding_metadata = response.candidates[0].grounding_metadata
-                if parts is None:
-                    finish_reason = response.candidates[0].finish_reason
-                    logger.error("[Lark] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
-                    self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
-                    logger.info("[Lark] sendMsg={}, receiver={}".format(reply.content, receiver))
-                elif parts is not None:
-                    reply_text = "\n".join(part.text for part in parts)
-                if grouding_metadata is not None:
-                    inline_url = self.get_search_sources(grouding_metadata)
-                reply_content = reply_text + "\n\n" + inline_url
-                self.send_text(reply_content, receiver)
-                logger.info("[Lark] sendMsg={}, receiver={}".format(reply_content, receiver))
+                if hasattr(response, 'candidates'):
+                    # gemini 获取引用的网址链接
+                    parts = response.candidates[0].content.parts
+                    grouding_metadata = response.candidates[0].grounding_metadata
+                    if parts is None:
+                        finish_reason = response.candidates[0].finish_reason
+                        logger.error("[Lark] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
+                        self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
+                        logger.info("[Lark] sendMsg={}, receiver={}".format(reply.content, receiver))
+                    elif parts is not None:
+                        reply_text = "\n".join(part.text for part in parts)
+                    if grouding_metadata is not None:
+                        inline_url = self.get_search_sources(grouding_metadata)
+                    reply_content = reply_text + "\n\n" + inline_url
 
+                    self.send_text(reply_content, receiver)
+                    logger.info("[Lark] sendMsg={}, receiver={}".format(reply_content, receiver))
+
+                elif hasattr(response, 'content') and hasattr(response, 'model'):
+                    # claude 获取引用的网址链接
+                    reply_text = ""
+                    for block in response.content:
+                        if hasattr(block, "text"):
+                            reply_text += block.text
+
+                    inline_url = self._get_claude_search_sources(response)
+                    reply_content = reply_text
+                    if inline_url:
+                        reply_content += f"\n\n{inline_url}"
+
+                    self.send_text(reply_content, receiver)
+                    logger.info("[Lark_CLAUDE] sendMsg={}, receiver={}".format(reply_content, receiver))
             else:
                 # 下载图片
                 file_name = self.extract_image_filename(response)
@@ -427,6 +443,27 @@ class FeiShuChanel(ChatChannel):
             sources.append(source)
         inline_url = '\n'.join(sources)
         return inline_url
+    
+    def _get_claude_search_sources(self, response) -> str:
+        """从 Claude web_search response 的 TextBlock.citations 提取来源
+        飞书用 Markdown 格式链接，不用 HTML"""
+        seen_urls = set()
+        sources = []
+        i = 1
+        for block in response.content:
+            if block.type != "text":
+                continue
+            citations = getattr(block, "citations", None)
+            if not citations:
+                continue
+            for citation in citations:
+                url = getattr(citation, "url", None)
+                title = getattr(citation, "title", None) or url
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    sources.append(f'{i}. [{title}]({url})')
+                    i += 1
+        return '\n'.join(sources)
 
     def send_text(self, reply_content, toUserName):
         """
