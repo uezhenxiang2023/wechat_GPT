@@ -179,6 +179,7 @@ available_setting = {
     # telegram channel配置
     "telegram_bot_token": "",  # telegram bot token
     "telegram_proxy_url": "",  # telegram bot proxy url
+    "stream": False,           # 是否启用流式响应，目前支持 claude bot + telegram 通道
 }
 
 

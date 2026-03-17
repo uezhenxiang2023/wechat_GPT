@@ -350,7 +350,15 @@ class ChatChannel(Channel):
                     reply.content = reply_text
                 elif reply.type == ReplyType.ERROR or reply.type == ReplyType.INFO:
                     reply.content = "[" + str(reply.type) + "]\n" + reply.content
-                elif reply.type == ReplyType.IMAGE_URL or reply.type == ReplyType.VOICE or reply.type == ReplyType.IMAGE or reply.type == ReplyType.FILE or reply.type == ReplyType.VIDEO or reply.type == ReplyType.VIDEO_URL:
+                elif reply.type in (
+                    ReplyType.IMAGE_URL,
+                    ReplyType.VOICE,
+                    ReplyType.IMAGE,
+                    ReplyType.FILE,
+                    ReplyType.VIDEO,
+                    ReplyType.VIDEO_URL,
+                    ReplyType.STREAM
+                ):
                     pass
                 else:
                     logger.error("[WX] unknown reply type: {}".format(reply.type))

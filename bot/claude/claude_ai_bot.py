@@ -27,6 +27,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
         self.sessions = SessionManager(ClaudeAiSession, model=conf().get("model") or "gpt-3.5-turbo")
         self.system_prompt = conf().get("character_desc")
         self.claude_api_cookie = conf().get("claude_api_cookie")
+        self.stream = conf().get("stream")
         self.proxy = conf().get("proxy")
 
     def reply(self, query, context: Context = None) -> Reply:
@@ -86,7 +87,8 @@ class ClaudeAIBot(Bot, OpenAIImage):
                 system=self.system_prompt,
                 messages=claude_message
             )
-
+            
+            # 联网搜索时走 IMAGE_URL 分支，把 response 整体传给 channel 处理
             if is_searching:
                 create_kwargs["tools"] = [
                     {
@@ -95,22 +97,44 @@ class ClaudeAIBot(Bot, OpenAIImage):
                         "max_uses": 5
                     }
                 ]
+                response = self.client.messages.create(**create_kwargs)
 
-            response = self.client.messages.create(**create_kwargs)
+                # 提取文本回复
+                reply_content = ""
+                for block in response.content:
+                    if hasattr(block, "text"):
+                        reply_content += block.text
 
-            # 提取文本回复
-            reply_content = ""
-            for block in response.content:
-                if hasattr(block, "text"):
-                    reply_content += block.text
-
-            logger.info(f"[{self.Model_ID}] reply={reply_content}, total_tokens=invisible")
-            self.sessions.session_reply(reply_content, session_id, 100)
-
-            # 联网搜索时走 IMAGE_URL 分支，把 response 整体传给 channel 处理
-            if is_searching:
+                logger.info(f"[{self.Model_ID}] reply={reply_content}, total_tokens=invisible")
+                self.sessions.session_reply(reply_content, session_id, 100)
                 return Reply(ReplyType.IMAGE_URL, response)
+            
+            elif self.stream:
+                logger.info(f"[{self.Model_ID}] stream 模式已开启")
+                
+                def stream_generator():
+                    full_text = ""
+                    with self.client.messages.stream(**create_kwargs) as s:
+                        for text_chunk in s.text_stream:
+                            full_text += text_chunk
+                            yield text_chunk
+                        # 流结束，写回 session
+                        final_message = s.get_final_message()
+                        total_tokens = final_message.usage.output_tokens
+                        self.sessions.session_reply(full_text, session_id, total_tokens)
+                        logger.info(f"[{self.Model_ID}] stream 完成, session_id={session_id}, tokens={total_tokens}")
+
+                return Reply(ReplyType.STREAM, stream_generator())
+
             else:
+                # 普通模式
+                response = self.client.messages.create(**create_kwargs)
+                reply_content = ""
+                for block in response.content:
+                    if hasattr(block, "text"):
+                        reply_content += block.text
+                logger.info(f"[{self.Model_ID}] reply={reply_content}")
+                self.sessions.session_reply(reply_content, session_id, 100)
                 return Reply(ReplyType.TEXT, reply_content)
 
         except Exception as e:

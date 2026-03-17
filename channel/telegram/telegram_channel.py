@@ -603,6 +603,33 @@ class TelegramChannel(ChatChannel):
                     connect_timeout=60
                 )
                 logger.info("[TELEGRAMBOT] sendVideo url={}, receiver={}".format(video_url, receiver))
+            elif reply.type == ReplyType.STREAM:
+                generator = reply.content
+                draft_id = abs(hash(str(receiver))) % (10**9) + 1
+
+                full_text = ""
+                update_interval = 0.8
+                last_update = 0
+
+                for text_chunk in generator:
+                    full_text += text_chunk
+
+                    try:
+                        await self.application.bot.send_message_draft(
+                            chat_id=receiver,
+                            draft_id=draft_id,
+                            text=full_text + " ▍"
+                        )
+
+                    except Exception as draft_err:
+                        logger.warning(f"[TELEGRAMBOT_STREAM] send_message_draft 失败（忽略）: {draft_err}")
+
+                # 流结束，finalize：发最终完整消息，draft 自动消失
+                await self.application.bot.send_message(
+                    chat_id=receiver,
+                    text=full_text
+                )
+                logger.info(f"[TELEGRAMBOT_STREAM] stream 发送完成, receiver={receiver}")
         except Exception as e:
             logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, e))
             # 发送失败时，尝试给用户回个错误提示
