@@ -88,7 +88,6 @@ class ClaudeAIBot(Bot, OpenAIImage):
                 messages=claude_message
             )
             
-            # 联网搜索时走 IMAGE_URL 分支，把 response 整体传给 channel 处理
             if is_searching:
                 create_kwargs["tools"] = [
                     {
@@ -97,8 +96,9 @@ class ClaudeAIBot(Bot, OpenAIImage):
                         "max_uses": 5
                     }
                 ]
+            if is_searching and not self.stream:
+                # 搜索开启 + stream 关闭 → IMAGE_URL 模式
                 response = self.client.messages.create(**create_kwargs)
-
                 # 提取文本回复
                 reply_content = ""
                 for block in response.content:
@@ -110,6 +110,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
                 return Reply(ReplyType.IMAGE_URL, response)
             
             elif self.stream:
+                # stream 开启 → STREAM 模式
                 logger.info(f"[{self.Model_ID}] stream 模式已开启")
                 
                 def stream_generator():
@@ -123,6 +124,9 @@ class ClaudeAIBot(Bot, OpenAIImage):
                         total_tokens = final_message.usage.output_tokens
                         self.sessions.session_reply(full_text, session_id, total_tokens)
                         logger.info(f"[{self.Model_ID}] stream 完成, session_id={session_id}, tokens={total_tokens}")
+                        # 搜索开启时，从 final_message 提取 citations yield 出去
+                        if is_searching:
+                            yield final_message
 
                 return Reply(ReplyType.STREAM, stream_generator())
 

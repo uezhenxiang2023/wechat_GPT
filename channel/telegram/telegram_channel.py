@@ -606,19 +606,22 @@ class TelegramChannel(ChatChannel):
             elif reply.type == ReplyType.STREAM:
                 generator = reply.content
                 draft_id = abs(hash(str(receiver))) % (10**9) + 1
-
                 full_text = ""
-                update_interval = 0.8
-                last_update = 0
-
-                for text_chunk in generator:
-                    full_text += text_chunk
+                for chunk in generator:
+                    if not isinstance(chunk, str):
+                        # final_message 对象，提取 citations 拼到 full_text
+                        inline_url = self._get_claude_search_sources(chunk)
+                        if inline_url:
+                            full_text += f"\n\n{inline_url}"
+                    else:
+                        full_text += chunk
 
                     try:
                         await self.application.bot.send_message_draft(
                             chat_id=receiver,
                             draft_id=draft_id,
-                            text=full_text + " ▍"
+                            text=full_text + " ▍",
+                            parse_mode='HTML'
                         )
 
                     except Exception as draft_err:
@@ -627,7 +630,9 @@ class TelegramChannel(ChatChannel):
                 # 流结束，finalize：发最终完整消息，draft 自动消失
                 await self.application.bot.send_message(
                     chat_id=receiver,
-                    text=full_text
+                    text=full_text,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
                 )
                 logger.info(f"[TELEGRAMBOT_STREAM] stream 发送完成, receiver={receiver}")
         except Exception as e:
