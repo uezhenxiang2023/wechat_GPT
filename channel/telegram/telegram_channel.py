@@ -609,10 +609,21 @@ class TelegramChannel(ChatChannel):
                 full_text = ""
                 for chunk in generator:
                     if not isinstance(chunk, str):
-                        # final_message 对象，提取 citations 拼到 full_text
-                        inline_url = self._get_claude_search_sources(chunk)
-                        if inline_url:
-                            full_text += f"\n\n{inline_url}"
+                        # 判断是 Gemini response 还是 Claude final_message
+                        if hasattr(chunk, 'candidates'):
+                            # Gemini grounding_metadata
+                            grounding_metadata = getattr(
+                                chunk.candidates[0], "grounding_metadata", None
+                            ) if chunk.candidates else None
+                            if grounding_metadata and grounding_metadata.grounding_chunks:
+                                inline_url = self.get_search_sources(grounding_metadata)
+                                if inline_url:
+                                    full_text += f"\n\n{inline_url}"
+                        else:
+                            # Claude final_message citations
+                            inline_url = self._get_claude_search_sources(chunk)
+                            if inline_url:
+                                full_text += f"\n\n{inline_url}"
                     else:
                         full_text += chunk
 
@@ -634,7 +645,7 @@ class TelegramChannel(ChatChannel):
                     parse_mode='HTML',
                     disable_web_page_preview=True
                 )
-                logger.info(f"[TELEGRAMBOT_STREAM] stream 发送完成, receiver={receiver}")
+                logger.info(f"[TELEGRAMBOT_STREAM] stream 发送完成, sendMsg={full_text}, receiver={receiver}")
         except Exception as e:
             logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, e))
             # 发送失败时，尝试给用户回个错误提示

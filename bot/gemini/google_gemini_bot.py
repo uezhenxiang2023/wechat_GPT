@@ -659,9 +659,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
                         tool_state.toggle_printing(session_id)
                     elif tool_state.get_breakdown_state(session_id):
                         response = user_chat.send_message(resquest_contents, config=self.breakdown_config)
-                        tool_state.toggle_breakdowning(session_id) 
-                    elif tool_state.get_search_state(session_id):
-                        response = user_chat.send_message(resquest_contents, config=self.search_config)
+                        tool_state.toggle_breakdowning(session_id)
                     else:
                         if tool_state.get_edit_state(session_id):
                             # 如果请求列表只有一项内容则意味着没有图片参考；如果有两项内容代表第一项是图片要单独提取出来
@@ -698,19 +696,39 @@ class GoogleGeminiBot(Bot, GeminiVision):
                             if user_image_chat._curated_history != []:
                                 user_chat._curated_history.extend(user_image_chat._curated_history)
                                 user_image_chat._curated_history.clear()
+
+                            is_searching = tool_state.get_search_state(session_id)
+
                             # 普通文本，判断是否走 stream
                             if self.stream:
                                 logger.info(f"[{self.Model_ID}] stream 模式已开启")
 
                                 def stream_generator():
                                     full_text = ""
-                                    stream_response = user_chat.send_message_stream(resquest_contents)
+                                    final_response = None
+                                    if is_searching:
+                                        stream_response = user_chat.send_message_stream(
+                                            resquest_contents, config=self.search_config
+                                        )
+                                    else:
+                                        stream_response = user_chat.send_message_stream(resquest_contents)
+
                                     for chunk in stream_response:
                                         if chunk.text:
                                             full_text += chunk.text
                                             yield chunk.text
+                                        final_response = chunk
+
                                     self.sessions.session_reply(full_text, session_id)
                                     logger.info(f"[{self.Model_ID}] stream 完成, session_id={session_id}")
+
+                                    # 搜索+stream：从最后一个 chunk 取 grounding_metadata yield 给 channel
+                                    if is_searching and final_response is not None:
+                                        grounding_metadata = getattr(
+                                            final_response.candidates[0], "grounding_metadata", None
+                                        ) if final_response.candidates else None
+                                        if grounding_metadata and grounding_metadata.grounding_chunks:
+                                            yield final_response
 
                                 return Reply(ReplyType.STREAM, stream_generator())
                             else:
