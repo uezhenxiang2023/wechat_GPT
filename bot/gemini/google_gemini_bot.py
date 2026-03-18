@@ -46,6 +46,7 @@ class GoogleGeminiBot(Bot, GeminiVision):
         self.image_model = conf().get('text_to_image')
         self.IMAGE_MODEL_ID = self.image_model.upper()"""
         self.system_prompt = conf().get("character_desc")
+        self.stream = conf().get("stream")
         self.function_call_dicts = {
             "screenplay_scenes_breakdown": screenplay_scenes_breakdown,
             "screenplay_assets_breakdown": screenplay_assets_breakdown,
@@ -697,7 +698,23 @@ class GoogleGeminiBot(Bot, GeminiVision):
                             if user_image_chat._curated_history != []:
                                 user_chat._curated_history.extend(user_image_chat._curated_history)
                                 user_image_chat._curated_history.clear()
-                            response = user_chat.send_message(resquest_contents)
+                            # 普通文本，判断是否走 stream
+                            if self.stream:
+                                logger.info(f"[{self.Model_ID}] stream 模式已开启")
+
+                                def stream_generator():
+                                    full_text = ""
+                                    stream_response = user_chat.send_message_stream(resquest_contents)
+                                    for chunk in stream_response:
+                                        if chunk.text:
+                                            full_text += chunk.text
+                                            yield chunk.text
+                                    self.sessions.session_reply(full_text, session_id)
+                                    logger.info(f"[{self.Model_ID}] stream 完成, session_id={session_id}")
+
+                                return Reply(ReplyType.STREAM, stream_generator())
+                            else:
+                                response = user_chat.send_message(resquest_contents)
 
                 elif self.model not in const.GEMINI_GENAI_SDK:
                     chat_session = self.generative_model.start_chat(
