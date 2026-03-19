@@ -1,11 +1,10 @@
 # -*- coding=utf-8 -*-
 import io
-import os
 import time
 
 import requests
-import web
-from wechatpy.enterprise import create_reply, parse_message
+from flask import Flask, request, abort
+from wechatpy.enterprise import parse_message
 from wechatpy.enterprise.crypto import WeChatCrypto
 from wechatpy.enterprise.exceptions import InvalidCorpIdException
 from wechatpy.exceptions import InvalidSignatureException, WeChatClientException
@@ -18,36 +17,40 @@ from channel.wechatcom.wechatcomapp_message import WechatComAppMessage
 from common.log import logger
 from common.singleton import singleton
 from common.utils import compress_imgfile, fsize, split_string_by_utf8_length
-from config import conf, subscribe_msg
-from voice.audio_convert import any_to_amr, split_audio
+from config import conf
 
 MAX_UTF8_LEN = 2048
+
+flask_app = Flask(__name__)
 
 
 @singleton
 class WechatComAppChannel(ChatChannel):
     NOT_SUPPORT_REPLYTYPE = []
 
-    def __init__(self):
+    def __init__(self, session_id=None):
         super().__init__()
         self.corp_id = conf().get("wechatcom_corp_id")
         self.secret = conf().get("wechatcomapp_secret")
         self.agent_id = conf().get("wechatcomapp_agent_id")
         self.token = conf().get("wechatcomapp_token")
         self.aes_key = conf().get("wechatcomapp_aes_key")
-        print(self.corp_id, self.secret, self.agent_id, self.token, self.aes_key)
         logger.info(
-            "[wechatcom] init: corp_id: {}, secret: {}, agent_id: {}, token: {}, aes_key: {}".format(self.corp_id, self.secret, self.agent_id, self.token, self.aes_key)
+            "[wechatcom] Initializing WeCom app channel, corp_id: {}, agent_id: {}".format(self.corp_id, self.agent_id)
         )
         self.crypto = WeChatCrypto(self.token, self.aes_key, self.corp_id)
         self.client = WechatComAppClient(self.corp_id, self.secret)
 
     def startup(self):
-        # start message listener
-        urls = ("/wxcomapp", "channel.wechatcom.wechatcomapp_channel.Query")
-        app = web.application(urls, globals(), autoreload=False)
         port = conf().get("wechatcomapp_port", 9898)
-        web.httpserver.runsimple(app.wsgifunc(), ("0.0.0.0", port))
+        logger.info("[wechatcom] ✅ WeCom app channel started successfully")
+        logger.info("[wechatcom] 📡 Listening on http://0.0.0.0:{}/wxcomapp/".format(port))
+        logger.info("[wechatcom] 🤖 Ready to receive messages")
+        flask_app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+    def stop(self):
+        # Flask dev server 不支持优雅停止，生产环境建议使用 gunicorn
+        logger.info("[wechatcom] HTTP server stopped")
 
     def send(self, reply: Reply, context: Context):
         receiver = context["receiver"]
@@ -59,35 +62,9 @@ class WechatComAppChannel(ChatChannel):
             for i, text in enumerate(texts):
                 self.client.message.send_text(self.agent_id, receiver, text)
                 if i != len(texts) - 1:
-                    time.sleep(0.5)  # 休眠0.5秒，防止发送过快乱序
+                    time.sleep(0.5)
             logger.info("[wechatcom] Do send text to {}: {}".format(receiver, reply_text))
-        elif reply.type == ReplyType.VOICE:
-            try:
-                media_ids = []
-                file_path = reply.content
-                amr_file = os.path.splitext(file_path)[0] + ".amr"
-                any_to_amr(file_path, amr_file)
-                duration, files = split_audio(amr_file, 60 * 1000)
-                if len(files) > 1:
-                    logger.info("[wechatcom] voice too long {}s > 60s , split into {} parts".format(duration / 1000.0, len(files)))
-                for path in files:
-                    response = self.client.media.upload("voice", open(path, "rb"))
-                    logger.debug("[wechatcom] upload voice response: {}".format(response))
-                    media_ids.append(response["media_id"])
-            except WeChatClientException as e:
-                logger.error("[wechatcom] upload voice failed: {}".format(e))
-                return
-            try:
-                os.remove(file_path)
-                if amr_file != file_path:
-                    os.remove(amr_file)
-            except Exception:
-                pass
-            for media_id in media_ids:
-                self.client.message.send_voice(self.agent_id, receiver, media_id)
-                time.sleep(1)
-            logger.info("[wechatcom] sendVoice={}, receiver={}".format(reply.content, receiver))
-        elif reply.type == ReplyType.IMAGE_URL:  # 从网络下载图片
+        elif reply.type == ReplyType.IMAGE_URL:
             img_url = reply.content
             pic_res = requests.get(img_url, stream=True)
             image_storage = io.BytesIO()
@@ -105,10 +82,9 @@ class WechatComAppChannel(ChatChannel):
             except WeChatClientException as e:
                 logger.error("[wechatcom] upload image failed: {}".format(e))
                 return
-
             self.client.message.send_image(self.agent_id, receiver, response["media_id"])
             logger.info("[wechatcom] sendImage url={}, receiver={}".format(img_url, receiver))
-        elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
+        elif reply.type == ReplyType.IMAGE:
             image_storage = reply.content
             sz = fsize(image_storage)
             if sz >= 10 * 1024 * 1024:
@@ -126,53 +102,54 @@ class WechatComAppChannel(ChatChannel):
             logger.info("[wechatcom] sendImage, receiver={}".format(receiver))
 
 
-class Query:
-    def GET(self):
-        channel = WechatComAppChannel()
-        params = web.input()
-        logger.info("[wechatcom] receive params: {}".format(params))
-        try:
-            signature = params.msg_signature
-            timestamp = params.timestamp
-            nonce = params.nonce
-            echostr = params.echostr
-            echostr = channel.crypto.check_signature(signature, timestamp, nonce, echostr)
-        except InvalidSignatureException:
-            raise web.Forbidden()
-        return echostr
+@flask_app.route("/wxcomapp/", methods=["GET"])
+def query_get():
+    channel = WechatComAppChannel()
+    logger.info("[wechatcom] receive params: {}".format(request.args))
+    try:
+        signature = request.args.get("msg_signature")
+        timestamp = request.args.get("timestamp")
+        nonce = request.args.get("nonce")
+        echostr = request.args.get("echostr")
+        echostr = channel.crypto.check_signature(signature, timestamp, nonce, echostr)
+    except InvalidSignatureException:
+        abort(403)
+    return echostr
 
-    def POST(self):
-        channel = WechatComAppChannel()
-        params = web.input()
-        logger.info("[wechatcom] receive params: {}".format(params))
+
+@flask_app.route("/wxcomapp/", methods=["POST"])
+def query_post():
+    channel = WechatComAppChannel()
+    logger.info("[wechatcom] receive params: {}".format(request.args))
+    try:
+        signature = request.args.get("msg_signature")
+        timestamp = request.args.get("timestamp")
+        nonce = request.args.get("nonce")
+        message = channel.crypto.decrypt_message(request.data, signature, timestamp, nonce)
+    except (InvalidSignatureException, InvalidCorpIdException):
+        abort(403)
+    msg = parse_message(message)
+    logger.debug("[wechatcom] receive message: {}, msg= {}".format(message, msg))
+    if msg.type == "event":
+        if msg.event == "subscribe":
+            pass
+            # reply_content = subscribe_msg()
+            # if reply_content:
+            #     reply = create_reply(reply_content, msg).render()
+            #     res = channel.crypto.encrypt_message(reply, nonce, timestamp)
+            #     return res
+    else:
         try:
-            signature = params.msg_signature
-            timestamp = params.timestamp
-            nonce = params.nonce
-            message = channel.crypto.decrypt_message(web.data(), signature, timestamp, nonce)
-        except (InvalidSignatureException, InvalidCorpIdException):
-            raise web.Forbidden()
-        msg = parse_message(message)
-        logger.debug("[wechatcom] receive message: {}, msg= {}".format(message, msg))
-        if msg.type == "event":
-            if msg.event == "subscribe":
-                reply_content = subscribe_msg()
-                if reply_content:
-                    reply = create_reply(reply_content, msg).render()
-                    res = channel.crypto.encrypt_message(reply, nonce, timestamp)
-                    return res
-        else:
-            try:
-                wechatcom_msg = WechatComAppMessage(msg, client=channel.client)
-            except NotImplementedError as e:
-                logger.debug("[wechatcom] " + str(e))
-                return "success"
-            context = channel._compose_context(
-                wechatcom_msg.ctype,
-                wechatcom_msg.content,
-                isgroup=False,
-                msg=wechatcom_msg,
-            )
-            if context:
-                channel.produce(context)
-        return "success"
+            wechatcom_msg = WechatComAppMessage(msg, client=channel.client)
+        except NotImplementedError as e:
+            logger.debug("[wechatcom] " + str(e))
+            return "success"
+        context = channel._compose_context(
+            wechatcom_msg.ctype,
+            wechatcom_msg.content,
+            isgroup=False,
+            msg=wechatcom_msg,
+        )
+        if context:
+            channel.produce(context)
+    return "success"

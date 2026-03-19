@@ -7,6 +7,9 @@ google-genai
 # google legacy SDK ended on November 30, 2025
 google-generativeai
 
+# wechatcom & wechatmp
+wechatpy
+
 # 飞书应用
 lark-oapi
 

@@ -1,7 +1,6 @@
 tiktoken>=0.3.2 # openai calculate token
 
 pre-commit
-web.py
 setuptools>=61.2
 elevenlabs==1.0.3
 
