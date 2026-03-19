@@ -17,7 +17,8 @@ from bridge.reply import Reply, ReplyType
 from common.log import logger
 from common.singleton import singleton
 from common import const
-from common .tool_button import tool_state
+from common.tool_button import tool_state
+from common.model_status import model_state
 from common.tmp_dir import TmpDir
 from config import conf
 from bridge.context import ContextType
@@ -152,25 +153,29 @@ class FeiShuChanel(ChatChannel):
         """
         This function handles image menu
         """
+        image_model = model_state.get_image_model(toUserName)
+        image_model_name = image_model.upper()
         if tool_state.get_image_state(toUserName):
             text = "[INFO]\n图片编辑功能已关闭，可以在消息框输入#image或点击输入框上方的‘其他工具’菜单随时开启。"
         else:
-            text = "[INFO]\n图片编辑功能已开启。"
+            text = f"[INFO]\n图片编辑功能已开启，当前默认模型：{image_model_name}，切换请选择图片模型菜单。"
         tool_state.toggle_imaging(toUserName)
         self.send_text(text, toUserName)
-        logger.info(f'[Lark_{self.IMAGE_MODEL_ID}]{text} requester={toUserName}')
+        logger.info(f'[Lark_{image_model}]{text} requester={toUserName}')
 
     def edit(self, toUserName) -> None:
         """
         This function handles edit menu
         """
+        video_model = model_state.get_video_state(toUserName)
+        video_model_name = video_model.upper()
         if tool_state.get_edit_state(toUserName):
             text = "[INFO]\n视频编辑功能已关闭，可以在消息框输入#edit或点击输入框上方的‘其他工具’菜单随时开启。"
         else:
-            text = "[INFO]\n视频编辑功能已开启。"
+            text = f"[INFO]\n视频编辑功能已开启，当前默认模型：{video_model_name}，切换请选择视频模型菜单。"
         tool_state.toggle_editing(toUserName)
         self.send_text(text, toUserName)
-        logger.info(f'[Lark_{self.VIDEO_MODEL_ID}]{text} requester={toUserName}')
+        logger.info(f'[Lark_{video_model_name}]{text} requester={toUserName}')
 
     def print(self, toUserName) -> None:
         """
