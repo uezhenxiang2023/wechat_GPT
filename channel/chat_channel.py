@@ -311,7 +311,9 @@ class ChatChannel(Channel):
                     }
                     cache_media(file_path, file_part, context)
                 else:
-                    logger.warning(f'[{model.upper()}] query with unsupported file type:{mime_type}')                       
+                    logger.warning(f'[{model.upper()}] query with unsupported file type:{mime_type}')
+            elif context.type == ContextType.IMAGE_CREATE:
+                reply = super().build_image_content(context.content, context)
             elif context.type == ContextType.VIDEO:   
                 # 视频消息，当前无默认逻辑
                 pass

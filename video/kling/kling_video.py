@@ -1,0 +1,2 @@
+class KlingVideoBot():
+    pass

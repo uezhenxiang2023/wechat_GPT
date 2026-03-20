@@ -5,6 +5,8 @@ from common import const
 from common.log import logger
 from common.singleton import singleton
 from config import conf
+from image.image_factory import create_image
+from video.video_factory import create_video
 from translate.factory import create_translator
 from voice.factory import create_voice
 from common.model_status import model_state
@@ -13,28 +15,29 @@ from common.model_status import model_state
 class Bridge(object):
     def __init__(self, session_id=None):
         self.btype = {
-            "chat": const.CHATGPT,
+            "chat": model_state.get_basic_state(session_id),
             "voice_to_text": conf().get("voice_to_text", "openai"),
             "text_to_voice": conf().get("text_to_voice", "google"),
             "translate": conf().get("translate", "baidu"),
+            "prompt_to_image": model_state.get_image_model(session_id),
+            "prompt_to_video": model_state.get_video_state(session_id),
         }
-        model_type = model_state.get_basic_state(session_id) or const.GPT35
-        self.model = model_type.upper()
-        if model_type in ["text-davinci-003"]:
+        self.model_type = self.btype['chat']
+        if self.model_type in ["text-davinci-003"]:
             self.btype["chat"] = const.OPEN_AI
         if conf().get("use_azure_chatgpt", False):
             self.btype["chat"] = const.CHATGPTONAZURE
-        if model_type in ["wenxin", "wenxin-4"]:
+        if self.model_type in ["wenxin", "wenxin-4"]:
             self.btype["chat"] = const.BAIDU
-        if model_type in ["xunfei"]:
+        if self.model_type in ["xunfei"]:
             self.btype["chat"] = const.XUNFEI
-        if model_type in [const.QWEN]:
+        if self.model_type in [const.QWEN]:
             self.btype["chat"] = const.QWEN
-        if model_type in (const.GEMINI_1_PRO_LIST + const.GEMINI_15_PRO_LIST + const.GEMINI_15_FLASH_LIST + const.GEMINI_GENAI_SDK):
+        if self.model_type in (const.GEMINI_1_PRO_LIST + const.GEMINI_15_PRO_LIST + const.GEMINI_15_FLASH_LIST + const.GEMINI_GENAI_SDK):
             self.btype["chat"] = const.GEMINI
-        if model_type in [const.OPEN_AI_ASSISTANT]:
+        if self.model_type in [const.OPEN_AI_ASSISTANT]:
             self.btype["chat"] = const.OPEN_AI_ASSISTANT
-        if model_type in const.DOUAO:
+        if self.model_type in const.DOUAO:
             self.btype["chat"] = const.ARK
 
         if conf().get("use_linkai") and conf().get("linkai_api_key"):
@@ -44,7 +47,7 @@ class Bridge(object):
             if not conf().get("text_to_voice") or conf().get("text_to_voice") in ["openai", const.TTS_1, const.TTS_1_HD]:
                 self.btype["text_to_voice"] = const.LINKAI
 
-        if model_type in const.CLAUDE_SDK:
+        if self.model_type in const.CLAUDE_SDK:
             self.btype["chat"] = const.CLAUDEAI
         self.bots = {}
         self.chat_bots = {}
@@ -59,10 +62,16 @@ class Bridge(object):
                 logger.info("create bot {}[{}] for {}".format(self.btype[typename], conf().get("voice_to_text_model"), typename))
                 self.bots[typename] = create_voice(self.btype[typename])
             elif typename == "chat":
-                logger.info("create bot {}[{}] for {}".format(self.btype[typename], self.model, typename))
+                logger.info("create bot {}[{}] for {}".format(self.btype[typename], self.model_type.upper(), typename))
                 self.bots[typename] = create_bot(self.btype[typename])
             elif typename == "translate":
                 self.bots[typename] = create_translator(self.btype[typename])
+            elif typename == "prompt_to_image":
+                logger.info("create image bot [{}]".format(self.btype[typename]))
+                self.bots[typename] = create_image(self.btype[typename])
+            elif typename == "prompt_to_video":
+                logger.info("create video bot [{}]".format(self.btype[typename]))
+                self.bots[typename] = create_video(self.btype[typename])
         return self.bots[typename]
 
     def get_bot_type(self, typename):
@@ -79,6 +88,12 @@ class Bridge(object):
 
     def fetch_translate(self, text, from_lang="", to_lang="en") -> Reply:
         return self.get_bot("translate").translate(text, from_lang, to_lang)
+    
+    def fetch_image_content(self, prompt, context: Context) -> Reply:
+        return self.get_bot("prompt_to_image").reply(prompt, context)
+
+    def fetch_video_content(self, prompt, context: Context, fps=1) -> Reply:
+        return self.get_bot("prompt_to_video").reply(prompt, context)
 
     def find_chat_bot(self, bot_type: str):
         if self.chat_bots.get(bot_type) is None:

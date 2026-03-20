@@ -42,3 +42,11 @@ class Channel(object):
 
     def build_text_to_voice(self, text) -> Reply:
         return Bridge().fetch_text_to_voice(text)
+    
+    def build_image_content(self, prompt, context: Context = None) -> Reply:
+        session_id = context['session_id']
+        return Bridge(session_id).fetch_image_content(prompt, context)
+
+    def build_video_content(self, prompt, context: Context = None, fps=1) -> Reply:
+        session_id = context['session_id']
+        return Bridge(session_id).fetch_video_content(prompt, context, fps=fps)

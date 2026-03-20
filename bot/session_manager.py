@@ -82,6 +82,51 @@ class SessionManager(object):
         except Exception as e:
             logger.warning("Exception when counting tokens precisely for session: {}".format(str(e)))
         return session
+    
+    def session_inject_media(self, session_id, media_type, data, source_model, mime_type=None, fps=1):
+        """
+        将跨模型生成的媒体结果注入当前 session 上下文
+
+        :param session_id:   目标会话 ID
+        :param media_type:   'image' | 'video'
+        :param data:         base64 编码字符串，或视频链接 URL
+        :param source_model: 生成来源，如 const.KLING_V3_OMNI
+        :param mime_type:    如 'image/jpeg' 'video/mp4'，None 时自动推断
+        :param fps:          视频抽帧频率，取值范围 [0.2, 5]，仅 video 时生效，默认 1
+        """
+        session = self.build_session(session_id)
+
+        if mime_type is None:
+            mime_type = 'video/mp4' if media_type == 'video' else 'image/jpeg'
+
+        if media_type == 'video':
+            media_content = {
+                "type": "video_url",
+                "video_url": {
+                    "url": f"data:{mime_type};base64,{data}",
+                    "fps": fps
+                }
+            }
+        else:
+            media_content = {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime_type};base64,{data}"
+                }
+            }
+
+        media_block = {
+            "role": "assistant",
+            "content": [
+                media_content,
+                {
+                    "type": "text",
+                    "text": f"[由 {source_model} 生成]"
+                }
+            ]
+        }
+
+        session.messages.append(media_block)
 
     def clear_session(self, session_id):
         if session_id in self.sessions:
