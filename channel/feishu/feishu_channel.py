@@ -123,6 +123,38 @@ class FeiShuChanel(ChatChannel):
             self.print(open_id)
         elif event_key == 'breakdowning':
             self.breakdown(open_id)
+        elif event_key == 'SeedDream':
+            model_state.toggle_image_model(open_id, const.DOUBAO_SEEDDREAM_5)
+            self.send_text(f"[INFO]\n图片模型已切换为：{const.DOUBAO_SEEDDREAM_5}", open_id)
+            logger.info(f'[Lark] switch image model to {const.DOUBAO_SEEDDREAM_5}, requester={open_id}')
+        elif event_key == 'KlingImage':
+            model_state.toggle_image_model(open_id, const.KLING_V3_OMNI)
+            self.send_text(f"[INFO]\n图片模型已切换为：{const.KLING_V3_OMNI}", open_id)
+            logger.info(f'[Lark] switch image model to {const.KLING_V3_OMNI}, requester={open_id}')
+        elif event_key == 'NanoBanana':
+            model_state.toggle_image_model(open_id, const.GEMINI_31_FLASH_IMAGE_PREVIEW)
+            self.send_text(f"[INFO]\n图片模型已切换为：{const.GEMINI_31_FLASH_IMAGE_PREVIEW}", open_id)
+            logger.info(f'[Lark] switch image model to {const.GEMINI_31_FLASH_IMAGE_PREVIEW}, requester={open_id}')
+        elif event_key == 'GrokImage':
+            model_state.toggle_image_model(open_id, const.GROK_IMAGINE_IMAGE_PRO)
+            self.send_text(f"[INFO]\n图片模型已切换为：{const.GROK_IMAGINE_IMAGE_PRO}", open_id)
+            logger.info(f'[Lark] switch image model to {const.GROK_IMAGINE_IMAGE_PRO}, requester={open_id}')
+        elif event_key == 'SeedDance':
+            model_state.toggle_video_model(open_id, const.DOUBAO_SEEDDANCE_15_PRO)
+            self.send_text(f"[INFO]\n视频模型已切换为：{const.DOUBAO_SEEDDANCE_15_PRO}", open_id)
+            logger.info(f'[Lark] switch video model to {const.DOUBAO_SEEDDANCE_15_PRO}, requester={open_id}')
+        elif event_key == 'KlingVideo':
+            model_state.toggle_video_model(open_id, const.KLING_V3_OMNI)
+            self.send_text(f"[INFO]\n视频模型已切换为：{const.KLING_V3_OMNI}", open_id)
+            logger.info(f'[Lark] switch video model to {const.KLING_V3_OMNI}, requester={open_id}')
+        elif event_key == 'Veo':
+            model_state.toggle_video_model(open_id, const.VEO_31)
+            self.send_text(f"[INFO]\n视频模型已切换为：{const.VEO_31}", open_id)
+            logger.info(f'[Lark] switch video model to {const.VEO_31}, requester={open_id}')
+        elif event_key == 'GrokVideo':
+            model_state.toggle_video_model(open_id, const.GROK_IMAGINE_VIDEO)
+            self.send_text(f"[INFO]\n视频模型已切换为：{const.GROK_IMAGINE_VIDEO}", open_id)
+            logger.info(f'[Lark] switch video model to {const.GROK_IMAGINE_VIDEO}, requester={open_id}')
 
     def handle_webhook_event(self):
         """Webhook event handler"""

@@ -69,6 +69,8 @@ GEMINI_25_PRO_LIST = [GEMINI_25_PRO_PREVRIEW, GEMINI_25_PRO, GEMINI_25_FLASH_PRE
 GEMINI_3_PRO_IMAGE_PREVIEW = "gemini-3-pro-image-preview"
 GEMINI_3_FLASH_PREVIEW = "gemini-3-flash-preview"
 GEMINI_31_FLASH_LITE_PREVIEW = "gemini-3.1-flash-lite-preview"
+GEMINI_31_FLASH_IMAGE_PREVIEW = "gemini-3.1-flash-image-preview"
+GEMINI_31_PRO_PREVIEW = "gemini-3.1-pro-preview"
 VEO_31 = 'veo-3.1-generate-preview'
 VEO_31_FAST = 'veo-3.1-fast-generate-preview'
 GEMINI_GENAI_SDK = [
@@ -82,8 +84,10 @@ GEMINI_GENAI_SDK = [
     GEMINI_25_FLASH, 
     GEMINI_25_FLASH_IMAGE,
     GEMINI_3_PRO_IMAGE_PREVIEW,
+    GEMINI_31_PRO_PREVIEW,
     GEMINI_3_FLASH_PREVIEW,
     GEMINI_31_FLASH_LITE_PREVIEW,
+    GEMINI_31_FLASH_IMAGE_PREVIEW,
     VEO_31,
     VEO_31_FAST
 ]
@@ -92,8 +96,8 @@ DOUBAO_SEED_16 = "doubao-seed-1-6-251015"
 DOUBAO_SEED_18 = "doubao-seed-1-8-251228"
 DOUBAO_SEED_20 = "doubao-seed-2-0-pro-260215"
 DOUBAO_SEEDDREAM_4 = "doubao-seedream-4-0-250828"
-DOUBAO_SEEDDREAM_45 ='doubao-seedream-4-5-251128'
-DOUBAO_SEEDDREAM_5 ='doubao-seedream-5-0-260128'
+DOUBAO_SEEDDREAM_45 = "doubao-seedream-4-5-251128"
+DOUBAO_SEEDDREAM_5 = "doubao-seedream-5-0-260128"
 DOUBAO_SEEDDANCE_10_PRO = "doubao-seedance-1-0-pro-250528"
 DOUBAO_SEEDDANCE_10_PRO_FAST = "doubao-seedance-1-0-pro-fast-251015"
 DOUBAO_SEEDANCE_10_LITE_I2V = "doubao-seedance-1-0-lite-i2v-250428"
@@ -115,6 +119,11 @@ DOUAO = [
     DOUBAO_SEED_20
 ]
 DOUBAO_BOT = [DOUBAO_BOT_16]
+
+KLING_V3_OMNI = "kling-v3-omni"
+
+GROK_IMAGINE_IMAGE_PRO = "grok-imagine-image-pro"
+GROK_IMAGINE_VIDEO = "grok-imagine-video"
 
 # switch model in cmd
 MODEL_LIST = [
