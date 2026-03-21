@@ -1,7 +1,10 @@
+import io
 import time
 import jwt
 import requests
 import base64
+
+from PIL import Image
 
 from bot.bot import Bot
 from bridge.context import Context
@@ -71,9 +74,21 @@ class KlingImageBot(Bot):
 
             # 参考图捕获
             file_cache = memory.USER_IMAGE_CACHE.get(session_id)
-            if file_cache:
+            session_images = []
+            if not file_cache:
+                session_images = self._get_image_from_session(session_id)
+                if session_images:
+                    payload["aspect_ratio"] = self._get_aspect_ratio_from_base64(session_images[0])
+                    if endpoint == self.ENDPOINT_OMNI:
+                        payload["image_list"] = [{"image": url.split(",", 1)[1]} for url in session_images]
+                    else:
+                        payload["image"] = session_images[0].split(",", 1)[1]
+                    logger.info(f"[Kling] 从 session 历史取参考图, count={len(session_images)}")
+            elif file_cache:
                 paths = file_cache.get("path", [])
                 if paths:
+                    # 图生图：根据参考图计算比例
+                    payload["aspect_ratio"] = self.aspect_ratio_calculator(paths)
                     if endpoint == self.ENDPOINT_OMNI:
                         # omni-image: image_list，支持多图
                         image_list = []
@@ -215,3 +230,65 @@ class KlingImageBot(Bot):
 
         logger.error(f"[Kling] 任务超时, task_id={task_id}")
         return None, "任务超时，请稍后重试"
+
+    def aspect_ratio_calculator(self, paths: list) -> str:
+        """根据参考图尺寸推断最佳宽高比"""
+        ratio_map = {
+            1.0:  "1:1",
+            1.33: "4:3",
+            0.75: "3:4",
+            1.78: "16:9",
+            0.56: "9:16",
+            1.5:  "3:2",
+            0.67: "2:3",
+            2.33: "21:9"
+        }
+
+        # 如果内存中有多图获，取所有图片中最大尺寸的宽高比
+        sizes = []
+        for p in paths:
+            img = Image.open(p)
+            sizes.append(img.size)  # (width, height)
+        best = sorted(sizes, key=lambda x: x[0] * x[1], reverse=True)[0]
+        ratio = round(best[0] / best[1], 2)
+
+        # 跟ratio_map中的预置参数比较，取最相似的值
+        closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
+        return ratio_map[closest]
+
+    def _get_image_from_session(self, session_id: str) -> list:
+        """图片缓存过期但在会话历史里，从 session 历史消息中提取最近一条用户图片"""
+        session = get_ark_sessions().build_session(session_id)
+        for msg in reversed(session.messages):
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            images = [
+                item["image_url"]["url"]
+                for item in content
+                if item.get("type") == "image_url"
+            ]
+            if images:
+                return images  # 返回 base64 url 列表
+        return []
+    
+    def _get_aspect_ratio_from_base64(self, b64_url: str) -> str:
+        """从 base64 图片 url 推断宽高比"""
+        b64_data = b64_url.split(",", 1)[1]
+        img_bytes = base64.b64decode(b64_data)
+        img = Image.open(io.BytesIO(img_bytes))
+        ratio = round(img.size[0] / img.size[1], 2)
+        ratio_map = {
+            1.0: "1:1", 
+            1.33: "4:3", 
+            0.75: "3:4",
+            1.78: "16:9", 
+            0.56: "9:16", 
+            1.5: "3:2",
+            0.67: "2:3", 
+            2.33: "21:9"
+        }
+        closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
+        return ratio_map[closest]
