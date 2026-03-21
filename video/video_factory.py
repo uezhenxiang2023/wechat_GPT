@@ -6,7 +6,7 @@ def create_video(video_type):
     :param video_type: video_bot type code
     :return: video_bot instance
     """
-    if video_type == const.KLING_V3_OMNI:
+    if video_type in const.KLING_VIDEO_LIST:
         from video.kling.kling_video import KlingVideoBot
         return KlingVideoBot()
     raise RuntimeError(f"Unsupported image model: {video_type}")

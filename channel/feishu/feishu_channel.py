@@ -36,6 +36,8 @@ class FeiShuChanel(ChatChannel):
         super().__init__()
         self.image_model = conf().get('text_to_image')
         self.IMAGE_MODEL_ID = self.image_model.upper()
+        self.kling_image_model = conf().get('kling_image_model')
+        self.kling_video_model = conf().get('kling_video_model')
         self.video_model = conf().get('text_to_video')
         self.VIDEO_MODEL_ID = self.video_model.upper()
         self.app_id = conf().get('feishu_app_id')
@@ -128,9 +130,9 @@ class FeiShuChanel(ChatChannel):
             self.send_text(f"[INFO]\n图片模型已切换为：{const.DOUBAO_SEEDDREAM_5}", open_id)
             logger.info(f'[Lark] switch image model to {const.DOUBAO_SEEDDREAM_5}, requester={open_id}')
         elif event_key == 'KlingImage':
-            model_state.toggle_image_model(open_id, const.KLING_V3_OMNI)
-            self.send_text(f"[INFO]\n图片模型已切换为：{const.KLING_V3_OMNI}", open_id)
-            logger.info(f'[Lark] switch image model to {const.KLING_V3_OMNI}, requester={open_id}')
+            model_state.toggle_image_model(open_id, self.kling_image_model)
+            self.send_text(f"[INFO]\n图片模型已切换为：{self.kling_image_model}", open_id)
+            logger.info(f'[Lark] switch image model to {self.kling_image_model.upper()}, requester={open_id}')
         elif event_key == 'NanoBanana':
             model_state.toggle_image_model(open_id, const.GEMINI_31_FLASH_IMAGE_PREVIEW)
             self.send_text(f"[INFO]\n图片模型已切换为：{const.GEMINI_31_FLASH_IMAGE_PREVIEW}", open_id)
@@ -144,9 +146,9 @@ class FeiShuChanel(ChatChannel):
             self.send_text(f"[INFO]\n视频模型已切换为：{const.DOUBAO_SEEDDANCE_15_PRO}", open_id)
             logger.info(f'[Lark] switch video model to {const.DOUBAO_SEEDDANCE_15_PRO}, requester={open_id}')
         elif event_key == 'KlingVideo':
-            model_state.toggle_video_model(open_id, const.KLING_V3_OMNI)
-            self.send_text(f"[INFO]\n视频模型已切换为：{const.KLING_V3_OMNI}", open_id)
-            logger.info(f'[Lark] switch video model to {const.KLING_V3_OMNI}, requester={open_id}')
+            model_state.toggle_video_model(open_id, self.kling_video_model)
+            self.send_text(f"[INFO]\n视频模型已切换为：{self.kling_video_model}", open_id)
+            logger.info(f'[Lark] switch video model to {self.kling_video_model.upper()}, requester={open_id}')
         elif event_key == 'Veo':
             model_state.toggle_video_model(open_id, const.VEO_31)
             self.send_text(f"[INFO]\n视频模型已切换为：{const.VEO_31}", open_id)

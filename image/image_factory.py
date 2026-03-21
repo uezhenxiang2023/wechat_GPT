@@ -6,7 +6,7 @@ def create_image(image_type):
     :param image_type: image_bot type code
     :return: image_bot instance
     """
-    if image_type == const.KLING_V3_OMNI:
+    if image_type in (const.KLING_IMAGE_LIST + const.KLING_OMNI_IMAGE_LIST):
         from image.kling.kling_image import KlingImageBot
         return KlingImageBot()
     raise RuntimeError(f"Unsupported image model: {image_type}")

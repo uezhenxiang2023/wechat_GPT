@@ -40,6 +40,7 @@ available_setting = {
     "image_create_prefix": ["画", "看", "找"],  # 开启图片回复的前缀
     "concurrency_in_session": 1,  # 同一会话最多有多少条消息在处理中，大于1可能乱序
     "image_create_size": "256x256",  # 图片大小,可选有 256x256, 512x512, 1024x1024 (dall-e-3默认为1024x1024)
+    "image_aspect_ratio":"16:9", # 图片长宽比例，可选有16:9、9:16、1:1、4:3、3:4、3:2、2:3、21:9、auto
     "text_to_video": "doubao-seedance-1-0-pro-250528", # 视频编辑模型
     "duration_seconds": 4, # 视频默认时长
     "video_resolution": "720p", # 视频默认分辨率 
@@ -180,6 +181,12 @@ available_setting = {
     "telegram_bot_token": "",  # telegram bot token
     "telegram_proxy_url": "",  # telegram bot proxy url
     "stream": False,           # 是否启用流式响应，目前支持 claude bot + telegram 通道
+
+    # 可灵API配置
+    "kling_access_key": "", # 身份密钥
+    "kling_secret_key": "",  # 授权密钥
+    "kling_image_model": "", # 可灵图片模型，参考common/const.py
+    "kling_video_model": "", # 可灵视频模型，参考common/const.py
 }
 
 

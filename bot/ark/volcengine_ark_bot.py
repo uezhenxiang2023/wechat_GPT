@@ -23,6 +23,8 @@ from common.tool_button import tool_state
 from common.model_status import model_state
 from common.video_status import video_state
 
+_ark_sessions = SessionManager(ChatGPTSession, model=const.DOUBAO_SEED_16 or "gpt-3.5-turbo")
+
 class VolcengineArkBot(Bot):
 
     def __init__(self):
@@ -30,7 +32,7 @@ class VolcengineArkBot(Bot):
         self.api_key = conf().get("ark_api_key")
         self.image_size = conf().get('image_create_size')
         self.system_prompt = conf().get("character_desc") 
-        self.sessions = SessionManager(ChatGPTSession, model=const.DOUBAO_SEED_16 or "gpt-3.5-turbo") # 复用chatGPT的token计算方式
+        self.sessions = _ark_sessions
 
         self.client = Ark(
             api_key=self.api_key

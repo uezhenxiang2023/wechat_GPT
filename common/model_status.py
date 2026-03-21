@@ -26,14 +26,14 @@ class UserModelState:
     def toggle_image_model(self, user_id, image_model):
         """切换用户的图像模型状态"""
         state = self.__get_model_state__(user_id)
-        state['test_to_image'] = image_model
-        return state['test_to_image']
+        state['text_to_image'] = image_model
+        return state['text_to_image']
     
     def toggle_voice_model(self, user_id, voice_model):
         """切换用户的语音模型状态"""
         state = self.__get_model_state__(user_id)
-        state['test_to_voice'] = voice_model
-        return state['test_to_voice']
+        state['text_to_voice'] = voice_model
+        return state['text_to_voice']
     
     def toggle_video_model(self, user_id, video_model):
         """切换用户的视频模型状态"""

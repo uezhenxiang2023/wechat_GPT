@@ -57,8 +57,13 @@ def get_path_suffix(path):
     path = urlparse(path).path
     return os.path.splitext(path)[-1].lstrip('.')
 
-def url_to_base64(self, url: str) -> str:
+def url_to_base64(url: str) -> str:
         """下载 URL 内容并转为 base64 字符串"""
         response = requests.get(url, timeout=30)
         response.raise_for_status()
         return base64.b64encode(response.content).decode('utf-8')
+
+# utils.py
+def get_ark_sessions():
+    from bot.ark.volcengine_ark_bot import _ark_sessions
+    return _ark_sessions

@@ -18,10 +18,9 @@ class Bridge(object):
             "chat": model_state.get_basic_state(session_id),
             "voice_to_text": conf().get("voice_to_text", "openai"),
             "text_to_voice": conf().get("text_to_voice", "google"),
-            "translate": conf().get("translate", "baidu"),
-            "prompt_to_image": model_state.get_image_model(session_id),
-            "prompt_to_video": model_state.get_video_state(session_id),
+            "translate": conf().get("translate", "baidu")
         }
+        self.session_id = session_id
         self.model_type = self.btype['chat']
         if self.model_type in ["text-davinci-003"]:
             self.btype["chat"] = const.OPEN_AI
@@ -53,6 +52,13 @@ class Bridge(object):
         self.chat_bots = {}
 
     def get_bot(self, typename):
+        # 图片/视频每次都实时取 model_state，不走缓存
+        if typename == "prompt_to_image":
+            model = model_state.get_image_model(self.session_id)
+            return create_image(model)
+        elif typename == "prompt_to_video":
+            model = model_state.get_video_state(self.session_id)
+            return create_video(model)
         if self.bots.get(typename) is None:
             #logger.info("create bot {}[{}] for {}".format(self.btype[typename], self.model, typename))
             if typename == "text_to_voice":
@@ -66,12 +72,6 @@ class Bridge(object):
                 self.bots[typename] = create_bot(self.btype[typename])
             elif typename == "translate":
                 self.bots[typename] = create_translator(self.btype[typename])
-            elif typename == "prompt_to_image":
-                logger.info("create image bot [{}]".format(self.btype[typename]))
-                self.bots[typename] = create_image(self.btype[typename])
-            elif typename == "prompt_to_video":
-                logger.info("create video bot [{}]".format(self.btype[typename]))
-                self.bots[typename] = create_video(self.btype[typename])
         return self.bots[typename]
 
     def get_bot_type(self, typename):

@@ -11,7 +11,7 @@ GEMINI = "gemini"
 OPEN_AI_ASSISTANT = 'OpenAIAssistant'
 ARK = 'ark'
 
-# model
+# GPT
 GPT35 = "gpt-3.5-turbo"
 GPT4 = "gpt-4"
 GPT4_TURBO_PREVIEW = "gpt-4-turbo-preview"
@@ -25,6 +25,8 @@ O1_MINI = "o1-mini"
 WHISPER_1 = "whisper-1"
 TTS_1 = "tts-1"
 TTS_1_HD = "tts-1-hd"
+
+# Claude
 CLAUDE_SONNET_46 = "claude-sonnet-4-6"
 CLAUDE_OPUS_46 = "claude-opus-4-6"
 CLAUDE_HAIKU_45 = "claude-haiku-4-5-20251001"
@@ -39,6 +41,9 @@ CLAUDE_3_LIST = [CLAUDE_3_HAIKU, CLAUDE_3_SONNET, CLAUDE_3_OPUS]
 CLAUDE_35_LIST = [CLAUDE_35_SONNET]
 CLAUDE_45_LIST = [CLAUDE_HAIKU_45]
 CLAUDE_46_LIST = [CLAUDE_SONNET_46, CLAUDE_OPUS_46]
+CLAUDE_SDK = CLAUDE_2_LIST + CLAUDE_3_LIST + CLAUDE_35_LIST + CLAUDE_45_LIST + CLAUDE_46_LIST
+
+# Gemini
 GEMINI_1_PRO_LATEST_VERSION = "gemini-1.0-pro-latest"
 GEMINI_1_LATEST_STABLE_VERSION = "gemini-1.0-pro"
 GEMINI_1_STABLE_VERSION = "gemini-1.0-pro-001"
@@ -91,7 +96,9 @@ GEMINI_GENAI_SDK = [
     VEO_31,
     VEO_31_FAST
 ]
-CLAUDE_SDK = CLAUDE_2_LIST + CLAUDE_3_LIST + CLAUDE_35_LIST + CLAUDE_45_LIST + CLAUDE_46_LIST 
+
+
+# Doubao
 DOUBAO_SEED_16 = "doubao-seed-1-6-251015"
 DOUBAO_SEED_18 = "doubao-seed-1-8-251228"
 DOUBAO_SEED_20 = "doubao-seed-2-0-pro-260215"
@@ -120,8 +127,33 @@ DOUAO = [
 ]
 DOUBAO_BOT = [DOUBAO_BOT_16]
 
+# Kling_image
+KLING_V1 = "kling-v1"
+KLING_V1_5 = "kling-v1-5"
+KLING_V2 = "kling-v2"
+KLING_V2_NEW = "kling-v2-new"
+KLING_V2_1 = "kling-v2-1"
+KLING_V3 = "kling-v3"
+KLING_IMAGE_O1 = "kling-image-o1"
+
+# Kling_video
+KLING_V1 = "kling-v1"
+KLING_V1_6 = "kling-v1-6"
+KLING_V2_MASTER = "kling-v2-master"
+KLING_V2_1_MASTER = "kling-v2-1-master"
+KLING_V2_5_TURBO = "kling-v2-5-turbo"
+KLING_V2_6 ="kling-v2-6"
+KLING_V3 = "kling-v3"
+
+# Kling omni
+KLING_VIDEO_O1 = "kling-video-o1"
 KLING_V3_OMNI = "kling-v3-omni"
 
+KLING_IMAGE_LIST = [KLING_V1, KLING_V1_5, KLING_V2, KLING_V2_NEW, KLING_V2_1, KLING_V3]
+KLING_OMNI_IMAGE_LIST = [KLING_IMAGE_O1, KLING_V3_OMNI]
+KLING_VIDEO_LIST = [KLING_VIDEO_O1, KLING_V3_OMNI]
+
+# Grok
 GROK_IMAGINE_IMAGE_PRO = "grok-imagine-image-pro"
 GROK_IMAGINE_VIDEO = "grok-imagine-video"
 
