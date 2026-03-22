@@ -87,6 +87,16 @@ COMMANDS = {
         "alias": ["breakdown", "顺分场表"],
         "desc": "开启顺分场表功能",
     },
+    "image_model": {
+    "alias": ["image_model", "图片模型"],
+    "args": ["模型名"],
+    "desc": "查看和设置图片模型",
+    },
+    "video_model": {
+        "alias": ["video_model", "视频模型"],
+        "args": ["模型名"],
+        "desc": "查看和设置视频模型",
+    },
     "duration": {
         "alias": ["duration", "时长"],
         "desc": "生成视频的长度(秒)",
@@ -420,6 +430,41 @@ class Godcmd(Plugin):
                         ok, result = True, "你的视频分辨率已设置为" + args[0]  
                     else:
                         ok, result = False, "请发送 #resolution 视频分辨率参数，可选数值为720p、1080p。例如#resolution 1080p"
+                elif cmd == "image_model":
+                    if not isadmin and not self.is_admin_in_group(e_context["context"]):
+                        ok, result = False, "需要管理员权限执行"
+                    elif len(args) == 0:
+                        image_model = model_state.get_image_model(user)
+                        ok, result = True, "当前图片模型为：" + str(image_model)
+                    elif len(args) == 1:
+                        available = const.KLING_IMAGE_LIST + const.KLING_OMNI_IMAGE_LIST + [
+                            const.DOUBAO_SEEDDREAM_5, const.GEMINI_31_FLASH_IMAGE_PREVIEW, const.GROK_IMAGINE_IMAGE_PRO
+                        ]
+                        if args[0] not in available:
+                            ok, result = False, "图片模型不存在，可选：\n" + "\n".join(available)
+                        else:
+                            model_state.toggle_image_model(user, args[0])
+                            ok, result = True, "图片模型已切换为：" + args[0]
+                    else:
+                        ok, result = False, "请发送 #image_model 加模型名，或直接 #image_model 查看当前模型"
+
+                elif cmd == "video_model":
+                    if not isadmin and not self.is_admin_in_group(e_context["context"]):
+                        ok, result = False, "需要管理员权限执行"
+                    elif len(args) == 0:
+                        video_model = model_state.get_video_state(user)
+                        ok, result = True, "当前视频模型为：" + str(video_model)
+                    elif len(args) == 1:
+                        available = const.KLING_VIDEO_LIST + [
+                            const.DOUBAO_SEEDDANCE_15_PRO, const.VEO_31, const.GROK_IMAGINE_VIDEO
+                        ]
+                        if args[0] not in available:
+                            ok, result = False, "视频模型不存在，可选：\n" + "\n".join(available)
+                        else:
+                            model_state.toggle_video_model(user, args[0])
+                            ok, result = True, "视频模型已切换为：" + args[0]
+                    else:
+                        ok, result = False, "请发送 #video_model 加模型名，或直接 #video_model 查看当前模型"
                 logger.debug("[Godcmd] command: %s by %s" % (cmd, user))
             elif any(cmd in info["alias"] for info in ADMIN_COMMANDS.values()):
                 if isadmin:

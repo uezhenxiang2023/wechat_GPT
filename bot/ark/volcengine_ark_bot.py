@@ -14,7 +14,7 @@ from volcenginesdkarkruntime import Ark
 from config import conf
 from bot.bot import Bot
 from bot.session_manager import SessionManager
-from bot.chatgpt.chat_gpt_session import ChatGPTSession
+from bot.ark.volcengine_ark_session import VolcengineArkSession
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
 from common import const, memory
@@ -23,7 +23,7 @@ from common.tool_button import tool_state
 from common.model_status import model_state
 from common.video_status import video_state
 
-_ark_sessions = SessionManager(ChatGPTSession, model=const.DOUBAO_SEED_16 or "gpt-3.5-turbo")
+_ark_sessions = SessionManager(VolcengineArkSession, model=const.DOUBAO_SEED_20)
 
 class VolcengineArkBot(Bot):
 

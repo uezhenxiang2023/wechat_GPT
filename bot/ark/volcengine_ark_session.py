@@ -1,10 +1,11 @@
 from bot.session_manager import Session
 
 
-class ClaudeAiSession(Session):
-    def __init__(self, session_id, system_prompt=None, model="claude-haiku-4-5-20251001"):
+class VolcengineArkSession(Session):
+    def __init__(self, session_id, system_prompt=None, model="doubao-seed-1-6-251015"):
         super().__init__(session_id, system_prompt)
         self.model = model
+        self.reset()
 
     def calc_tokens(self):
         """
@@ -20,12 +21,10 @@ class ClaudeAiSession(Session):
                 for block in content:
                     if block.get("type") == "text":
                         total += len(block.get("text", "")) // 2
-                    elif block.get("type") == "image":
-                        # 图片固定计一个较大的 token 估算值
+                    elif block.get("type") == "image_url":
                         total += 1500
-                    elif block.get("type") == "document":
-                        # PDF document block，按 base64 长度粗估
-                        total += len(block.get("source", {}).get("data", "")) // 4
+                    elif block.get("type") == "video_url":
+                        total += 8000
         return total
 
     def discard_exceeding(self, max_tokens=None, cur_tokens=None):
@@ -42,7 +41,6 @@ class ClaudeAiSession(Session):
             if total <= max_tokens:
                 return total
 
-            # 找到第一条非 system 消息的索引
             first_non_system = next(
                 (i for i, m in enumerate(self.messages) if m.get("role") != "system"),
                 None
@@ -50,7 +48,6 @@ class ClaudeAiSession(Session):
             if first_non_system is None:
                 return total
 
-            # 至少保留最后一条 user 消息，不能再丢了
             remaining_non_system = [
                 m for m in self.messages if m.get("role") != "system"
             ]

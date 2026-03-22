@@ -3,6 +3,7 @@ import time
 import jwt
 import requests
 import base64
+import re
 
 from PIL import Image
 
@@ -71,6 +72,11 @@ class KlingImageBot(Bot):
                 "n": 1,
                 "aspect_ratio": self.image_aspect_ratio
             }
+            # 用户 prompt 中的比例优先级最高
+            prompt_ratio = self._parse_aspect_ratio_from_prompt(query)
+            if prompt_ratio:
+                payload["aspect_ratio"] = prompt_ratio
+                logger.info(f"[Kling] 从 prompt 中解析到比例: {prompt_ratio}")
 
             # 参考图捕获
             file_cache = memory.USER_IMAGE_CACHE.get(session_id)
@@ -78,7 +84,9 @@ class KlingImageBot(Bot):
             if not file_cache:
                 session_images = self._get_image_from_session(session_id)
                 if session_images:
-                    payload["aspect_ratio"] = self._get_aspect_ratio_from_base64(session_images[0])
+                    if not prompt_ratio:
+                        # 如果用户没设置图片比例，则自动从缓存图片的比例
+                        payload["aspect_ratio"] = self._get_aspect_ratio_from_base64(session_images[0])
                     if endpoint == self.ENDPOINT_OMNI:
                         payload["image_list"] = [{"image": url.split(",", 1)[1]} for url in session_images]
                     else:
@@ -87,8 +95,9 @@ class KlingImageBot(Bot):
             elif file_cache:
                 paths = file_cache.get("path", [])
                 if paths:
-                    # 图生图：根据参考图计算比例
-                    payload["aspect_ratio"] = self.aspect_ratio_calculator(paths)
+                    # 如果用户没设置图片比例，则自动从缓存图片的比例
+                    if not prompt_ratio:
+                        payload["aspect_ratio"] = self.aspect_ratio_calculator(paths)
                     if endpoint == self.ENDPOINT_OMNI:
                         # omni-image: image_list，支持多图
                         image_list = []
@@ -291,4 +300,35 @@ class KlingImageBot(Bot):
             2.33: "21:9"
         }
         closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
+        return ratio_map[closest]
+
+    def _parse_aspect_ratio_from_prompt(self, prompt: str) -> str | None:
+        ratio_map = {
+            1.0: "1:1", 
+            1.33: "4:3", 
+            0.75: "3:4",
+            1.78: "16:9", 
+            0.56: "9:16", 
+            1.5: "3:2",
+            0.67: "2:3", 
+            2.33: "21:9"
+        }
+        # 先匹配小数格式：1.78 / 2.39 / 0.75 等
+        decimal_pattern = r'(?<!\d)(\d+\.\d+)(?!\d)'
+        for match in re.finditer(decimal_pattern, prompt):
+            ratio = round(float(match.group(1)), 2)
+            closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
+            if abs(closest - ratio) <= 0.15:  # 容差比整数比例更严格
+                return ratio_map[closest]
+
+        # 再匹配整数比格式：16:9 / 16比9 / 16：9
+        pattern = r'(\d+)\s*(?::|：|比)\s*(\d+)'
+        match = re.search(pattern, prompt)
+        if not match:
+            return None
+        w, h = int(match.group(1)), int(match.group(2))
+        ratio = round(w / h, 2)
+        closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
+        if abs(closest - ratio) > 0.3:
+            return None
         return ratio_map[closest]
