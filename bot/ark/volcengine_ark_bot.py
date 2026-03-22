@@ -73,7 +73,7 @@ class VolcengineArkBot(Bot):
                     memory.USER_IMAGE_CACHE.pop(session_id)
                     
                 session = self.sessions.session_query(query, session_id)
-                client_attr = 'bot_chat' if self.model in const.DOUBAO_BOT else 'chat'
+                client_attr = 'bot_chat' if self.model in const.DOUBAO_BOT_LIST else 'chat'
                 # 如果调用bot,去掉messages列表中的system prompt
                 if client_attr == 'bot_chat' and session.messages[0].get('role') == 'system':
                     session.messages.pop(0)

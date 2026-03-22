@@ -6,6 +6,7 @@
 """
 
 # -*- coding=utf-8 -*-
+import cv2
 import io, json, os, uuid, requests, threading, re
 from io import BytesIO
 from flask import Flask
@@ -641,7 +642,7 @@ class FeiShuChanel(ChatChannel):
         # 创建client
         client = self.client
         # 构造请求对象
-        duration = video_duration * 1000
+        duration = int(video_duration * 1000)
         filename = os.path.basename(video_path)
         name, ext = os.path.splitext(filename)
         ext = ext.lstrip('.')
@@ -715,11 +716,14 @@ class FeiShuChanel(ChatChannel):
         # 创建client
         client = self.client
         file_key = self.create_video(video_duration, video_path)
-        content = json.dumps(
-            {
-                "file_key": file_key
-            }
-        )
+
+        # 截取第一帧作为封面
+        image_key = self._extract_video_cover(video_path)
+
+        content_dict = {"file_key": file_key}
+        if image_key:
+            content_dict["image_key"] = image_key
+        content = json.dumps(content_dict)
 
         # 生成唯一的UUID
         request_uuid = str(uuid.uuid4())
@@ -757,3 +761,20 @@ class FeiShuChanel(ChatChannel):
         # 如果文件名包含查询参数，只取问号前的部分
         filename = filename.split('?')[0]
         return filename
+    
+    def _extract_video_cover(self, video_path: str) -> str | None:
+        """截取视频第一帧，上传飞书返回 image_key"""
+        try:
+            cap = cv2.VideoCapture(video_path)
+            ret, frame = cap.read()
+            cap.release()
+            if not ret:
+                return None
+            cover_path = video_path + '_cover.jpg'
+            cv2.imwrite(cover_path, frame)
+            image_key = self.create_image(cover_path)
+            os.remove(cover_path)
+            return image_key
+        except Exception as e:
+            logger.warning(f"[Lark] extract video cover failed: {e}")
+            return None

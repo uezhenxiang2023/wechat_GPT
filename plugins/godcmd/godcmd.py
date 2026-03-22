@@ -437,9 +437,7 @@ class Godcmd(Plugin):
                         image_model = model_state.get_image_model(user)
                         ok, result = True, "当前图片模型为：" + str(image_model)
                     elif len(args) == 1:
-                        available = const.KLING_IMAGE_LIST + const.KLING_OMNI_IMAGE_LIST + [
-                            const.DOUBAO_SEEDDREAM_5, const.GEMINI_31_FLASH_IMAGE_PREVIEW, const.GROK_IMAGINE_IMAGE_PRO
-                        ]
+                        available = const.KLING_IMAGE_LIST + const.DOUBAO_SEEDREAM_LIST + const.GOOGLE_IMAGE_LIST + const.GROK_IMAGE_LIST
                         if args[0] not in available:
                             ok, result = False, "图片模型不存在，可选：\n" + "\n".join(available)
                         else:
@@ -455,9 +453,7 @@ class Godcmd(Plugin):
                         video_model = model_state.get_video_state(user)
                         ok, result = True, "当前视频模型为：" + str(video_model)
                     elif len(args) == 1:
-                        available = const.KLING_VIDEO_LIST + [
-                            const.DOUBAO_SEEDDANCE_15_PRO, const.VEO_31, const.GROK_IMAGINE_VIDEO
-                        ]
+                        available = const.KLING_VIDEO_LIST + const.DOUBAO_SEEDANCE_LIST + const.VEO_LIST + const.GROK_VIDEO_LIST  
                         if args[0] not in available:
                             ok, result = False, "视频模型不存在，可选：\n" + "\n".join(available)
                         else:

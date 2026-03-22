@@ -38,6 +38,7 @@ available_setting = {
     "text_to_image": "dall-e-2",  # 图片生成模型，可选 dall-e-2, dall-e-3，gemini-2.0-flash-preview-image-generation, gemini-2.5-flash-image-preview
     "image_proxy": True,  # 是否需要图片代理，国内访问LinkAI时需要
     "image_create_prefix": ["画", "看", "找"],  # 开启图片回复的前缀
+    "video_create_prefix": ["//"], # 开启视频回复的前缀
     "concurrency_in_session": 1,  # 同一会话最多有多少条消息在处理中，大于1可能乱序
     "image_create_size": "256x256",  # 图片大小,可选有 256x256, 512x512, 1024x1024 (dall-e-3默认为1024x1024)
     "image_aspect_ratio":"16:9", # 图片长宽比例，可选有16:9、9:16、1:1、4:3、3:4、3:2、2:3、21:9、auto
@@ -187,6 +188,9 @@ available_setting = {
     "kling_secret_key": "",  # 授权密钥
     "kling_image_model": "", # 可灵图片模型，参考common/const.py
     "kling_video_model": "", # 可灵视频模型，参考common/const.py
+
+    # 视频生成时是否同时生成声音
+    "video_sound": "off",  # on/off
 }
 
 

@@ -154,8 +154,12 @@ class ChatChannel(Channel):
                 else:
                     return None
             content = content.strip()
+            video_match_prefix = check_prefix(content, conf().get("video_create_prefix", ["//"])) 
             img_match_prefix = check_prefix(content, conf().get("image_create_prefix"))
-            if img_match_prefix:
+            if video_match_prefix:
+                content = content.replace(video_match_prefix, "", 1)
+                context.type = ContextType.VIDEO_CREATE
+            elif img_match_prefix:
                 content = content.replace(img_match_prefix, "", 1)
                 context.type = ContextType.IMAGE_CREATE
             else:
@@ -314,6 +318,8 @@ class ChatChannel(Channel):
                     logger.warning(f'[{model.upper()}] query with unsupported file type:{mime_type}')
             elif context.type == ContextType.IMAGE_CREATE:
                 reply = super().build_image_content(context.content, context)
+            elif context.type == ContextType.VIDEO_CREATE:
+                reply = super().build_video_content(context.content, context)
             elif context.type == ContextType.VIDEO:   
                 # 视频消息，当前无默认逻辑
                 pass

@@ -30,3 +30,6 @@ nest_asyncio
 #install plugin
 dulwich
 flask
+
+# opencv
+opencv-python
