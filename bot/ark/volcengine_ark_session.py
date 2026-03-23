@@ -27,17 +27,15 @@ class VolcengineArkSession(Session):
                         total += 8000
         return total
 
-    def discard_exceeding(self, max_tokens=None, cur_tokens=None):
+    def discard_exceeding(self, max_tokens, cur_tokens=None):
         """
         当历史消息超出 max_tokens 时，从最早的非 system 消息开始丢弃，
         直到 token 数满足要求。
         保证至少保留最后一轮 user 消息，不会把当前消息丢掉。
         """
-        if max_tokens is None:
-            return self.calc_tokens()
-
+        # 第一轮用传入的准确值，后续截断后用估算值
+        total = cur_tokens if cur_tokens is not None else self.calc_tokens()
         while True:
-            total = self.calc_tokens()
             if total <= max_tokens:
                 return total
 
@@ -55,3 +53,4 @@ class VolcengineArkSession(Session):
                 return total
 
             self.messages.pop(first_non_system)
+            total = self.calc_tokens()  # 截断后重新估算
