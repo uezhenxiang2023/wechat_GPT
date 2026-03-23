@@ -75,6 +75,8 @@ class SessionManager(object):
     def session_reply(self, reply, session_id, total_tokens=None):
         session = self.build_session(session_id)
         session.add_reply(reply)
+        if total_tokens is not None and hasattr(session, 'last_total_tokens'):
+            session.last_total_tokens = total_tokens
         try:
             max_tokens = conf().get("conversation_max_tokens", 1000)
             tokens_cnt = session.discard_exceeding(max_tokens, total_tokens)

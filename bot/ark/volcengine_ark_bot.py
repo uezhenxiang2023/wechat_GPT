@@ -84,6 +84,7 @@ class VolcengineArkBot(Bot):
                 )
                 reply_text = completion.choices[0].message.content
                 total_tokens = completion.usage.total_tokens if client_attr == 'chat' else completion.bot_usage.model_usage[0].total_tokens
+                logger.info(f"[{model_id}] reply={reply_text}, requester={session_id}")
                 self.sessions.session_reply(reply_text, session_id, total_tokens)
                 return Reply(ReplyType.TEXT, reply_text)
             
