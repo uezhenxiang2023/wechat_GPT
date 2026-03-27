@@ -9,4 +9,7 @@ def create_image(image_type):
     if image_type in (const.KLING_IMAGE_LIST + const.KLING_OMNI_IMAGE_LIST):
         from image.kling.kling_image import KlingImageBot
         return KlingImageBot()
+    if image_type in const.DOUBAO_SEEDREAM_LIST:
+        from image.doubao.doubao_image import DoubaoImageBot
+        return DoubaoImageBot()
     raise RuntimeError(f"Unsupported image model: {image_type}")

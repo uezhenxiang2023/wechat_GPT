@@ -186,8 +186,12 @@ available_setting = {
     # 可灵API配置
     "kling_access_key": "", # 身份密钥
     "kling_secret_key": "",  # 授权密钥
-    "kling_image_model": "", # 可灵图片模型，参考common/const.py
-    "kling_video_model": "", # 可灵视频模型，参考common/const.py
+    "kling_image_model": "", # 可灵图片模型，参考common/const.py 中的 KLING_IMAGE_LIST
+    "kling_video_model": "", # 可灵视频模型，参考common/const.py 中的 KLING_VIDEO_LIST
+
+    # 豆包API配置
+    "dooubao_image_model": "", # 豆包图片模型，参考common/const.py 中的 DOUBAO_SEEDREAM_LIST
+    "douobao_video_model": "", # 豆包视频模型，参考common/const.py 中的 DOUBAO_SEEDANCE_LIST
 
     # 视频生成时是否同时生成声音
     "video_sound": "off",  # on/off
