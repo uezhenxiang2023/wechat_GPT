@@ -223,8 +223,6 @@ class KlingVideoBot(Bot):
     def _get_image_from_session(self, session_id: str) -> list:
         session = get_ark_sessions().build_session(session_id)
         for msg in reversed(session.messages):
-            if msg.get("role") != "user":
-                continue
             content = msg.get("content")
             if not isinstance(content, list):
                 continue
