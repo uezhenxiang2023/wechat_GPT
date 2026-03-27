@@ -12,4 +12,7 @@ def create_video(video_type):
     if video_type in const.DOUBAO_SEEDANCE_LIST:
         from video.doubao.doubao_video import DoubaoVideoBot
         return DoubaoVideoBot()
+    if video_type in const.VEO_LIST:
+        from video.google.google_gemini_video import GoogleGeminiVideoBot
+        return GoogleGeminiVideoBot()
     raise RuntimeError(f"Unsupported image model: {video_type}")

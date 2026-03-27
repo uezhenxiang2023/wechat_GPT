@@ -1,27 +1,26 @@
 """
 Google gemini bot
 
-@author zhayujie
-@Date 2023/12/15
+@author guofu
+@Date 2026/03/27
 """
 # encoding:utf-8
 
-import os
-import time
-import base64
-from io import BytesIO
+import os, time
 
-import google.generativeai as generativeai
-from google.ai.generativelanguage_v1beta.types import content
 from google import genai
 from google.genai import types
 from google.genai.types import Tool, GenerateContentConfig, GoogleSearch, Part, FunctionDeclaration, Type, FileData
 
 from config import conf
 from bot.bot import Bot
-from bot.session_manager import SessionManager
-from bot.baidu.baidu_wenxin_session import BaiduWenxinSession
-from bot.gemini.google_genimi_vision import GeminiVision
+from bot.gemini.gemini_common import (
+    data_url_to_part,
+    get_image_context_from_session,
+    mark_image_context_injected,
+    should_inject_image_context,
+)
+from bot.gemini.google_gemini_session import _gemini_sessions
 
 from bridge.context import ContextType, Context
 from bridge.reply import Reply, ReplyType
@@ -29,18 +28,16 @@ from common.log import logger
 from common import const, memory
 from common.tool_button import tool_state
 from common.model_status import model_state
-from common.video_status import video_state
 
 from plugins.bigchao.script_breakdown import screenplay_scenes_breakdown, screenplay_assets_breakdown, screenplay_formatter
 
 
 # OpenAI对话模型API (可用)
-class GoogleGeminiBot(Bot, GeminiVision):
+class GoogleGeminiBot(Bot):
 
     def __init__(self):
         super().__init__()
         self.api_key = conf().get("gemini_api_key")
-        self.paid_api_key = conf().get("gemini_api_key_paid")
         """self.model = conf().get('model')
         self.Model_ID = self.model.upper()
         self.image_model = conf().get('text_to_image')
@@ -52,11 +49,8 @@ class GoogleGeminiBot(Bot, GeminiVision):
             "screenplay_assets_breakdown": screenplay_assets_breakdown,
             'screenplay_formatter': screenplay_formatter
         }
-        # 复用文心的token计算方式
-        self.sessions = SessionManager(BaiduWenxinSession, model=const.GEMINI_25_FLASH or "gpt-3.5-turbo")
-
-        # Initialize a client according to old generativeai SDK
-        generativeai.configure(api_key=self.api_key, transport='rest')
+        # 调用gemini自己的token计算方式
+        self.sessions = _gemini_sessions
         self.generation_config = {
             "temperature": 0.4,
             "top_p": 0.95,
@@ -83,65 +77,8 @@ class GoogleGeminiBot(Bot, GeminiVision):
         ]
         self.tool_config={'function_calling_config': 'AUTO'}
 
-        self.generative_model = generativeai.GenerativeModel(
-                        model_name=const.GEMINI_25_FLASH,
-                        generation_config=self.generation_config,
-                        safety_settings=self.safety_settings,
-                        system_instruction=self.system_prompt,
-                        tools = [
-                            generativeai.protos.Tool(
-                                function_declarations = [
-                                    generativeai.protos.FunctionDeclaration(
-                                        name = "screenplay_scenes_breakdown",
-                                        description = "第一步先拆解剧本场景，提取场号、场景、内外、日夜等基础信息，形成场景列表；第二步根据输入的剧本名称找到剧本文件，准确统计剧本总页数，总字数，每场戏的字数，补充到场景列表中。",
-                                        parameters = content.Schema(
-                                            type = content.Type.OBJECT,
-                                            enum = [],
-                                            required = ["screenplay_title", "scenes_list"],
-                                            properties = {
-                                                "screenplay_title": content.Schema(
-                                                    type = content.Type.STRING,
-                                                    description = "剧本名称",
-                                                ),
-                                                "scenes_list": content.Schema(
-                                                    type = content.Type.ARRAY,
-                                                    items = content.Schema(
-                                                        type = content.Type.OBJECT,
-                                                        properties = {
-                                                            "id": content.Schema(
-                                                                type = content.Type.INTEGER,
-                                                                description = "场号",
-                                                            ),
-                                                            "location": content.Schema(
-                                                                type = content.Type.STRING,
-                                                                description = "场景名称",
-                                                            ),
-                                                            "daynight": content.Schema(
-                                                                type = content.Type.STRING,
-                                                                description = "日景还是夜景",
-                                                                enum = ["日", "夜"]
-                                                            ),
-                                                            "envirement": content.Schema(
-                                                                type = content.Type.STRING,
-                                                                description = "室内环境还是室外环境",
-                                                                enum = ["内", "外"]
-                                                            ),
-                                                        },
-                                                    ),
-                                                ),
-                                            },
-                                        ),
-                                    ),
-                                ],
-                            ),
-                        ],
-                        tool_config=self.tool_config
-                    )
-
         # Initialize a client according to new genai SDK
         self.client = genai.Client(api_key=self.api_key)
-        self.paid_client = genai.Client(api_key=self.paid_api_key)
-
          # schema for screenplay_scenes_breakdown need to be updated
         self.screenplay_scenes_breakdown_schema = FunctionDeclaration(
             name="screenplay_scenes_breakdown",
@@ -409,8 +346,6 @@ class GoogleGeminiBot(Bot, GeminiVision):
         )
         # 用字典存储用户会话实例
         self.user_chats = {}
-        self.user_image_chats = {}
-        self.user_video_chats = {}
 
     def _get_user_chat(self, session_id, model):
         """获取指定用户的chat实例,如果不存在则创建新的"""
@@ -432,143 +367,6 @@ class GoogleGeminiBot(Bot, GeminiVision):
             )
         return self.user_chats[session_id]
 
-    def _get_user_image_chat(self, session_id, image_model):
-        """获取指定用户的image_chat实例,如果不存在则创建新的"""
-        if session_id not in self.user_image_chats:
-            img_config=GenerateContentConfig(
-                system_instruction=self.system_prompt,
-                safety_settings=self.safety_settings,
-                response_modalities=['TEXT', 'Image'],
-                image_config=types.ImageConfig(
-                    aspect_ratio='16:9'
-                )
-            )
-            img_config.tools = [{"google_search": {}}] if image_model == 'gemini-3-pro-image-preview' else None
-            self.user_image_chats[session_id] = self.paid_client.chats.create(
-                model=image_model,
-                config=img_config
-            )
-        return self.user_image_chats[session_id]
-    
-    def _convert_image_to_types(self, image):
-        """
-        将图片转换为base64编码和mime_type
-        
-        :param image: PIL Image对象
-        :return: google-genai定义的Image对象
-        """
-        image_format = image.format
-        image_bytes_io = BytesIO()
-        image.save(image_bytes_io, image_format)
-        #image_bytes = base64.b64encode(image_bytes_io.getvalue()).decode('utf-8')
-        image_bytes = image_bytes_io.getvalue()
-        mime_type = f'image/{image_format.lower()}'
-        genai_image = types.Image(image_bytes=image_bytes, mime_type=mime_type) 
-        return genai_image
-    
-    def _build_ref_images_obj(self, ref_images):
-        """
-        构建google-genai Image图片列表
-        
-        :param ref_images: PIL Image图片对象列表
-        """
-        ref_images_obj = []
-        for ref_image in ref_images:
-            ref_image_genai = self._convert_image_to_types(ref_image)
-            ref_image_obj = types.VideoGenerationReferenceImage(
-                image=ref_image_genai,
-                reference_type='asset'
-            )
-            ref_images_obj.append(ref_image_obj)
-        return ref_images_obj
-    
-    def _get_user_video_chat(self, session_id: str, video_model: str, *, prompt: str = None, image = None, last_image = None, ref_images: list = None, video = None):
-        """
-        获取指定用户的video_chat实例，如果不存在则新建。
-
-        :param session_id: 用户会话的ID
-        :param video_model: 视频模型ID
-        :param prompt: 文本提示词
-        :param image: PIL Image起幅图片素材
-        :param last_image: PIL Image落幅图片素材
-        :param ref_images: PIL_Image图片元素列表
-        :param video: 视频素材
-        """
-        if session_id not in self.user_video_chats:
-            self.user_video_chats[session_id] = self.paid_client
-    
-        # 1. 预处理所有图片对象
-        image_genai = self._convert_image_to_types(image) if image else None
-        last_image_genai = self._convert_image_to_types(last_image) if last_image else None
-        ref_images_obj = self._build_ref_images_obj(ref_images) if ref_images else None
-
-        # 2. 构建 config，根据互斥规则进行清洗
-        # 默认配置
-        video_duration = 8 if video_state.get_video_resolution(session_id) == '1080p' else video_state.get_video_duration(session_id)
-        video_resolution = video_state.get_video_resolution(session_id) 
-        gen_config = types.GenerateVideosConfig(
-            number_of_videos=1,
-            duration_seconds=video_duration,
-            resolution=video_resolution, 
-            person_generation='allow_all'
-        )
-        
-        # 默认 source
-        gen_source = types.GenerateVideosSource(
-            prompt=prompt
-        )
-
-        # --- 核心逻辑：互斥参数处理 ---
-        
-        # 情况 1: 如果有起始帧 (Image-to-Video 或 Transition)
-        # 此时必须丢弃 reference_images，因为 API 不支持混用
-        if image_genai:
-            logger.info(f"[{video_model}]Detected Start Image. Using 'Image-to-Video' mode. (Reference Images ignored)")
-            gen_source.image = image_genai
-            gen_config.person_generation = 'allow_adult'
-            
-            # 如果同时还有结束帧，则启用过渡模式
-            if last_image_genai:
-                 logger.info(f"[{video_model}]Detected Last Image. Using 'Transition' mode.")
-                 gen_config.last_frame = last_image_genai
-                 gen_config.duration_seconds = 8
-            
-            # 强制清空 reference_images，防止报错
-            if ref_images_obj:
-                logger.info(f"[{video_model}]Reference images cannot be used with Start/End frames in Veo 3.1. They have been dropped.")
-                gen_config.reference_images = None
-
-        # 情况 2: 如果没有起始帧，但有参考图 (Reference-guided)
-        elif ref_images_obj:
-            logger.info(f"[{video_model}]No Start Image detected. Using 'Reference-guided' mode.")
-            gen_config.reference_images = ref_images_obj
-            gen_config.duration_seconds = 8
-            gen_config.person_generation = 'allow_adult'
-            # 此时 source.image 和 config.last_frame 自然为空，符合要求
-
-        # 情况 3: 只有 Prompt (Text-to-Video)
-        else:
-            logger.info(f"T[{video_model}]ext-to-Video mode.")
-
-        # --- 发送请求 ---
-        operation = self.user_video_chats[session_id].models.generate_videos(
-            model=video_model,
-            source=gen_source,
-            config=gen_config
-        )
-
-        # 轮询生成状态
-        logger.info(f"[{video_model}]Waiting for video generation to complete..." )
-        while not operation.done:
-            time.sleep(10)
-            operation = self.user_video_chats[session_id].operations.get(operation)
-        logger.info(f"[{video_model}]Video generation is completed sucessfully." )
-
-        # 提取视频对象
-        res_video = operation.response.generated_videos[0].video
-        self.user_video_chats[session_id].files.download(file=res_video)
-        return res_video
-
     def _build_request_contents(self, query: str, session_id: str):
         """
         构建请求内容列表，包括处理文本和缓存的媒体文件
@@ -577,15 +375,13 @@ class GoogleGeminiBot(Bot, GeminiVision):
         :param session_id: 用户会话ID
         :return: 构建好的请求内容列表
         """
-        request_contents = []
-        
         # 如果是打印状态，修改查询内容
         if tool_state.get_print_state(session_id):
             query = f"大超子，帮忙给这个本子排版，编剧的名字是{query}"
         
         # 创建文本Part对象并添加到列表
         text = Part.from_text(text=query)
-        request_contents.insert(0, text)
+        request_contents = [text]
         
         # 检查缓存中是否媒体文件
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
@@ -602,14 +398,24 @@ class GoogleGeminiBot(Bot, GeminiVision):
                     file_content = Part.from_bytes(**first_data)
                     request_contents.insert(0, file_content)
             elif data_type in ['JpegImageFile', 'PngImageFile', 'File']:
-                file_cache['files'].append(text)
-                request_contents = file_cache['files']
+                request_contents.extend(file_cache['files'])
             elif data_type in ['FileData']:
-                filedata = [{'fileData': first_data}]
-                filedata.append(text)
-                request_contents = filedata
+                request_contents.append({'fileData': first_data})
             
             memory.USER_IMAGE_CACHE.pop(session_id)
+        else:
+            image_context = get_image_context_from_session(session_id)
+            session_images = image_context["images"]
+            if session_images and should_inject_image_context(session_id, image_context["signature"]):
+                request_contents.extend([data_url_to_part(image_url) for image_url in session_images])
+                if image_context["prompt"]:
+                    request_contents.append(
+                        Part.from_text(
+                            text=f"补充背景信息（仅供参考，不要复述给用户）：这张图此前可能由这个提示词生成：{image_context['prompt']}"
+                        )
+                    )
+                mark_image_context_injected(session_id, image_context["signature"])
+                logger.info(f"[{self.Model_ID}] 从 session 历史注入图片上下文, count={len(session_images)}, has_prompt={bool(image_context['prompt'])}")
         
         return request_contents
 
@@ -618,129 +424,57 @@ class GoogleGeminiBot(Bot, GeminiVision):
             session_id = context["session_id"]
             self.model = model_state.get_basic_state(session_id)
             self.Model_ID = self.model.upper()
-            self.image_model = model_state.get_image_model(session_id)
-            self.IMAGE_MODEL_ID = self.image_model.upper()
-            self.video_model = model_state.get_video_state(session_id)
-            self.VIDEO_MODEL = self.video_model.upper()
 
-            if context.type == ContextType.VIDEO:
+            if context.type == ContextType.TEXT:
+                logger.info(f"[{self.Model_ID}] query={query}, requester={session_id}")
+                if self.model not in const.GEMINI_GENAI_SDK:
+                    logger.warning(f"[{self.Model_ID}] Unsupported Gemini model")
+                    return Reply(ReplyType.ERROR, f"[{self.Model_ID}] Unsupported Gemini model")
+
                 session = self.sessions.session_query(query, session_id)
-                return self.gemini_15_media(query, context, session)
-            elif context.type == ContextType.SHARING:
-                session = self.sessions.session_query(query, session_id)
-                return self.gemini_15_media(query, context, session)
-            elif context.type == ContextType.TEXT:
-                # 使用用户特定的状态
-                is_imaging = tool_state.get_image_state(session_id)
-                is_editing = tool_state.get_edit_state(session_id)
-                Model_ID = self.VIDEO_MODEL if is_editing else (self.IMAGE_MODEL_ID if is_imaging else self.Model_ID)
-                logger.info(f"[{Model_ID}] query={query}, requester={session_id}")
-                session = self.sessions.session_query(query, session_id)
+                user_chat = self._get_user_chat(session_id, self.model)
+                resquest_contents = self._build_request_contents(query, session_id)
+                if tool_state.get_print_state(session_id):
+                    response = user_chat.send_message(resquest_contents, config=self.print_config)
+                    tool_state.toggle_printing(session_id)
+                elif tool_state.get_breakdown_state(session_id):
+                    response = user_chat.send_message(resquest_contents, config=self.breakdown_config)
+                    tool_state.toggle_breakdowning(session_id)
+                else:
+                    is_searching = tool_state.get_search_state(session_id)
 
-                # Set up the model
-                if self.model in const.GEMINI_1_PRO_LIST:
-                    gemini_messages = self._convert_to_gemini_1_messages(self._filter_gemini_1_messages(session.messages))
-                    system_prompt = None
-                    vision_res = self.do_vision_completion_if_need(session_id, query) # Image recongnition and vision completion
-                    if vision_res:
-                        return vision_res
-                elif (self.model in const.GEMINI_15_PRO_LIST or
-                      self.model in const.GEMINI_15_FLASH_LIST):
-                    gemini_messages = self._convert_to_gemini_15_messages(session.messages)
+                    if self.stream:
+                        logger.info(f"[{self.Model_ID}] stream 模式已开启")
 
-                if self.model in const.GEMINI_GENAI_SDK:
-                    # 获取当前用户的chat实例
-                    user_chat = self._get_user_chat(session_id, self.model)
-                    user_image_chat = self._get_user_image_chat(session_id, self.image_model)
-                    # 构建请求内容列表
-                    resquest_contents = self._build_request_contents(query, session_id)
-                    if tool_state.get_print_state(session_id):
-                        response = user_chat.send_message(resquest_contents, config=self.print_config)
-                        tool_state.toggle_printing(session_id)
-                    elif tool_state.get_breakdown_state(session_id):
-                        response = user_chat.send_message(resquest_contents, config=self.breakdown_config)
-                        tool_state.toggle_breakdowning(session_id)
-                    else:
-                        if tool_state.get_edit_state(session_id):
-                            # 如果请求列表只有一项内容则意味着没有图片参考；如果有两项内容代表第一项是图片要单独提取出来
-                            request_contents_count = len(resquest_contents)
-                            if request_contents_count == 1:
-                                image = None
-                                last_image = None
-                                ref_images = None
-                            elif request_contents_count == 2:
-                                image = resquest_contents[0]
-                                last_image = None
-                                ref_images = None
-                            elif request_contents_count == 3:
-                                image = resquest_contents[0]
-                                last_image = resquest_contents[1]
-                                ref_images = None
-                            elif request_contents_count == 4:
-                                image = None
-                                last_image = None
-                                # 抛出内容列表中的文本提示词
-                                resquest_contents.pop()
-                                ref_images = resquest_contents
-                            response = self._get_user_video_chat(session_id, self.video_model, prompt=query, image=image, last_image=last_image, ref_images=ref_images)
-                            return Reply(ReplyType.VIDEO, response)
-                        elif tool_state.get_image_state(session_id):
-                            # 将主会话内容补充到图片编辑会话中
-                            if user_chat._curated_history != []:
-                                user_image_chat._curated_history.extend(user_chat._curated_history)
-                                user_chat._curated_history.clear()
-                            response = user_image_chat.send_message(resquest_contents)
-                            return Reply(ReplyType.IMAGE, response)
-                        else:
-                            # 将图片编辑的会话内容补充到主会话中
-                            if user_image_chat._curated_history != []:
-                                user_chat._curated_history.extend(user_image_chat._curated_history)
-                                user_image_chat._curated_history.clear()
-
-                            is_searching = tool_state.get_search_state(session_id)
-
-                            # 普通文本，判断是否走 stream
-                            if self.stream:
-                                logger.info(f"[{self.Model_ID}] stream 模式已开启")
-
-                                def stream_generator():
-                                    full_text = ""
-                                    final_response = None
-                                    if is_searching:
-                                        stream_response = user_chat.send_message_stream(
-                                            resquest_contents, config=self.search_config
-                                        )
-                                    else:
-                                        stream_response = user_chat.send_message_stream(resquest_contents)
-
-                                    for chunk in stream_response:
-                                        if chunk.text:
-                                            full_text += chunk.text
-                                            yield chunk.text
-                                        final_response = chunk
-
-                                    self.sessions.session_reply(full_text, session_id)
-                                    logger.info(f"[{self.Model_ID}] stream 完成, session_id={session_id}")
-
-                                    # 搜索+stream：从最后一个 chunk 取 grounding_metadata yield 给 channel
-                                    if is_searching and final_response is not None:
-                                        grounding_metadata = getattr(
-                                            final_response.candidates[0], "grounding_metadata", None
-                                        ) if final_response.candidates else None
-                                        if grounding_metadata and grounding_metadata.grounding_chunks:
-                                            yield final_response
-
-                                return Reply(ReplyType.STREAM, stream_generator())
+                        def stream_generator():
+                            full_text = ""
+                            final_response = None
+                            if is_searching:
+                                stream_response = user_chat.send_message_stream(
+                                    resquest_contents, config=self.search_config
+                                )
                             else:
-                                response = user_chat.send_message(resquest_contents)
+                                stream_response = user_chat.send_message_stream(resquest_contents)
 
-                elif self.model not in const.GEMINI_GENAI_SDK:
-                    chat_session = self.generative_model.start_chat(
-                        # 消息堆栈中的最新数据抛出去，留给send_message方法，从query中拿
-                        history=gemini_messages[:-1],
-                        enable_automatic_function_calling=True
-                    )
-                    response = chat_session.send_message(resquest_contents)
+                            for chunk in stream_response:
+                                if chunk.text:
+                                    full_text += chunk.text
+                                    yield chunk.text
+                                final_response = chunk
+
+                            self.sessions.session_reply(full_text, session_id)
+                            logger.info(f"[{self.Model_ID}] stream 完成, session_id={session_id}")
+
+                            if is_searching and final_response is not None:
+                                grounding_metadata = getattr(
+                                    final_response.candidates[0], "grounding_metadata", None
+                                ) if final_response.candidates else None
+                                if grounding_metadata and grounding_metadata.grounding_chunks:
+                                    yield final_response
+
+                        return Reply(ReplyType.STREAM, stream_generator())
+                    else:
+                        response = user_chat.send_message(resquest_contents)
                 if response.text == None and response.function_calls == []:
                     logger.warning(f"[{self.Model_ID}] Response Text is None")
                     return Reply(ReplyType.ERROR, f"[{self.Model_ID}] Response Text is None")
@@ -819,84 +553,10 @@ class GoogleGeminiBot(Bot, GeminiVision):
                 self.sessions.session_query(function_response_str, session_id)"""
             if function_calls:
                 # new turn of model request with function response
-                if self.model in const.GEMINI_GENAI_SDK:
-                    response = user_chat.send_message(function_response_parts)
-                """else:
-                # gemini 2.0开始，chat方法自动维护消息历史，后续考虑暂停维护脚手架中旧版gemini的消息历史
-                    gemini_messages = self._convert_to_gemini_15_messages(session.messages)
-                    chat_session = self.generative_model.start_chat(
-                    # 消息堆栈中的最新数据抛出去，留给send_message方法，从function_response_str中拿
-                        history=gemini_messages[:-1],
-                        enable_automatic_function_calling=True
-                    )
-                    response = chat_session.send_message(function_response_part)"""
+                response = user_chat.send_message(function_response_parts)
                 continue
             function_calling = False
         return response, function_response
-
-    def _convert_to_gemini_1_messages(self, messages: list):
-        res = []
-        for msg in messages:
-            if msg.get("role") == "user":
-                role = "user"
-            elif msg.get("role") == "assistant":
-                role = "model"
-            else:
-                continue
-            res.append({
-                "role": role,
-                "parts": [{"text": msg.get("content")}]
-            })
-        return res
-
-    def _convert_to_gemini_15_messages(self, messages: list):
-        res = []
-        media_parts = []
-        user_parts = []
-        assistant_parts = []
-        for msg in messages:
-            msg_role = msg.get('role')
-            msg_content = msg.get('content')
-            msg_type = type(msg_content).__name__  #识别消息内容的类型
-            if msg.get("role") == "user":
-                if msg_type == 'File':
-                    media_parts.append(msg_content)
-                    continue
-                if msg_type in ['str', 'JpegImageFile', 'dict']:
-                    if media_parts != []:
-                        media_parts.append(msg_content)
-                        user_parts = media_parts
-                        parts = user_parts
-                        media_parts = []
-                    elif media_parts == []:
-                        parts = [msg_content]
-                role = "user"
-
-            elif msg_role == "assistant":
-                assistant_parts = [msg_content]
-                parts = assistant_parts
-                role = "model"
-            else:
-                continue
-            res.append({
-                "role": role,
-                "parts": parts
-            })
-        return res
-
-    def _filter_gemini_1_messages(self, messages: list):
-        res = []
-        turn = "user"
-        for i in range(len(messages) - 1, -1, -1):
-            message = messages[i]
-            if message.get("role") != turn:
-                continue
-            res.insert(0, message)
-            if turn == "user":
-                turn = "assistant"
-            elif turn == "assistant":
-                turn = "user"
-        return res
 
     def _file_cache(self, context):
         memory.USER_FILE_CACHE[context['session_id']] = {
@@ -912,46 +572,6 @@ class GoogleGeminiBot(Bot, GeminiVision):
         msg.prepare()
         logger.info("[{}] file={} is downloaded locally".format(self.Model_ID, path))
         return None
-
-    def gemini_15_media(self, query, context, session: BaiduWenxinSession):
-        session_id = context.kwargs["session_id"]
-        msg = context.kwargs["msg"]
-        media_path = context.content
-        logger.info(f"[{self.model}] query with media, path={media_path}")
-
-        # Check if the url is a youtube link
-        if 'youtube' in media_path:
-            media_file = FileData(file_uri=media_path)
-        else:
-            type_position = media_path.rfind('.') + 1
-            mime_type = media_path[type_position:]
-            if mime_type in const.IMAGE:
-                type_id = 'image'
-                # Image URL request
-                if query[:8] == 'https://':
-                    media_file = media_path
-            elif mime_type in const.AUDIO:
-                msg.prepare()
-                type_id = 'audio'
-            elif mime_type in const.VIDEO:
-                msg.prepare()
-                type_id = 'video'
-            elif mime_type in const.SPREADSHEET or mime_type in const.TXT:
-                msg.prepare()
-                type_id = 'text'
-            elif mime_type in const.PRESENTATION:
-                msg.prepare()
-                type_id = 'application'
-                mime_type = 'vnd.google-apps.presentation'
-            elif mime_type in const.APPLICATION:
-                msg.prepare()
-                type_id = 'application'
-            # Clear original media file in user content avoiding duplicated commitment
-            session.messages.pop()
-            if (mime_type not in const.IMAGE) and (mime_type not in const.DOCUMENT):
-                media_file = self.upload_to_gemini(media_path, mime_type=f'{type_id}/{mime_type}')
-        self.sessions.session_query(media_file, session_id)
-        self.cache_media(media_path, media_file, context)
 
     def cache_media(self, media_path, media_file, context):
         session_id = context["session_id"]
@@ -1004,4 +624,3 @@ class GoogleGeminiBot(Bot, GeminiVision):
             raise Exception(f"File {file.name} failed to process")
         print("...all files ready")
         print()
-

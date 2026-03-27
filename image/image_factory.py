@@ -12,4 +12,7 @@ def create_image(image_type):
     if image_type in const.DOUBAO_SEEDREAM_LIST:
         from image.doubao.doubao_image import DoubaoImageBot
         return DoubaoImageBot()
+    if image_type in const.GOOGLE_IMAGE_LIST:
+        from image.google.google_gemini_image import GoogleGeminiImageBot
+        return GoogleGeminiImageBot()
     raise RuntimeError(f"Unsupported image model: {image_type}")

@@ -1,8 +1,7 @@
 import google.generativeai as genai
 
-from bot.session_manager import SessionManager
 from bridge.reply import Reply,ReplyType
-from bot.baidu.baidu_wenxin_session import BaiduWenxinSession
+from bot.gemini.google_gemini_session import _gemini_sessions
 from common.log import logger
 from common import memory,const
 from config import conf
@@ -15,8 +14,7 @@ class GeminiVision(object):
         super().__init__()
         self.api_key=conf().get('gemini_api_key')
         self.MODEL_ID = const.GEMINI_1_PRO_VISION_LATEST.upper()
-        # 复用文心的token计算方式
-        self.sessions = SessionManager(BaiduWenxinSession,model=conf().get('model') or 'gpt=3.5-turbo')
+        self.sessions = _gemini_sessions
 
     def do_vision_completion_if_need(self, session_id: str, query: str):
         '''Request text response from multimodal input with google-generativeai's gemini-pro-vision'''
