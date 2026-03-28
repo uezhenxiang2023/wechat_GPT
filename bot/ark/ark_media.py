@@ -3,7 +3,9 @@ import io
 
 from PIL import Image
 
+from common import const
 from common.utils import get_ark_sessions
+from common.log import logger
 
 
 def encode_image_content(image_path, image_file):
@@ -40,42 +42,16 @@ def process_image_files(file_cache):
 
 def size_calculator(files):
     """根据参考图推断最接近的豆包出图分辨率。"""
-    ratio_resolutions = {
-        1.0: "2048x2048",
-        1.33: "2304x1728",
-        0.75: "1728x2304",
-        1.78: "2560x1440",
-        0.56: "1440x2560",
-        1.5: "2496x1664",
-        0.67: "1664x2496",
-        2.33: "3024x1296"
-    }
-
     sizes_list = [file.size for file in files]
     best_size = sorted(sizes_list, key=lambda x: x[0] * x[1], reverse=True)[0]
-    ratio = round(best_size[0] / best_size[1], 2)
-    closest_ratio = min(ratio_resolutions.keys(), key=lambda x: abs(x - ratio))
-    return ratio_resolutions[closest_ratio]
+    return aspect_ratio_from_size(best_size)
 
 
 def size_calculator_from_data_urls(image_urls):
-    """根据 session 中的 data URL 图片推断最接近的豆包出图分辨率。"""
-    ratio_resolutions = {
-        1.0: "2048x2048",
-        1.33: "2304x1728",
-        0.75: "1728x2304",
-        1.78: "2560x1440",
-        0.56: "1440x2560",
-        1.5: "2496x1664",
-        0.67: "1664x2496",
-        2.33: "3024x1296"
-    }
-
+    """根据 session 中的 data URL 图片推断最接近的豆包出图比例。"""
     sizes_list = [_decode_image_size(image_url) for image_url in image_urls]
     best_size = sorted(sizes_list, key=lambda x: x[0] * x[1], reverse=True)[0]
-    ratio = round(best_size[0] / best_size[1], 2)
-    closest_ratio = min(ratio_resolutions.keys(), key=lambda x: abs(x - ratio))
-    return ratio_resolutions[closest_ratio]
+    return aspect_ratio_from_size(best_size)
 
 
 def get_image_from_session(session_id):
@@ -106,3 +82,112 @@ def _decode_image_size(image_url):
     b64_data = image_url.split(",", 1)[1]
     img = Image.open(io.BytesIO(base64.b64decode(b64_data)))
     return img.size
+
+
+def aspect_ratio_from_size(size):
+    ratio_map = {
+        1.0: "1:1",
+        1.33: "4:3",
+        0.75: "3:4",
+        1.78: "16:9",
+        0.56: "9:16",
+        1.5: "3:2",
+        0.67: "2:3",
+        2.33: "21:9",
+    }
+    ratio = round(size[0] / size[1], 2)
+    closest_ratio = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
+    return ratio_map[closest_ratio]
+
+
+def build_seedream_size(model, configured_size, aspect_ratio):
+    normalized_size = str(configured_size).strip().upper()
+    normalized_ratio = str(aspect_ratio).strip()
+    supported_sizes = _get_seedream_supported_sizes(model)
+    if normalized_size not in supported_sizes:
+        fallback_size = supported_sizes[0]
+        logger.warning(
+            f"[DoubaoImage] invalid size={configured_size} for model={model}, fallback to {fallback_size}"
+        )
+        normalized_size = fallback_size
+
+    ratio_size_map = _get_seedream_ratio_size_map(model, normalized_size)
+    if normalized_ratio in ratio_size_map:
+        return ratio_size_map[normalized_ratio]
+
+    if normalized_ratio and normalized_ratio != "auto":
+        logger.warning(
+            f"[DoubaoImage] unsupported aspect_ratio={aspect_ratio} for model={model}, size={normalized_size}, "
+            f"fallback to resolution tier {normalized_size}"
+        )
+    return normalized_size
+
+
+def _get_seedream_supported_sizes(model):
+    if model == const.DOUBAO_SEEDREAM_5:
+        return ["2K", "3K"]
+    if model == const.DOUBAO_SEEDREAM_45:
+        return ["2K", "4K"]
+    if model == const.DOUBAO_SEEDREAM_4:
+        return ["1K", "2K", "4K"]
+    return ["2K"]
+
+
+def _get_seedream_ratio_size_map(model, image_size):
+    if model == const.DOUBAO_SEEDREAM_5:
+        return {
+            "2K": {
+                "1:1": "2048x2048",
+                "3:4": "1728x2304",
+                "4:3": "2304x1728",
+                "16:9": "2848x1600",
+                "9:16": "1600x2848",
+                "3:2": "2496x1664",
+                "2:3": "1664x2496",
+                "21:9": "3136x1344",
+            },
+            "3K": {
+                "1:1": "3072x3072",
+                "3:4": "2592x3456",
+                "4:3": "3456x2592",
+                "16:9": "4096x2304",
+                "9:16": "2304x4096",
+                "3:2": "3744x2496",
+                "2:3": "2496x3744",
+                "21:9": "4704x2016",
+            },
+        }.get(image_size, {})
+    if model in {const.DOUBAO_SEEDREAM_45, const.DOUBAO_SEEDREAM_4}:
+        return {
+            "1K": {
+                "1:1": "1024x1024",
+                "3:4": "864x1152",
+                "4:3": "1152x864",
+                "16:9": "1312x736",
+                "9:16": "736x1312",
+                "3:2": "1248x832",
+                "2:3": "832x1248",
+                "21:9": "1568x672",
+            },
+            "2K": {
+                "1:1": "2048x2048",
+                "3:4": "1728x2304",
+                "4:3": "2304x1728",
+                "16:9": "2848x1600",
+                "9:16": "1600x2848",
+                "3:2": "2496x1664",
+                "2:3": "1664x2496",
+                "21:9": "3136x1344",
+            },
+            "4K": {
+                "1:1": "4096x4096",
+                "3:4": "3520x4704",
+                "4:3": "4704x3520",
+                "16:9": "5504x3040",
+                "9:16": "3040x5504",
+                "3:2": "4992x3328",
+                "2:3": "3328x4992",
+                "21:9": "6240x2656",
+            },
+        }.get(image_size, {})
+    return {}

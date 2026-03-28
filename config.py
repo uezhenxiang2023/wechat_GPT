@@ -40,7 +40,7 @@ available_setting = {
     "image_create_prefix": ["画", "看", "找"],  # 开启图片回复的前缀
     "video_create_prefix": ["//"], # 开启视频回复的前缀
     "concurrency_in_session": 1,  # 同一会话最多有多少条消息在处理中，大于1可能乱序
-    "image_create_size": "256x256",  # 图片大小,可选有 256x256, 512x512, 1024x1024 (dall-e-3默认为1024x1024)
+    "image_create_size": "256x256",  # 图片大小,可选有 1k、2k、4k(seedream4.5不支持1k,seedream5仅支持2k和3k)
     "image_aspect_ratio":"16:9", # 图片长宽比例，可选有16:9、9:16、1:1、4:3、3:4、3:2、2:3、21:9、auto
     "text_to_video": "doubao-seedance-1-0-pro-250528", # 视频编辑模型
     "duration_seconds": 4, # 视频默认时长

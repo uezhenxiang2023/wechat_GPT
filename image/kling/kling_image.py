@@ -26,8 +26,8 @@ class KlingImageBot(Bot):
         super().__init__()
         self.access_key = conf().get("kling_access_key")
         self.secret_key = conf().get("kling_secret_key")
-        self.image_resolution = conf().get("image_create_size", "1K")
-        self.image_aspect_ratio = conf().get("image_aspect_ratio", "16:19")
+        self.image_resolution = self._normalize_resolution(conf().get("image_create_size", "1k"))
+        self.image_aspect_ratio = conf().get("image_aspect_ratio", "16:9")
 
     def _get_token(self) -> str:
         headers = {
@@ -158,6 +158,13 @@ class KlingImageBot(Bot):
         except Exception as e:
             logger.error(f"[Kling] fetch reply error: {e}")
             return Reply(ReplyType.ERROR, f"[Kling] {e}")
+
+    def _normalize_resolution(self, resolution: str) -> str:
+        normalized = str(resolution).strip().lower()
+        if normalized in {"1k", "2k", "4k"}:
+            return normalized
+        logger.warning(f"[Kling] invalid resolution={resolution}, fallback to 1k")
+        return "1k"
 
     def _check_response_error(self, data: dict) -> str | None:
         """检查响应中的业务错误码，返回错误描述或 None"""

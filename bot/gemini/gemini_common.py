@@ -13,6 +13,7 @@ from bot.gemini.google_gemini_session import _gemini_sessions
 from common import const
 from common.log import logger
 from common.video_status import video_state
+from config import conf
 
 _user_chat_image_context = {}
 
@@ -33,12 +34,20 @@ def get_paid_client(api_key):
 
 
 def get_user_image_chat(session_id, image_model, *, paid_client, safety_settings):
+    image_settings = get_gemini_image_settings()
     img_config = GenerateContentConfig(
         safety_settings=safety_settings,
         response_modalities=["TEXT", "Image"],
-        image_config=types.ImageConfig(aspect_ratio="16:9")
+        image_config=types.ImageConfig(
+            aspect_ratio=image_settings["aspect_ratio"],
+            image_size=image_settings["size"]
+        )
     )
     img_config.tools = [{"google_search": {}}] if image_model == const.GEMINI_3_PRO_IMAGE_PREVIEW else None
+    logger.info(
+        f"[{image_model}] create image chat, session_id={session_id}, "
+        f"size={image_settings['size']}, aspect_ratio={image_settings['aspect_ratio']}"
+    )
     return paid_client.chats.create(model=image_model, config=img_config)
 
 
@@ -213,6 +222,21 @@ def extract_inline_image(response):
 
 def _build_image_context_signature(images, prompt):
     return f"{len(images)}|{images[0] if images else ''}|{prompt}"
+
+
+def get_gemini_image_settings():
+    return {
+        "size": _normalize_gemini_image_size(conf().get("image_create_size", "1K")),
+        "aspect_ratio": conf().get("image_aspect_ratio", "16:9"),
+    }
+
+
+def _normalize_gemini_image_size(image_size: str) -> str:
+    normalized = str(image_size).strip().upper()
+    if normalized in {"512", "1K", "2K", "4K"}:
+        return normalized
+    logger.warning(f"[GeminiImage] invalid image_size={image_size}, fallback to 1K")
+    return "1K"
 
 
 def _read_downloaded_video_bytes(video_file):

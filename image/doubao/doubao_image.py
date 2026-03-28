@@ -1,9 +1,16 @@
 from volcenginesdkarkruntime import Ark
 
 from bot.bot import Bot
-from bot.ark.ark_media import encode_image, get_image_from_session, size_calculator, size_calculator_from_data_urls
+from bot.ark.ark_media import (
+    build_seedream_size,
+    encode_image,
+    get_image_from_session,
+    size_calculator,
+    size_calculator_from_data_urls,
+)
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
+from common import const
 from common import memory
 from common.log import logger
 from common.model_status import model_state
@@ -31,6 +38,7 @@ class DoubaoImageBot(Bot):
                 "watermark": True,
                 "sequential_image_generation": "disabled"
             }
+            default_aspect_ratio = conf().get("image_aspect_ratio", "16:9")
 
             file_cache = memory.USER_IMAGE_CACHE.get(session_id)
             session_images = []
@@ -39,21 +47,23 @@ class DoubaoImageBot(Bot):
                     encode_image(path, file)
                     for path, file in zip(file_cache["path"], file_cache["files"])
                 ]
+                aspect_ratio = size_calculator(file_cache["files"])
                 params.update({
                     "image": images,
-                    "size": size_calculator(file_cache["files"])
+                    "size": self._build_image_size(model, aspect_ratio)
                 })
                 memory.USER_IMAGE_CACHE.pop(session_id)
             else:
                 session_images = get_image_from_session(session_id)
                 if session_images:
+                    aspect_ratio = size_calculator_from_data_urls(session_images)
                     params.update({
                         "image": session_images,
-                        "size": size_calculator_from_data_urls(session_images)
+                        "size": self._build_image_size(model, aspect_ratio)
                     })
                     logger.info(f"[DoubaoImage] 从 session 历史取参考图, count={len(session_images)}")
                 else:
-                    params["size"] = self.image_size
+                    params["size"] = self._build_image_size(model, default_aspect_ratio)
 
             response = self.client.images.generate(**params)
             image_url = response.data[0].url
@@ -74,3 +84,8 @@ class DoubaoImageBot(Bot):
         except Exception as e:
             logger.error(f"[DoubaoImage] fetch reply error: {e}")
             return Reply(ReplyType.ERROR, f"[DoubaoImage] {e}")
+
+    def _build_image_size(self, model, aspect_ratio):
+        if model in const.DOUBAO_SEEDREAM_LIST:
+            return build_seedream_size(model, self.image_size, aspect_ratio)
+        return self.image_size
