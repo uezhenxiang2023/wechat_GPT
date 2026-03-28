@@ -35,10 +35,6 @@ from common.tmp_dir import TmpDir, create_user_dir
 class FeiShuChanel(ChatChannel):
     def __init__(self, session_id=None):
         super().__init__()
-        self.image_model = conf().get('text_to_image')
-        self.IMAGE_MODEL_ID = self.image_model.upper()
-        self.video_model = conf().get('text_to_video')
-        self.VIDEO_MODEL_ID = self.video_model.upper()
         self.app_id = conf().get('feishu_app_id')
         self.app_secret = conf().get('feishu_app_secret')
         self.encrypt_key = conf().get('feishu_encrypt_key')
@@ -71,6 +67,12 @@ class FeiShuChanel(ChatChannel):
             event_handler=self.event_handler,
             log_level=lark.LogLevel.INFO,
         )
+
+    def _get_current_image_model_id(self, user_id):
+        return model_state.get_image_model(user_id).upper()
+
+    def _get_current_video_model_id(self, user_id):
+        return model_state.get_video_state(user_id).upper()
 
     # Register event handler to handle received messages.
     # https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/events/receive
@@ -329,8 +331,9 @@ class FeiShuChanel(ChatChannel):
                 self.send_text(error_response, toUserName=receiver)
                 logger.info("[Lark] sendMsg={}, receiver={}".format(error_response, receiver))
         elif reply.type == ReplyType.ERROR:
-            self.send_text(error_response, toUserName=receiver)
-            logger.info("[Lark] sendMsg={}, receiver={}".format(error_response, receiver))
+            error_text = reply.content if reply.content else error_response
+            self.send_text(error_text, toUserName=receiver)
+            logger.info("[Lark] sendMsg={}, receiver={}".format(error_text, receiver))
         elif reply.type == ReplyType.INFO:
             self.send_text(reply.content, toUserName=receiver)
             logger.info("[Lark] sendMsg={}, receiver={}".format(reply, receiver))
@@ -394,6 +397,7 @@ class FeiShuChanel(ChatChannel):
                 self.send_image(image_path, toUserName=receiver)
                 logger.info("[Lark] sendImage url={}, receiver={}".format(response, receiver))
         elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
+            image_model_id = self._get_current_image_model_id(receiver)
             response = reply.content
             parts = response.candidates[0].content.parts
             if parts is None:
@@ -406,11 +410,11 @@ class FeiShuChanel(ChatChannel):
                     if part.text:
                         reply_text = part.text
                         self.send_text(reply_text, receiver)
-                        logger.info("[Lark_{}] sendMsg={}, receiver={}".format(self.IMAGE_MODEL_ID, part.text, receiver))
+                        logger.info("[Lark_{}] sendMsg={}, receiver={}".format(image_model_id, part.text, receiver))
                     elif part.inline_data:
                         image_type = part.inline_data.mime_type.split('/')[-1]
                         image = BytesIO(part.inline_data.data)
-                        logger.info(f"[Lark_{self.IMAGE_MODEL_ID}] reply={image}")
+                        logger.info(f"[Lark_{image_model_id}] reply={image}")
                         image.seek(0)
                         user_dir = TmpDir().path() + str(receiver) + '/response/'
                         user_dir_exists = os.path.exists(user_dir)
@@ -421,7 +425,7 @@ class FeiShuChanel(ChatChannel):
                         with open(image_path, 'wb') as f:
                             f.write(image.read())
                         self.send_image(image_path, receiver)
-                        logger.info("[Lark_{}] sendMsg={}, receiver={}".format(self.IMAGE_MODEL_ID, image, receiver))
+                        logger.info("[Lark_{}] sendMsg={}, receiver={}".format(image_model_id, image, receiver))
         elif reply.type == ReplyType.FILE:  # 新增文件回复类型
             file_pathes = reply.content['function_response']['file_pathes']
             reply_text = reply.content['reply_text']
@@ -431,6 +435,7 @@ class FeiShuChanel(ChatChannel):
             self.send_text(reply_text, receiver)
             logger.info("[Lark] sendMsg={}, receiver={}".format(reply_text, receiver))
         elif reply.type == ReplyType.VIDEO:  # 新增视频回复类型
+            video_model_id = self._get_current_video_model_id(receiver)
             video_duration = conf().get("duration_seconds")
             response = reply.content
             file_uri = response.uri
@@ -438,23 +443,24 @@ class FeiShuChanel(ChatChannel):
             video_storage = io.BytesIO(response.video_bytes)
             video_path = self.save_media_file(receiver, video_storage, file_name)
             self.send_video(video_duration, video_path, receiver)
-            logger.info("[Lark] sendFile video_name={}, receiver={}".format(file_name, receiver))
+            logger.info("[Lark_{}] sendFile video_name={}, receiver={}".format(video_model_id, file_name, receiver))
         elif reply.type == ReplyType.VIDEO_URL:  # 新增视频URL回复类型
+            video_model_id = self._get_current_video_model_id(receiver)
             video_duration = reply.content[0]
             video_url = reply.content[1]
             file_name = self.extract_image_filename(video_url)
-            logger.debug(f"[Lark] start download video, video_url={video_url}")
+            logger.debug(f"[Lark_{video_model_id}] start download video, video_url={video_url}")
             video_res = requests.get(video_url, stream=True)
             video_storage = io.BytesIO()
             size = 0
             for block in video_res.iter_content(1024):
                 size += len(block)
                 video_storage.write(block)
-            logger.info(f"[Lark] download video success, size={size}, video_url={video_url}")
+            logger.info(f"[Lark_{video_model_id}] download video success, size={size}, video_url={video_url}")
             video_storage.seek(0)
             video_path = self.save_media_file(receiver, video_storage, file_name)
             self.send_video(video_duration, video_path, receiver)
-            logger.info("[Lark] sendVideo url={}, receiver={}".format(video_path, receiver))
+            logger.info("[Lark_{}] sendVideo url={}, receiver={}".format(video_model_id, video_path, receiver))
     
     def save_media_file(self, receiver, media_storage, file_name):
         """将网页链接中的图片或视频文件存储到本地硬盘"""

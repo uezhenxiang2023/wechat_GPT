@@ -1,7 +1,13 @@
 import base64
 
 from bot.bot import Bot
-from bot.gemini.gemini_common import data_url_to_pil_image, generate_video, get_image_from_session, get_paid_client
+from bot.gemini.gemini_common import (
+    GeminiVideoGenerationError,
+    data_url_to_pil_image,
+    generate_video,
+    get_image_from_session,
+    get_paid_client,
+)
 from bot.gemini.google_gemini_session import _gemini_sessions
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
@@ -47,9 +53,12 @@ class GoogleGeminiVideoBot(Bot):
                 logger.warning(f"[GoogleGeminiVideo] failed to inject video to session: {e}")
 
             return Reply(ReplyType.VIDEO, response)
+        except GeminiVideoGenerationError as e:
+            logger.error(f"[GoogleGeminiVideo] business error: {e}")
+            return Reply(ReplyType.ERROR, str(e))
         except Exception as e:
             logger.error(f"[GoogleGeminiVideo] fetch reply error: {e}")
-            return Reply(ReplyType.ERROR, f"[GoogleGeminiVideo] {e}")
+            return Reply(ReplyType.ERROR, "Gemini 视频生成失败，请稍后重试。")
 
     def _get_video_inputs(self, session_id):
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)

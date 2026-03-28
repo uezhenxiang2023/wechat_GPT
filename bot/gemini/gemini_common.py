@@ -17,6 +17,10 @@ from common.video_status import video_state
 _user_chat_image_context = {}
 
 
+class GeminiVideoGenerationError(RuntimeError):
+    pass
+
+
 class DownloadedGeminiVideo(BytesIO):
     def __init__(self, uri, video_bytes):
         super().__init__(video_bytes)
@@ -180,7 +184,7 @@ def generate_video(*, paid_client, session_id, video_model, prompt, image=None, 
         generated_videos = response_payload.get("generated_videos")
     if not generated_videos:
         logger.error(f"[{video_model}] No generated videos found in operation response: {response_payload}")
-        raise RuntimeError(_format_gemini_video_error(response_payload))
+        raise GeminiVideoGenerationError(_format_gemini_video_error(response_payload))
 
     first_video = generated_videos[0]
     res_video = getattr(first_video, "video", None)
@@ -188,7 +192,7 @@ def generate_video(*, paid_client, session_id, video_model, prompt, image=None, 
         res_video = first_video.get("video")
     if res_video is None:
         logger.error(f"[{video_model}] Invalid generated video item: {first_video}")
-        raise RuntimeError("Gemini video generation returned an invalid video item")
+        raise GeminiVideoGenerationError("Veo 返回结果异常，请稍后重试。")
 
     paid_client.files.download(file=res_video)
     video_bytes = _read_downloaded_video_bytes(res_video)
