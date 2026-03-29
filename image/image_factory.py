@@ -15,4 +15,7 @@ def create_image(image_type):
     if image_type in const.GOOGLE_IMAGE_LIST:
         from image.google.google_gemini_image import GoogleGeminiImageBot
         return GoogleGeminiImageBot()
+    if image_type in const.GROK_IMAGE_LIST:
+        from image.grok.grok_image import GrokImageBot
+        return GrokImageBot()
     raise RuntimeError(f"Unsupported image model: {image_type}")
