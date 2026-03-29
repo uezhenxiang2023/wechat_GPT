@@ -10,6 +10,8 @@ from bot.gemini.gemini_common import (
     get_image_context_from_session,
     get_paid_client,
     get_user_image_chat,
+    infer_gemini_aspect_ratio_from_data_urls,
+    infer_gemini_aspect_ratio_from_images,
 )
 from bot.gemini.google_gemini_session import _gemini_sessions
 from bridge.context import Context
@@ -40,13 +42,14 @@ class GoogleGeminiImageBot(Bot):
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
             session_manager.session_query(query, session_id)
 
+            request_contents, aspect_ratio = self._build_request_contents(query, session_id, model)
             user_image_chat = get_user_image_chat(
                 session_id,
                 model,
                 paid_client=self.paid_client,
-                safety_settings=self.safety_settings
+                safety_settings=self.safety_settings,
+                aspect_ratio=aspect_ratio
             )
-            request_contents = self._build_request_contents(query, session_id)
             response = user_image_chat.send_message(request_contents)
 
             try:
@@ -60,30 +63,34 @@ class GoogleGeminiImageBot(Bot):
                         mime_type=mime_type
                     )
                     clear_image_context_marker(session_id)
-                    logger.info(f"[GoogleGeminiImage] image injected to session, model={model}, session_id={session_id}")
+                    logger.info(f"[{model.upper()}] image injected to session, model={model}, session_id={session_id}")
             except Exception as e:
-                logger.warning(f"[GoogleGeminiImage] failed to inject image to session: {e}")
+                logger.warning(f"[{model.upper()}] failed to inject image to session: {e}")
 
             return Reply(ReplyType.IMAGE, response)
         except Exception as e:
-            logger.error(f"[GoogleGeminiImage] fetch reply error: {e}")
-            return Reply(ReplyType.ERROR, f"[GoogleGeminiImage] {e}")
+            logger.error(f"[{model.upper()}] fetch reply error: {e}")
+            return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
 
-    def _build_request_contents(self, query, session_id):
+    def _build_request_contents(self, query, session_id, model):
         text = Part.from_text(text=query)
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
         if file_cache:
             request_contents = list(file_cache["files"])
             request_contents.append(text)
+            aspect_ratio = infer_gemini_aspect_ratio_from_images(file_cache["files"])
             memory.USER_IMAGE_CACHE.pop(session_id)
-            return request_contents
+            logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}")
+            return request_contents, aspect_ratio
 
         image_context = get_image_context_from_session(session_id)
         session_images = image_context["images"]
         if session_images:
             request_contents = [data_url_to_part(image_url) for image_url in session_images]
             request_contents.append(text)
-            logger.info(f"[GoogleGeminiImage] 从 session 历史取参考图, count={len(session_images)}")
-            return request_contents
+            aspect_ratio = infer_gemini_aspect_ratio_from_data_urls(session_images)
+            logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
+            logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}")
+            return request_contents, aspect_ratio
 
-        return [text]
+        return [text], None

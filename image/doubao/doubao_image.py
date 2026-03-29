@@ -49,20 +49,27 @@ class DoubaoImageBot(Bot):
                     for path, file in zip(file_cache["path"], file_cache["files"])
                 ]
                 aspect_ratio = size_calculator(file_cache["files"])
+                image_size = self._build_image_size(model, aspect_ratio)
                 params.update({
                     "image": images,
-                    "size": self._build_image_size(model, aspect_ratio)
+                    "size": image_size
                 })
+                logger.info(
+                    f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, "
+                    f"size={image_size}, count={len(images)}"
+                )
                 memory.USER_IMAGE_CACHE.pop(session_id)
             else:
                 session_images = get_image_urls_from_session(session_id, session_manager)
                 if session_images:
                     aspect_ratio = size_calculator_from_data_urls(session_images)
+                    image_size = self._build_image_size(model, aspect_ratio)
                     params.update({
                         "image": session_images,
-                        "size": self._build_image_size(model, aspect_ratio)
+                        "size": image_size
                     })
-                    logger.info(f"[DoubaoImage] 从 session 历史取参考图, count={len(session_images)}")
+                    logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
+                    logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}, size={image_size}")
                 else:
                     params["size"] = self._build_image_size(model, default_aspect_ratio)
 
@@ -77,14 +84,14 @@ class DoubaoImageBot(Bot):
                     data=base64_data,
                     source_model=model
                 )
-                logger.info(f"[DoubaoImage] image injected to session, model={model}, session_id={session_id}")
+                logger.info(f"[{model.upper()}] image injected to session, model={model}, session_id={session_id}")
             except Exception as e:
-                logger.warning(f"[DoubaoImage] failed to inject image to session: {e}")
+                logger.warning(f"[{model.upper()}] failed to inject image to session: {e}")
 
             return Reply(ReplyType.IMAGE_URL, image_url)
         except Exception as e:
-            logger.error(f"[DoubaoImage] fetch reply error: {e}")
-            return Reply(ReplyType.ERROR, f"[DoubaoImage] {e}")
+            logger.error(f"[{model.upper()}] fetch reply error: {e}")
+            return Reply(ReplyType.ERROR, f"[{model.upper()}]s {e}")
 
     def _build_image_size(self, model, aspect_ratio):
         if model in const.DOUBAO_SEEDREAM_LIST:

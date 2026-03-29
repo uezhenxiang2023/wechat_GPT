@@ -17,6 +17,22 @@ from common.video_status import video_state
 from config import conf
 
 _user_chat_image_context = {}
+_GEMINI_IMAGE_RATIO_MAP = {
+    "1:1": 1.0,
+    "1:4": 1 / 4,
+    "4:1": 4 / 1,
+    "1:8": 1 / 8,
+    "8:1": 8 / 1,
+    "2:3": 2 / 3,
+    "3:2": 3 / 2,
+    "3:4": 3 / 4,
+    "4:3": 4 / 3,
+    "4:5": 4 / 5,
+    "5:4": 5 / 4,
+    "9:16": 9 / 16,
+    "16:9": 16 / 9,
+    "21:9": 21 / 9,
+}
 
 
 class GeminiVideoGenerationError(RuntimeError):
@@ -34,8 +50,8 @@ def get_paid_client(api_key):
     return genai.Client(api_key=api_key)
 
 
-def get_user_image_chat(session_id, image_model, *, paid_client, safety_settings):
-    image_settings = get_gemini_image_settings()
+def get_user_image_chat(session_id, image_model, *, paid_client, safety_settings, aspect_ratio=None):
+    image_settings = get_gemini_image_settings(aspect_ratio)
     img_config = GenerateContentConfig(
         safety_settings=safety_settings,
         response_modalities=["TEXT", "Image"],
@@ -127,6 +143,16 @@ def data_url_to_pil_image(image_url):
     image = Image.open(BytesIO(base64.b64decode(b64_data)))
     image.load()
     return image
+
+
+def infer_gemini_aspect_ratio_from_images(images):
+    sizes = [image.size for image in images if hasattr(image, "size")]
+    return _infer_gemini_aspect_ratio_from_sizes(sizes)
+
+
+def infer_gemini_aspect_ratio_from_data_urls(image_urls):
+    sizes = [_decode_image_size(image_url) for image_url in image_urls]
+    return _infer_gemini_aspect_ratio_from_sizes(sizes)
 
 
 def convert_image_to_types(image):
@@ -234,10 +260,12 @@ def _build_image_context_signature(images, prompt):
     return f"{len(images)}|{images[0] if images else ''}|{prompt}"
 
 
-def get_gemini_image_settings():
+def get_gemini_image_settings(aspect_ratio=None):
     return {
         "size": _normalize_gemini_image_size(conf().get("image_create_size", "1K")),
-        "aspect_ratio": conf().get("image_aspect_ratio", "16:9"),
+        "aspect_ratio": _normalize_gemini_image_aspect_ratio(
+            aspect_ratio or conf().get("image_aspect_ratio", "16:9")
+        ),
     }
 
 
@@ -247,6 +275,26 @@ def _normalize_gemini_image_size(image_size: str) -> str:
         return normalized
     logger.warning(f"[GeminiImage] invalid image_size={image_size}, fallback to 1K")
     return "1K"
+
+
+def _normalize_gemini_image_aspect_ratio(aspect_ratio: str) -> str:
+    normalized = str(aspect_ratio).strip()
+    if normalized in _GEMINI_IMAGE_RATIO_MAP:
+        return normalized
+    logger.warning(f"[GeminiImage] invalid aspect_ratio={aspect_ratio}, fallback to 16:9")
+    return "16:9"
+
+
+def _infer_gemini_aspect_ratio_from_sizes(sizes):
+    if not sizes:
+        return None
+    best_size = sorted(sizes, key=lambda size: size[0] * size[1], reverse=True)[0]
+    ratio = round(best_size[0] / best_size[1], 4)
+    return min(_GEMINI_IMAGE_RATIO_MAP, key=lambda key: abs(_GEMINI_IMAGE_RATIO_MAP[key] - ratio))
+
+
+def _decode_image_size(image_url):
+    return data_url_to_pil_image(image_url).size
 
 
 def _read_downloaded_video_bytes(video_file):

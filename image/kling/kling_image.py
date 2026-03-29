@@ -93,6 +93,7 @@ class KlingImageBot(Bot):
                     else:
                         payload["image"] = session_images[0].split(",", 1)[1]
                     logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
+                    logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {payload['aspect_ratio']}")
             elif file_cache:
                 paths = file_cache.get("path", [])
                 if paths:
@@ -113,6 +114,7 @@ class KlingImageBot(Bot):
                             b64 = base64.b64encode(f.read()).decode("utf-8")
                         payload["image"] = b64
                     logger.info(f"[{model.upper()}] 参考图已注入 payload, model={model}, count={len(paths)}")
+                    logger.info(f"[{model.upper()}] 从内存参考图推断比例: {payload['aspect_ratio']}")
                 memory.USER_IMAGE_CACHE.pop(session_id)
 
             resp = requests.post(
@@ -128,18 +130,18 @@ class KlingImageBot(Bot):
             err = self._check_response_error(data)
             if err:
                 logger.info(f"[{model.upper()}] 提交任务失败: {err}, resp={data}")
-                return Reply(ReplyType.ERROR, f"可灵出图失败：{err}")
+                return Reply(ReplyType.ERROR, f"[{model.upper()}]出图失败：{err}")
 
             task_id = data.get("data", {}).get("task_id")
             if not task_id:
                 logger.error(f"[{model.upper()}] 未获取到 task_id, resp={data}")
-                return Reply(ReplyType.ERROR, "可灵图片生成失败：未获取到任务ID")
+                return Reply(ReplyType.ERROR, f"[{model.upper()}]图片生成失败：未获取到任务ID")
 
             logger.info(f"[{model.upper()}] 任务已提交, task_id={task_id}, model={model}, endpoint={endpoint}")
 
             img_url, poll_err = self._poll_task(task_id, endpoint, model)
             if poll_err:
-                return Reply(ReplyType.ERROR, f"可灵出图失败：{poll_err}")
+                return Reply(ReplyType.ERROR, f"[{model.upper()}]出图失败：{poll_err}")
 
             # 图片生成结果注入 session 上下文
             try:
