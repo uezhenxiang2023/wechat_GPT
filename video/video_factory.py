@@ -15,4 +15,7 @@ def create_video(video_type):
     if video_type in const.VEO_LIST:
         from video.google.google_gemini_video import GoogleGeminiVideoBot
         return GoogleGeminiVideoBot()
+    if video_type in const.GROK_VIDEO_LIST:
+        from video.grok.grok_video import GrokVideoBot
+        return GrokVideoBot()
     raise RuntimeError(f"Unsupported image model: {video_type}")

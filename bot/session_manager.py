@@ -85,7 +85,7 @@ class SessionManager(object):
             logger.warning("Exception when counting tokens precisely for session: {}".format(str(e)))
         return session
     
-    def session_inject_media(self, session_id, media_type, data, source_model, mime_type=None, fps=1):
+    def session_inject_media(self, session_id, media_type, data, source_model, mime_type=None, fps=1, remote_url=None):
         """
         将跨模型生成的媒体结果注入当前 session 上下文
 
@@ -109,6 +109,8 @@ class SessionManager(object):
                     "fps": fps
                 }
             }
+            if remote_url:
+                media_content["video_url"]["remote_url"] = remote_url
         else:
             media_content = {
                 "type": "image_url",

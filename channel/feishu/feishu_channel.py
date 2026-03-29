@@ -9,8 +9,8 @@
 import cv2
 import io, json, os, uuid, requests, threading, re
 from io import BytesIO
-from flask import Flask
-from urllib.parse import urlparse
+from flask import Flask, send_file, abort
+from urllib.parse import urlparse, quote
 
 from channel.feishu.feishu_message import FeishuMessage
 from bridge.context import Context
@@ -46,6 +46,7 @@ class FeiShuChanel(ChatChannel):
         self.app = Flask(__name__)
         # 注册路由
         self.app.route("/", methods=["POST"])(self.handle_webhook_event)
+        self.app.route("/tmp_media/<path:relative_path>", methods=["GET"])(self.serve_tmp_media)
         self.webhook_port = conf().get('feishu_webhook_port')
         # Register event handler.
         self.event_handler = (
@@ -295,6 +296,10 @@ class FeiShuChanel(ChatChannel):
         else:
             logger.debug("[Lark]receive msg: {}, cmsg={}".format(cmsg.content, cmsg))
         context = self._compose_context(cmsg.ctype, cmsg.content, isgroup=False, msg=cmsg)
+        if context and cmsg.ctype == ContextType.VIDEO:
+            public_url = self.build_public_media_url(cmsg.content)
+            if public_url:
+                context["video_public_url"] = public_url
         if context:
             self.produce(context)
 
@@ -315,6 +320,10 @@ class FeiShuChanel(ChatChannel):
         else:
             logger.debug("[Lark]receive group msg: {}".format(cmsg.content))
         context = self._compose_context(cmsg.ctype, cmsg.content, isgroup=True, msg=cmsg)
+        if context and cmsg.ctype == ContextType.VIDEO:
+            public_url = self.build_public_media_url(cmsg.content)
+            if public_url:
+                context["video_public_url"] = public_url
         if context:
             self.produce(context)
 
@@ -765,6 +774,27 @@ class FeiShuChanel(ChatChannel):
         # 如果文件名包含查询参数，只取问号前的部分
         filename = filename.split('?')[0]
         return filename
+
+    def serve_tmp_media(self, relative_path):
+        tmp_root = os.path.abspath(TmpDir().path())
+        target_path = os.path.abspath(os.path.join(tmp_root, relative_path))
+        if not target_path.startswith(tmp_root + os.sep) and target_path != tmp_root:
+            abort(403)
+        if not os.path.exists(target_path):
+            abort(404)
+        return send_file(target_path, conditional=True)
+
+    def build_public_media_url(self, file_path):
+        base_url = str(conf().get("media_public_base_url", "") or "").rstrip("/")
+        if not base_url:
+            return None
+        tmp_root = os.path.abspath(TmpDir().path())
+        abs_path = os.path.abspath(file_path)
+        if not abs_path.startswith(tmp_root + os.sep) and abs_path != tmp_root:
+            logger.warning(f"[Lark] media path is outside tmp dir, skip public url build: {file_path}")
+            return None
+        relative_path = os.path.relpath(abs_path, tmp_root).replace(os.sep, "/")
+        return f"{base_url}/tmp_media/{quote(relative_path, safe='/')}"
     
     def _extract_video_cover(self, video_path: str) -> str | None:
         """截取视频第一帧，上传飞书返回 image_key"""

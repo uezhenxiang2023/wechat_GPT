@@ -152,6 +152,7 @@ available_setting = {
     "feishu_bot_name": "",  # 飞书机器人的名字
     "feishu_websocket": False,  # 是否使用websocket长链接接收飞书事件
     "feishu_webhook_port": 7777, # 本地回调服务器端口
+    "media_public_base_url": "",  # 用于对外暴露 tmp 媒体文件的公网根地址，如 https://bot.example.com
     
     # 钉钉配置
     "dingtalk_client_id": "",  # 钉钉机器人Client ID 

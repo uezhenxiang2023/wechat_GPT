@@ -97,3 +97,25 @@ def get_image_urls_from_session(session_id, session_manager=None):
         if images:
             return images
     return []
+
+
+def get_video_urls_from_session(session_id, session_manager=None, include_data_urls=False):
+    session_manager = session_manager or get_chat_session_manager(session_id)
+    session = session_manager.build_session(session_id)
+    for msg in reversed(session.messages):
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        videos = []
+        for item in content:
+            if not isinstance(item, dict) or item.get("type") != "video_url":
+                continue
+            video_info = item.get("video_url", {})
+            video_url = video_info.get("remote_url") or video_info.get("url")
+            if not isinstance(video_url, str):
+                continue
+            if include_data_urls or video_url.startswith(("http://", "https://")):
+                videos.append(video_url)
+        if videos:
+            return videos
+    return []

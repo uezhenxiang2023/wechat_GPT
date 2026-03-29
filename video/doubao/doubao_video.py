@@ -76,7 +76,8 @@ class DoubaoVideoBot(Bot):
                     session_id=session_id,
                     media_type="video",
                     data=base64_data,
-                    source_model=model
+                    source_model=model,
+                    remote_url=video_url
                 )
                 logger.info(f"[{model.upper()}] video injected to session, model={model}, session_id={session_id}")
             except Exception as e:

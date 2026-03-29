@@ -73,8 +73,19 @@ class FeishuMessage(ChatMessage):
             self._prepare_fn = lambda: get_message_resource(message_id=self.msg_id, file_key=image_key, type=event.message.message_type, file_path=self.content)
         elif event.message.message_type == 'media':
             self.ctype = ContextType.VIDEO
-            self.content = TmpDir().path() + event.message["FileName"]  # content直接存临时目录路径
-            self._prepare_fn = lambda: event.message.download(self.content)
+            media_content = json.loads(event.message.content)
+            file_name = media_content.get("file_name") or media_content.get("file_key") or f"{self.msg_id}.mp4"
+            self.content = self.user_dir + file_name
+            file_key = media_content.get("file_key")
+            if file_key:
+                self._prepare_fn = lambda: get_message_resource(
+                    message_id=self.msg_id,
+                    file_key=file_key,
+                    type=event.message.message_type,
+                    file_path=self.content
+                )
+            else:
+                self._prepare_fn = lambda: event.message.download(self.content)
         elif event.message.message_type == 'file':
             self.ctype = ContextType.FILE
             file_key = json.loads(event.message.content)["file_key"]

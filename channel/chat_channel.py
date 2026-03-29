@@ -314,8 +314,26 @@ class ChatChannel(Channel):
             elif context.type == ContextType.VIDEO_CREATE:
                 reply = super().build_video_content(context.content, context)
             elif context.type == ContextType.VIDEO:   
-                # 视频消息，当前无默认逻辑
-                pass
+                file_path = context.content
+                dir_path = os.path.dirname(file_path)
+                if not os.path.exists(dir_path):
+                    create_user_dir(dir_path)
+                session_id = context["session_id"]
+                model = model_state.get_video_state(session_id)
+                logger.info(f'[{model.upper()}] query with video, path={file_path}')
+                with cache_lock:
+                    context["msg"].prepare()
+                    video_cache_item = {
+                        "path": file_path,
+                        "public_url": context.get("video_public_url"),
+                        "mime_type": "video/mp4",
+                    }
+                    existing_cache = memory.USER_VIDEO_CACHE.get(session_id)
+                    if existing_cache and isinstance(existing_cache.get("files"), list):
+                        existing_cache["files"].append(video_cache_item)
+                    else:
+                        memory.USER_VIDEO_CACHE[session_id] = {"files": [video_cache_item]}
+                    logger.info(f'[{model.upper()}] {file_path} cached to video memory')
             else:
                 logger.warning("[WX] unknown context type: {}".format(context.type))
                 return
