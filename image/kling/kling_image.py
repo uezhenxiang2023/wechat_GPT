@@ -11,7 +11,7 @@ from bot.bot import Bot
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
-from common.utils import url_to_base64, get_ark_sessions
+from common.utils import get_chat_session_manager, get_image_urls_from_session, url_to_base64
 from common import const, memory
 from config import conf
 from common.model_status import model_state
@@ -60,9 +60,10 @@ class KlingImageBot(Bot):
         try:
             session_id = context["session_id"]
             model = model_state.get_image_model(session_id) or const.KLING_IMAGE_O1
+            session_manager = get_chat_session_manager(session_id)
 
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
-            get_ark_sessions().session_query(query, session_id)
+            session_manager.session_query(query, session_id)
 
             endpoint = self._get_endpoint(model)
             payload = {
@@ -76,13 +77,13 @@ class KlingImageBot(Bot):
             prompt_ratio = self._parse_aspect_ratio_from_prompt(query)
             if prompt_ratio:
                 payload["aspect_ratio"] = prompt_ratio
-                logger.info(f"[Kling] 从 prompt 中解析到比例: {prompt_ratio}")
+                logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
 
             # 参考图捕获
             file_cache = memory.USER_IMAGE_CACHE.get(session_id)
             session_images = []
             if not file_cache:
-                session_images = self._get_image_from_session(session_id)
+                session_images = get_image_urls_from_session(session_id, session_manager)
                 if session_images:
                     if not prompt_ratio:
                         # 如果用户没设置图片比例，则自动从缓存图片的比例
@@ -91,7 +92,7 @@ class KlingImageBot(Bot):
                         payload["image_list"] = [{"image": url.split(",", 1)[1]} for url in session_images]
                     else:
                         payload["image"] = session_images[0].split(",", 1)[1]
-                    logger.info(f"[Kling] 从 session 历史取参考图, count={len(session_images)}")
+                    logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
             elif file_cache:
                 paths = file_cache.get("path", [])
                 if paths:
@@ -111,7 +112,7 @@ class KlingImageBot(Bot):
                         with open(paths[0], "rb") as f:
                             b64 = base64.b64encode(f.read()).decode("utf-8")
                         payload["image"] = b64
-                    logger.info(f"[Kling] 参考图已注入 payload, model={model}, count={len(paths)}")
+                    logger.info(f"[{model.upper()}] 参考图已注入 payload, model={model}, count={len(paths)}")
                 memory.USER_IMAGE_CACHE.pop(session_id)
 
             resp = requests.post(
@@ -126,44 +127,44 @@ class KlingImageBot(Bot):
             # 检查业务错误码
             err = self._check_response_error(data)
             if err:
-                logger.info(f"[Kling] 提交任务失败: {err}, resp={data}")
+                logger.info(f"[{model.upper()}] 提交任务失败: {err}, resp={data}")
                 return Reply(ReplyType.ERROR, f"可灵出图失败：{err}")
 
             task_id = data.get("data", {}).get("task_id")
             if not task_id:
-                logger.error(f"[Kling] 未获取到 task_id, resp={data}")
+                logger.error(f"[{model.upper()}] 未获取到 task_id, resp={data}")
                 return Reply(ReplyType.ERROR, "可灵图片生成失败：未获取到任务ID")
 
-            logger.info(f"[Kling] 任务已提交, task_id={task_id}, model={model}, endpoint={endpoint}")
+            logger.info(f"[{model.upper()}] 任务已提交, task_id={task_id}, model={model}, endpoint={endpoint}")
 
-            img_url, poll_err = self._poll_task(task_id, endpoint)
+            img_url, poll_err = self._poll_task(task_id, endpoint, model)
             if poll_err:
                 return Reply(ReplyType.ERROR, f"可灵出图失败：{poll_err}")
 
             # 图片生成结果注入 session 上下文
             try:
                 base64_data = url_to_base64(img_url)
-                get_ark_sessions().session_inject_media(
+                session_manager.session_inject_media(
                     session_id=session_id,
                     media_type='image',
                     data=base64_data,
                     source_model=model
                 )
-                logger.info(f"[Kling] image injected to session, model={model}, session_id={session_id}")
+                logger.info(f"[{model.upper()}] image injected to session, model={model}, session_id={session_id}")
             except Exception as e:
-                logger.warning(f"[Kling] failed to inject image to session: {e}")
+                logger.warning(f"[{model.upper()}] failed to inject image to session: {e}")
 
             return Reply(ReplyType.IMAGE_URL, img_url)
 
         except Exception as e:
-            logger.error(f"[Kling] fetch reply error: {e}")
-            return Reply(ReplyType.ERROR, f"[Kling] {e}")
+            logger.error(f"[{model.upper()}] fetch reply error: {e}")
+            return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
 
     def _normalize_resolution(self, resolution: str) -> str:
         normalized = str(resolution).strip().lower()
         if normalized in {"1k", "2k", "4k"}:
             return normalized
-        logger.warning(f"[Kling] invalid resolution={resolution}, fallback to 1k")
+        logger.warning(f"[Kling_Image] invalid resolution={resolution}, fallback to 1k")
         return "1k"
 
     def _check_response_error(self, data: dict) -> str | None:
@@ -201,7 +202,7 @@ class KlingImageBot(Bot):
         else:
             return f"[{code}] {desc}" + (f"：{message}" if message else "")
 
-    def _poll_task(self, task_id: str, endpoint: str, max_retries=60, interval=5) -> tuple:
+    def _poll_task(self, task_id: str, endpoint: str, model: str, max_retries=60, interval=5) -> tuple:
         query_url = f"{self.API_BASE}{endpoint}/{task_id}"
         retry_delay = interval
 
@@ -215,12 +216,12 @@ class KlingImageBot(Bot):
 
                 if code == 1303:
                     retry_delay = min(retry_delay * 2, 30)
-                    logger.warning(f"[Kling] 并发超限，退避重试 {retry_delay}s, task_id={task_id}")
+                    logger.warning(f"[{model.upper()}] 并发超限，退避重试 {retry_delay}s, task_id={task_id}")
                     continue
 
                 err = self._check_response_error(result)
                 if err:
-                    logger.error(f"[Kling] 轮询出错: {err}, task_id={task_id}")
+                    logger.error(f"[{model.upper()}] 轮询出错: {err}, task_id={task_id}")
                     return None, err
 
                 data = result.get("data", {})
@@ -230,21 +231,21 @@ class KlingImageBot(Bot):
                     images = data.get("task_result", {}).get("images", [])
                     if images:
                         url = images[0].get("url")
-                        logger.info(f"[Kling] 图片生成成功, task_id={task_id}, url={url}")
+                        logger.info(f"[{model.upper()}] 图片生成成功, task_id={task_id}, url={url}")
                         return url, None
 
                 elif status == "failed":
                     status_msg = data.get("task_status_msg", "")
-                    logger.error(f"[Kling] 任务失败, task_id={task_id}, msg={status_msg}")
+                    logger.error(f"[{model.upper()}] 任务失败, task_id={task_id}, msg={status_msg}")
                     return None, f"任务失败：{status_msg}"
 
                 retry_delay = interval
-                logger.debug(f"[Kling] 轮询中 ({i+1}/{max_retries}), status={status}, task_id={task_id}")
+                logger.debug(f"[{model.upper()}] 轮询中 ({i+1}/{max_retries}), status={status}, task_id={task_id}")
 
             except Exception as e:
-                logger.warning(f"[Kling] 轮询异常: {e}")
+                logger.warning(f"[{model.upper()}] 轮询异常: {e}")
 
-        logger.error(f"[Kling] 任务超时, task_id={task_id}")
+        logger.error(f"[{model.upper()}] 任务超时, task_id={task_id}")
         return None, "任务超时，请稍后重试"
 
     def aspect_ratio_calculator(self, paths: list) -> str:
@@ -272,22 +273,6 @@ class KlingImageBot(Bot):
         closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
         return ratio_map[closest]
 
-    def _get_image_from_session(self, session_id: str) -> list:
-        """图片缓存过期但在会话历史里，从 session 历史消息中提取最近一条图片消息"""
-        session = get_ark_sessions().build_session(session_id)
-        for msg in reversed(session.messages):
-            content = msg.get("content")
-            if not isinstance(content, list):
-                continue
-            images = [
-                item["image_url"]["url"]
-                for item in content
-                if item.get("type") == "image_url"
-            ]
-            if images:
-                return images  # 返回 base64 url 列表
-        return []
-    
     def _get_aspect_ratio_from_base64(self, b64_url: str) -> str:
         """从 base64 图片 url 推断宽高比"""
         b64_data = b64_url.split(",", 1)[1]

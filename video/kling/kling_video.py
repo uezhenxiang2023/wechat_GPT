@@ -13,7 +13,7 @@ from bot.bot import Bot
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
-from common.utils import url_to_base64, get_ark_sessions
+from common.utils import get_chat_session_manager, get_image_urls_from_session, url_to_base64
 from common import const, memory
 from config import conf
 from common.model_status import model_state
@@ -51,9 +51,10 @@ class KlingVideoBot(Bot):
             session_id = context["session_id"]
             model = model_state.get_video_state(session_id) or const.KLING_VIDEO_O1
             duration = str(video_state.get_video_duration(session_id))
+            session_manager = get_chat_session_manager(session_id)
 
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
-            get_ark_sessions().session_query(query, session_id)
+            session_manager.session_query(query, session_id)
 
             payload = {
                 "model_name": model,
@@ -68,13 +69,13 @@ class KlingVideoBot(Bot):
             prompt_ratio = self._parse_aspect_ratio_from_prompt(query)
             if prompt_ratio:
                 payload["aspect_ratio"] = prompt_ratio
-                logger.info(f"[Kling] 从 prompt 中解析到比例: {prompt_ratio}")
+                logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
 
             # 参考素材捕获：内存缓存优先，过期则从 session 历史捞
             file_cache = memory.USER_IMAGE_CACHE.get(session_id)
             session_images = []
             if not file_cache:
-                session_images = self._get_image_from_session(session_id)
+                session_images = get_image_urls_from_session(session_id, session_manager)
 
             if file_cache:
                 paths = file_cache.get("path", [])
@@ -87,7 +88,7 @@ class KlingVideoBot(Bot):
                             b64 = base64.b64encode(f.read()).decode("utf-8")
                         image_list.append({"image_url": b64})
                     payload["image_list"] = image_list
-                    logger.info(f"[Kling] 参考图已注入 payload, count={len(paths)}")
+                    logger.info(f"[{model.upper()}] 参考图已注入 payload, count={len(paths)}")
                 memory.USER_IMAGE_CACHE.pop(session_id)
             elif session_images:
                 if not prompt_ratio:
@@ -95,7 +96,7 @@ class KlingVideoBot(Bot):
                 payload["image_list"] = [
                     {"image_url": url.split(",", 1)[1]} for url in session_images
                 ]
-                logger.info(f"[Kling] 从 session 历史取参考图, count={len(session_images)}")
+                logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
             else:
                 # 纯文生视频，必须传 aspect_ratio
                 if not prompt_ratio:
@@ -112,39 +113,39 @@ class KlingVideoBot(Bot):
 
             err = self._check_response_error(data)
             if err:
-                logger.error(f"[Kling] 提交任务失败: {err}")
+                logger.error(f"[{model.upper()}] 提交任务失败: {err}")
                 return Reply(ReplyType.ERROR, f"可灵出视频失败：{err}")
 
             task_id = data.get("data", {}).get("task_id")
             if not task_id:
                 return Reply(ReplyType.ERROR, "可灵视频生成失败：未获取到任务ID")
 
-            logger.info(f"[Kling] 任务已提交, task_id={task_id}, model={model}")
+            logger.info(f"[{model.upper()}] 任务已提交, task_id={task_id}, model={model}")
 
-            video_url, video_duration, poll_err = self._poll_task(task_id)
+            video_url, video_duration, poll_err = self._poll_task(task_id, model)
             if poll_err:
                 return Reply(ReplyType.ERROR, f"可灵出视频失败：{poll_err}")
 
             # 视频结果注入 session
             try:
                 base64_data = url_to_base64(video_url)
-                get_ark_sessions().session_inject_media(
+                session_manager.session_inject_media(
                     session_id=session_id,
                     media_type='video',
                     data=base64_data,
                     source_model=model
                 )
-                logger.info(f"[Kling] video injected to session, model={model}, session_id={session_id}")
+                logger.info(f"[{model.upper()}] video injected to session, model={model}, session_id={session_id}")
             except Exception as e:
-                logger.warning(f"[Kling] failed to inject video to session: {e}")
+                logger.warning(f"[{model.upper()}] failed to inject video to session: {e}")
 
             return Reply(ReplyType.VIDEO_URL, (video_duration, video_url))
 
         except Exception as e:
-            logger.error(f"[Kling] fetch reply error: {e}")
-            return Reply(ReplyType.ERROR, f"[Kling] {e}")
+            logger.error(f"[{model.upper()}] fetch reply error: {e}")
+            return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
 
-    def _poll_task(self, task_id: str, max_retries=120, interval=5) -> tuple:
+    def _poll_task(self, task_id: str, model: str, max_retries=120, interval=5) -> tuple:
         query_url = f"{self.API_BASE}{self.ENDPOINT_OMNI}/{task_id}"
         retry_delay = interval
 
@@ -158,7 +159,7 @@ class KlingVideoBot(Bot):
 
                 if code == 1303:
                     retry_delay = min(retry_delay * 2, 30)
-                    logger.warning(f"[Kling] 并发超限，退避重试 {retry_delay}s")
+                    logger.warning(f"[{model.upper()}] 并发超限，退避重试 {retry_delay}s")
                     continue
 
                 err = self._check_response_error(result)
@@ -173,7 +174,7 @@ class KlingVideoBot(Bot):
                     if videos:
                         url = videos[0].get("url")
                         duration = float(videos[0].get("duration", 5))
-                        logger.info(f"[Kling] 视频生成成功, task_id={task_id}, url={url}")
+                        logger.info(f"[{model.upper()}] 视频生成成功, task_id={task_id}, url={url}")
                         return url, duration, None
 
                 elif status == "failed":
@@ -181,10 +182,10 @@ class KlingVideoBot(Bot):
                     return None, None, f"任务失败：{msg}"
 
                 retry_delay = interval
-                logger.debug(f"[Kling] 轮询中 ({i+1}/{max_retries}), status={status}")
+                logger.debug(f"[{model.upper()}] 轮询中 ({i+1}/{max_retries}), status={status}")
 
             except Exception as e:
-                logger.warning(f"[Kling] 轮询异常: {e}")
+                logger.warning(f"[{model.upper()}] 轮询异常: {e}")
 
         return None, None, "任务超时，请稍后重试"
 
@@ -210,9 +211,9 @@ class KlingVideoBot(Bot):
 
     def aspect_ratio_calculator(self, paths: list) -> str:
         ratio_map = {
-            1.0: "1:1", 1.33: "4:3", 0.75: "3:4",
-            1.78: "16:9", 0.56: "9:16", 1.5: "3:2",
-            0.67: "2:3"
+            1.0: "1:1", 
+            1.78: "16:9", 
+            0.56: "9:16"
         }
         sizes = [Image.open(p).size for p in paths]
         best = sorted(sizes, key=lambda x: x[0] * x[1], reverse=True)[0]
@@ -220,38 +221,23 @@ class KlingVideoBot(Bot):
         closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
         return ratio_map[closest]
 
-    def _get_image_from_session(self, session_id: str) -> list:
-        session = get_ark_sessions().build_session(session_id)
-        for msg in reversed(session.messages):
-            content = msg.get("content")
-            if not isinstance(content, list):
-                continue
-            images = [
-                item["image_url"]["url"]
-                for item in content
-                if item.get("type") == "image_url"
-            ]
-            if images:
-                return images
-        return []
-
     def _get_aspect_ratio_from_base64(self, b64_url: str) -> str:
         b64_data = b64_url.split(",", 1)[1]
         img = Image.open(io.BytesIO(base64.b64decode(b64_data)))
         ratio = round(img.size[0] / img.size[1], 2)
         ratio_map = {
-            1.0: "1:1", 1.33: "4:3", 0.75: "3:4",
-            1.78: "16:9", 0.56: "9:16", 1.5: "3:2",
-            0.67: "2:3"
+            1.0: "1:1", 
+            1.78: "16:9", 
+            0.56: "9:16"
         }
         closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
         return ratio_map[closest]
 
     def _parse_aspect_ratio_from_prompt(self, prompt: str) -> str | None:
         ratio_map = {
-            1.0: "1:1", 1.33: "4:3", 0.75: "3:4",
-            1.78: "16:9", 0.56: "9:16", 1.5: "3:2",
-            0.67: "2:3"
+            1.0: "1:1", 
+            1.78: "16:9", 
+            0.56: "9:16"
         }
         decimal_pattern = r'(?<!\d)(\d+\.\d+)(?!\d)'
         for match in re.finditer(decimal_pattern, prompt):

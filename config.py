@@ -86,6 +86,9 @@ available_setting = {
     # Volcengine ARK 配置
     "ark_api_key": "",
     "thinking": "", # "disabled",不使用深度思考能力; "enabled",使用深度思考能力; "auto",模型自行判断是否使用深度思考能力
+    # xAI Grok 配置
+    "grok_api_key": "",
+    "grok_base_url": "https://api.x.ai/v1",
     # wework的通用配置
     "wework_smart": True,  # 配置wework是否使用已登录的企业微信，False为多开
     # 语音设置

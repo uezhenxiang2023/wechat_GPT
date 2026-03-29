@@ -14,6 +14,7 @@ from bridge.reply import Reply, ReplyType
 from common import memory
 from common.log import logger
 from common.model_status import model_state
+from common.utils import get_chat_session_manager
 from config import conf
 
 
@@ -26,8 +27,9 @@ class GoogleGeminiVideoBot(Bot):
         try:
             session_id = context["session_id"]
             model = model_state.get_video_state(session_id)
+            session_manager = get_chat_session_manager(session_id) or _gemini_sessions
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
-            _gemini_sessions.session_query(query, session_id)
+            session_manager.session_query(query, session_id)
 
             image, last_image, ref_images = self._get_video_inputs(session_id)
             response = generate_video(
@@ -41,7 +43,7 @@ class GoogleGeminiVideoBot(Bot):
             )
 
             try:
-                _gemini_sessions.session_inject_media(
+                session_manager.session_inject_media(
                     session_id=session_id,
                     media_type="video",
                     data=base64.b64encode(response.video_bytes).decode("utf-8"),

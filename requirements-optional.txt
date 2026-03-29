@@ -40,6 +40,9 @@ websocket-client==1.2.0
 # claude bot
 curl_cffi
 
+# xAI Grok
+xai-sdk
+
 # tongyi qwen
 broadscope_bailian
 

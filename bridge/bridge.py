@@ -38,6 +38,8 @@ class Bridge(object):
             self.btype["chat"] = const.OPEN_AI_ASSISTANT
         if self.model_type in const.DOUAO:
             self.btype["chat"] = const.ARK
+        if self.model_type in const.GROK_LIST:
+            self.btype["chat"] = const.GROK
 
         if conf().get("use_linkai") and conf().get("linkai_api_key"):
             self.btype["chat"] = const.LINKAI

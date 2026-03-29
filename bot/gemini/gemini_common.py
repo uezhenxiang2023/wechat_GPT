@@ -12,6 +12,7 @@ from google.genai.types import Part, GenerateContentConfig
 from bot.gemini.google_gemini_session import _gemini_sessions
 from common import const
 from common.log import logger
+from common.utils import get_chat_session_manager
 from common.video_status import video_state
 from config import conf
 
@@ -57,17 +58,14 @@ def get_image_from_session(session_id):
 
 
 def get_image_context_from_session(session_id):
-    session = _gemini_sessions.build_session(session_id)
+    session_manager = get_chat_session_manager(session_id) or _gemini_sessions
+    session = session_manager.build_session(session_id)
     for idx in range(len(session.messages) - 1, -1, -1):
         msg = session.messages[idx]
         content = msg.get("content")
         if not isinstance(content, list):
             continue
-        images = [
-            item["image_url"]["url"]
-            for item in content
-            if item.get("type") == "image_url"
-        ]
+        images = _extract_image_urls_from_content(content)
         if images:
             prompt = ""
             for prev_idx in range(idx - 1, -1, -1):
@@ -88,6 +86,18 @@ def get_image_context_from_session(session_id):
         "prompt": "",
         "signature": ""
     }
+
+
+def _extract_image_urls_from_content(content):
+    images = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "image_url":
+            image_url = item.get("image_url", {}).get("url")
+            if image_url:
+                images.append(image_url)
+    return images
 
 
 def should_inject_image_context(session_id, signature):

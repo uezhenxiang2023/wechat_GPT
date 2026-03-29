@@ -60,4 +60,8 @@ def create_bot(bot_type):
         from bot.ark.volcengine_ark_bot import VolcengineArkBot
         return VolcengineArkBot()
 
+    elif bot_type == const.GROK:
+        from bot.grok.grok_bot import GrokBot
+        return GrokBot()
+
     raise RuntimeError

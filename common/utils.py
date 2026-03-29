@@ -67,3 +67,33 @@ def url_to_base64(url: str) -> str:
 def get_ark_sessions():
     from bot.ark.volcengine_ark_bot import _ark_sessions
     return _ark_sessions
+
+
+def get_chat_session_manager(session_id):
+    try:
+        from bridge.bridge import Bridge
+
+        bot = Bridge(session_id).get_bot("chat")
+        sessions = getattr(bot, "sessions", None)
+        if sessions is not None:
+            return sessions
+    except Exception:
+        pass
+    return get_ark_sessions()
+
+
+def get_image_urls_from_session(session_id, session_manager=None):
+    session_manager = session_manager or get_chat_session_manager(session_id)
+    session = session_manager.build_session(session_id)
+    for msg in reversed(session.messages):
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        images = [
+            item["image_url"]["url"]
+            for item in content
+            if item.get("type") == "image_url"
+        ]
+        if images:
+            return images
+    return []

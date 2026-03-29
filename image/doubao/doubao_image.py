@@ -14,7 +14,7 @@ from common import const
 from common import memory
 from common.log import logger
 from common.model_status import model_state
-from common.utils import get_ark_sessions, url_to_base64
+from common.utils import get_chat_session_manager, get_image_urls_from_session, url_to_base64
 from config import conf
 
 
@@ -28,8 +28,9 @@ class DoubaoImageBot(Bot):
         try:
             session_id = context["session_id"]
             model = model_state.get_image_model(session_id)
+            session_manager = get_chat_session_manager(session_id)
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
-            get_ark_sessions().session_query(query, session_id)
+            session_manager.session_query(query, session_id)
 
             params = {
                 "model": model,
@@ -54,7 +55,7 @@ class DoubaoImageBot(Bot):
                 })
                 memory.USER_IMAGE_CACHE.pop(session_id)
             else:
-                session_images = get_image_from_session(session_id)
+                session_images = get_image_urls_from_session(session_id, session_manager)
                 if session_images:
                     aspect_ratio = size_calculator_from_data_urls(session_images)
                     params.update({
@@ -70,7 +71,7 @@ class DoubaoImageBot(Bot):
 
             try:
                 base64_data = url_to_base64(image_url)
-                get_ark_sessions().session_inject_media(
+                session_manager.session_inject_media(
                     session_id=session_id,
                     media_type="image",
                     data=base64_data,

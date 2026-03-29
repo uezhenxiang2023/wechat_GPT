@@ -129,6 +129,10 @@ class SessionManager(object):
         }
 
         session.messages.append(media_block)
+        if hasattr(session, "append_media_message"):
+            session.append_media_message(media_type, source_model)
+        elif hasattr(session, "mark_remote_history_outdated"):
+            session.mark_remote_history_outdated()
 
     def clear_session(self, session_id):
         if session_id in self.sessions:
