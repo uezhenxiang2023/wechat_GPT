@@ -300,6 +300,12 @@ class FeiShuChanel(ChatChannel):
             public_url = self.build_public_media_url(cmsg.content)
             if public_url:
                 context["video_public_url"] = public_url
+        if context and cmsg.ctype == ContextType.FILE:
+            suffix = os.path.splitext(cmsg.content)[1].lstrip(".").lower()
+            if suffix in const.VIDEO:
+                public_url = self.build_public_media_url(cmsg.content)
+                if public_url:
+                    context["video_public_url"] = public_url
         if context:
             self.produce(context)
 
@@ -324,6 +330,12 @@ class FeiShuChanel(ChatChannel):
             public_url = self.build_public_media_url(cmsg.content)
             if public_url:
                 context["video_public_url"] = public_url
+        if context and cmsg.ctype == ContextType.FILE:
+            suffix = os.path.splitext(cmsg.content)[1].lstrip(".").lower()
+            if suffix in const.VIDEO:
+                public_url = self.build_public_media_url(cmsg.content)
+                if public_url:
+                    context["video_public_url"] = public_url
         if context:
             self.produce(context)
 

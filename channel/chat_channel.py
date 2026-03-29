@@ -288,7 +288,21 @@ class ChatChannel(Channel):
                 logger.info(f'[{model.upper()}] query with file, path={file_path}')
                 mime_type = file_path[(file_path.rfind('.') + 1):]
                 type_id = 'application'
-                if mime_type in const.DOCUMENT:
+                if mime_type in const.VIDEO:
+                    with cache_lock:
+                        context["msg"].prepare()
+                        video_cache_item = {
+                            "path": file_path,
+                            "public_url": context.get("video_public_url"),
+                            "mime_type": f"video/{mime_type}",
+                        }
+                        existing_cache = memory.USER_VIDEO_CACHE.get(session_id)
+                        if existing_cache and isinstance(existing_cache.get("files"), list):
+                            existing_cache["files"].append(video_cache_item)
+                        else:
+                            memory.USER_VIDEO_CACHE[session_id] = {"files": [video_cache_item]}
+                        logger.info(f'[{model.upper()}] {file_path} cached to video memory from file branch')
+                elif mime_type in const.DOCUMENT:
                     # 将文件下载到本地/tmp目录
                     context['msg'].prepare()
                     if mime_type == 'pdf':
