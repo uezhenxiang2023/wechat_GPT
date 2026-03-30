@@ -551,25 +551,30 @@ class TelegramChannel(ChatChannel):
                     logger.info(f"[TELEGRAMBOT_CLAUDE] sendMsg={reply_content}, receiver={receiver}")
             elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
                 response = reply.content
-                parts = response.candidates[0].content.parts
-                if parts is None:
-                    finish_reason = response.candidates[0].finish_reason
-                    logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
-                    await self.application.bot.send_message(chat_id=receiver, text=const.ERROR_RESPONSE)
-                    logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
+                if hasattr(response, "candidates"):
+                    parts = response.candidates[0].content.parts
+                    if parts is None:
+                        finish_reason = response.candidates[0].finish_reason
+                        logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
+                        await self.application.bot.send_message(chat_id=receiver, text=const.ERROR_RESPONSE)
+                        logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
+                    else:
+                        for part in parts:
+                            if part.text:
+                                reply_text = part.text
+                                await self.application.bot.send_message(chat_id=receiver, text=reply_text)
+                                logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(conf().get('text_to_image'), reply_text, receiver))
+                            elif part.inline_data:
+                                image_bytes = part.inline_data.data
+                                image = BytesIO(image_bytes)
+                                logger.info(f"[TELEGRAMBOT_{conf().get('text_to_image')}] reply={image}")
+                                image.seek(0)
+                                await self.application.bot.send_photo(chat_id=receiver, photo=image)
+                                logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(conf().get('text_to_image'), image, receiver))
                 else:
-                    for part in parts:
-                        if part.text:
-                            reply_text = part.text
-                            await self.application.bot.send_message(chat_id=receiver, text=reply_text)
-                            logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(conf().get('text_to_image'), reply_text, receiver))
-                        elif part.inline_data:
-                            image_bytes = part.inline_data.data
-                            image = BytesIO(image_bytes)
-                            logger.info(f"[TELEGRAMBOT_{conf().get('text_to_image')}] reply={image}")
-                            image.seek(0)
-                            await self.application.bot.send_photo(chat_id=receiver, photo=image)
-                            logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(conf().get('text_to_image'), image, receiver))
+                    response.seek(0)
+                    await self.application.bot.send_photo(chat_id=receiver, photo=response)
+                    logger.info("[TELEGRAMBOT] sendImage binary, receiver={}".format(receiver))
             elif reply.type == ReplyType.FILE:  # 新增文件回复类型
                 file_pathes = reply.content['function_response']['file_pathes']
                 reply_text = escape(reply.content['reply_text'])

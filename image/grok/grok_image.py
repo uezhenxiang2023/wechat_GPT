@@ -10,7 +10,7 @@ from bridge.reply import Reply, ReplyType
 from common import const, memory
 from common.log import logger
 from common.model_status import model_state
-from common.utils import get_chat_session_manager, get_image_urls_from_session, url_to_base64
+from common.utils import get_chat_session_manager, get_image_urls_from_session
 from config import conf
 
 
@@ -52,25 +52,26 @@ class GrokImageBot(Bot):
             response = self.client.image.sample(
                 prompt=query,
                 model=model,
-                image_format="url",
+                image_format="base64",
                 resolution=self._normalize_resolution(conf().get("image_create_size", "1k"), model),
                 **image_args
             )
-            image_url = response.url
+            mime_type, base64_data = self._split_response_base64(response.base64)
+            image_storage = io.BytesIO(base64.b64decode(base64_data))
 
             try:
-                base64_data = url_to_base64(image_url)
                 session_manager.session_inject_media(
                     session_id=session_id,
                     media_type="image",
                     data=base64_data,
-                    source_model=model
+                    source_model=model,
+                    mime_type=mime_type
                 )
                 logger.info(f"[{model.upper()}] image injected to session, model={model}, session_id={session_id}")
             except Exception as e:
                 logger.warning(f"[{model.upper()}] failed to inject image to session: {e}")
 
-            return Reply(ReplyType.IMAGE_URL, image_url)
+            return Reply(ReplyType.IMAGE, image_storage)
         except Exception as e:
             logger.error(f"[{model.upper()}] fetch reply error: {e}")
             return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
@@ -112,6 +113,15 @@ class GrokImageBot(Bot):
             "image_urls": image_urls[:5],
             "aspect_ratio": aspect_ratio
         }
+
+    def _split_response_base64(self, encoded):
+        if not encoded:
+            raise ValueError("Empty base64 image response from Grok.")
+        if encoded.startswith("data:") and "base64," in encoded:
+            header, b64_data = encoded.split("base64,", 1)
+            mime_type = header[5:].rstrip(";")
+            return mime_type or "image/jpeg", b64_data
+        return "image/jpeg", encoded
 
     def _encode_pil_image(self, image, model):
         try:

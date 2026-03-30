@@ -420,33 +420,56 @@ class FeiShuChanel(ChatChannel):
         elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
             image_model_id = self._get_current_image_model_id(receiver)
             response = reply.content
-            parts = response.candidates[0].content.parts
-            if parts is None:
-                finish_reason = response.candidates[0].finish_reason
-                logger.error("[Lark] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
-                self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
-                logger.info("[Lark] sendMsg={}, receiver={}".format(reply.content, receiver))
+            if hasattr(response, "candidates"):
+                parts = response.candidates[0].content.parts
+                if parts is None:
+                    finish_reason = response.candidates[0].finish_reason
+                    logger.error("[Lark] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
+                    self.send_text(const.ERROR_RESPONSE, toUserName=receiver)
+                    logger.info("[Lark] sendMsg={}, receiver={}".format(reply.content, receiver))
+                else:
+                    for part in parts:
+                        if part.text:
+                            reply_text = part.text
+                            self.send_text(reply_text, receiver)
+                            logger.info("[Lark_{}] sendMsg={}, receiver={}".format(image_model_id, part.text, receiver))
+                        elif part.inline_data:
+                            image_type = part.inline_data.mime_type.split('/')[-1]
+                            image = BytesIO(part.inline_data.data)
+                            logger.info(f"[Lark_{image_model_id}] reply={image}")
+                            image.seek(0)
+                            user_dir = TmpDir().path() + str(receiver) + '/response/'
+                            user_dir_exists = os.path.exists(user_dir)
+                            if not user_dir_exists:
+                                create_user_dir(user_dir)
+                            response_uuid = str(uuid.uuid4())
+                            image_path = user_dir + response_uuid + '.' + image_type
+                            with open(image_path, 'wb') as f:
+                                f.write(image.read())
+                            self.send_image(image_path, receiver)
+                            logger.info("[Lark_{}] sendMsg={}, receiver={}".format(image_model_id, image, receiver))
             else:
-                for part in parts:
-                    if part.text:
-                        reply_text = part.text
-                        self.send_text(reply_text, receiver)
-                        logger.info("[Lark_{}] sendMsg={}, receiver={}".format(image_model_id, part.text, receiver))
-                    elif part.inline_data:
-                        image_type = part.inline_data.mime_type.split('/')[-1]
-                        image = BytesIO(part.inline_data.data)
-                        logger.info(f"[Lark_{image_model_id}] reply={image}")
-                        image.seek(0)
-                        user_dir = TmpDir().path() + str(receiver) + '/response/'
-                        user_dir_exists = os.path.exists(user_dir)
-                        if not user_dir_exists:
-                            create_user_dir(user_dir)
-                        response_uuid = str(uuid.uuid4())
-                        image_path = user_dir + response_uuid + '.' + image_type
-                        with open(image_path, 'wb') as f:
-                            f.write(image.read())
-                        self.send_image(image_path, receiver)
-                        logger.info("[Lark_{}] sendMsg={}, receiver={}".format(image_model_id, image, receiver))
+                image = response
+                image.seek(0)
+                image_bytes = image.read()
+                image.seek(0)
+                try:
+                    from PIL import Image
+
+                    with Image.open(BytesIO(image_bytes)) as pil_image:
+                        image_type = (pil_image.format or "PNG").lower()
+                except Exception:
+                    image_type = "png"
+                user_dir = TmpDir().path() + str(receiver) + '/response/'
+                user_dir_exists = os.path.exists(user_dir)
+                if not user_dir_exists:
+                    create_user_dir(user_dir)
+                response_uuid = str(uuid.uuid4())
+                image_path = user_dir + response_uuid + '.' + image_type
+                with open(image_path, 'wb') as f:
+                    f.write(image_bytes)
+                self.send_image(image_path, receiver)
+                logger.info("[Lark_{}] sendImage binary receiver={}".format(image_model_id, receiver))
         elif reply.type == ReplyType.FILE:  # 新增文件回复类型
             file_pathes = reply.content['function_response']['file_pathes']
             reply_text = reply.content['reply_text']
