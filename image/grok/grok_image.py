@@ -77,6 +77,20 @@ class GrokImageBot(Bot):
             return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
 
     def _build_image_args(self, session_id, model):
+        file_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
+        if file_cache:
+            image_urls = [
+                self._encode_pil_image(image_file, model)
+                for image_file in file_cache.get("files", [])
+            ]
+            image_urls = [image_url for image_url in image_urls if image_url]
+            memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
+            if image_urls:
+                image_urls = [self._compress_data_url(image_url, model) for image_url in image_urls]
+                aspect_ratio = self._infer_aspect_ratio_from_data_urls(image_urls, model)
+                logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
+                return self._build_edit_args(image_urls, aspect_ratio)
+
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
         if file_cache:
             image_urls = [

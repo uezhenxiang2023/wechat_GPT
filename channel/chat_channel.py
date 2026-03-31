@@ -187,6 +187,22 @@ class ChatChannel(Channel):
         # reply的发送步骤
         self._send_reply(context, reply)
 
+
+    def _cache_quoted_image(self, context: Context):
+        quoted_image_path = context.get("quoted_image_path")
+        session_id = context.get("session_id")
+        if not quoted_image_path or not session_id:
+            return
+        try:
+            img = Image.open(quoted_image_path)
+            memory.USER_QUOTED_IMAGE_CACHE[session_id] = {
+                "path": [quoted_image_path],
+                "files": [img]
+            }
+            logger.info(f"[WX] quoted image cached, session_id={session_id}, path={quoted_image_path}")
+        except Exception as e:
+            logger.warning(f"[WX] failed to cache quoted image: {e}")
+
     def _generate_reply(self, context: Context, reply: Reply = Reply()) -> Reply:
         session_id = context["session_id"]
                 
@@ -207,6 +223,8 @@ class ChatChannel(Channel):
         model = model_state.get_basic_state(session_id)
         if not e_context.is_pass():
             logger.debug("[WX] ready to handle context: type={}, content={}".format(context.type, context.content))
+            if context.type in (ContextType.IMAGE_CREATE, ContextType.VIDEO_CREATE):
+                self._cache_quoted_image(context)
             if context.type == ContextType.VOICE:  # 语音消息
                 cmsg = context["msg"]
                 cmsg.prepare()

@@ -41,6 +41,56 @@ def get_message_resource(*, message_id, file_key, type, file_path):
     f.write(response.file.read())
     f.close()
 
+
+
+def get_message_detail(message_id):
+    client = lark.Client.builder() \
+        .app_id(conf().get('feishu_app_id')) \
+        .app_secret(conf().get('feishu_app_secret')) \
+        .log_level(lark.LogLevel.INFO) \
+        .build()
+
+    request: GetMessageRequest = GetMessageRequest.builder() \
+        .message_id(message_id) \
+        .build()
+
+    response: GetMessageResponse = client.im.v1.message.get(request)
+    if not response.success():
+        lark.logger.error(
+            f"client.im.v1.message.get failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}")
+        return None
+
+    items = response.data.items or []
+    return items[0] if items else None
+
+
+def download_referenced_image(parent_message_id, file_path):
+    message = get_message_detail(parent_message_id)
+    if not message or not message.body or not message.body.content:
+        return None
+
+    try:
+        content = json.loads(message.body.content)
+    except Exception as e:
+        logger.warning(f"[Lark] failed to parse referenced message body: {e}")
+        return None
+
+    if message.msg_type == 'image':
+        image_key = content.get('image_key')
+        if not image_key:
+            return None
+        get_message_resource(message_id=parent_message_id, file_key=image_key, type='image', file_path=file_path)
+        return file_path
+
+    if message.msg_type == 'post':
+        contents = content.get('content', [])
+        for items in contents:
+            for item in items:
+                if item.get('tag') == 'img' and item.get('image_key'):
+                    get_message_resource(message_id=parent_message_id, file_key=item['image_key'], type='image', file_path=file_path)
+                    return file_path
+    return None
+
 def get_file_name(file):
     file_path = file.file_path
     file_name_index = file_path.rfind("/")
@@ -58,6 +108,7 @@ class FeishuMessage(ChatMessage):
         self.to_user_id = event.message.chat_id
         self.other_user_id = self.from_user_id
         self.user_dir = TmpDir().path() + str(self.from_user_id) + '/request/'
+        self.parent_id = event.message.parent_id
 
         if event.message.message_type == 'text':
             self.ctype = ContextType.TEXT
@@ -103,3 +154,11 @@ class FeishuMessage(ChatMessage):
                         self._prepare_fn = lambda: get_message_resource(message_id=self.msg_id, file_key=image_key, type='image', file_path=self.content)
         else:
             raise NotImplementedError("Unsupported message type: Type:{} MsgType:{}".format(event.message["Type"], event.message["MsgType"]))
+
+
+    def get_quoted_image_path(self):
+        if not self.parent_id:
+            return None
+        os.makedirs(self.user_dir, exist_ok=True)
+        file_path = os.path.join(self.user_dir, f"quoted_{self.parent_id}.png")
+        return download_referenced_image(self.parent_id, file_path)

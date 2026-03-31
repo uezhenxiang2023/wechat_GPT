@@ -80,7 +80,10 @@ class KlingImageBot(Bot):
                 logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
 
             # 参考图捕获
-            file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+            file_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
+            session_images = []
+            if not file_cache:
+                file_cache = memory.USER_IMAGE_CACHE.get(session_id)
             session_images = []
             if not file_cache:
                 session_images = get_image_urls_from_session(session_id, session_manager)
@@ -114,8 +117,14 @@ class KlingImageBot(Bot):
                             b64 = base64.b64encode(f.read()).decode("utf-8")
                         payload["image"] = b64
                     logger.info(f"[{model.upper()}] 参考图已注入 payload, model={model}, count={len(paths)}")
-                    logger.info(f"[{model.upper()}] 从内存参考图推断比例: {payload['aspect_ratio']}")
-                memory.USER_IMAGE_CACHE.pop(session_id)
+                    if memory.USER_QUOTED_IMAGE_CACHE.get(session_id):
+                        logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {payload['aspect_ratio']}")
+                    else:
+                        logger.info(f"[{model.upper()}] 从内存参考图推断比例: {payload['aspect_ratio']}")
+                if memory.USER_QUOTED_IMAGE_CACHE.get(session_id):
+                    memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
+                else:
+                    memory.USER_IMAGE_CACHE.pop(session_id)
 
             resp = requests.post(
                 f"{self.API_BASE}{endpoint}",

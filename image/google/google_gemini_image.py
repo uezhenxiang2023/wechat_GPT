@@ -74,6 +74,15 @@ class GoogleGeminiImageBot(Bot):
 
     def _build_request_contents(self, query, session_id, model):
         text = Part.from_text(text=query)
+        quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
+        if quoted_cache:
+            request_contents = list(quoted_cache["files"])
+            request_contents.append(text)
+            aspect_ratio = infer_gemini_aspect_ratio_from_images(quoted_cache["files"])
+            memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
+            logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}")
+            return request_contents, aspect_ratio
+
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
         if file_cache:
             request_contents = list(file_cache["files"])
