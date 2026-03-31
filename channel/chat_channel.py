@@ -187,21 +187,26 @@ class ChatChannel(Channel):
         # reply的发送步骤
         self._send_reply(context, reply)
 
+    def _get_channel(self, context: Context = None):
+        channel = context.get("channel") if context else None
+        channel_type = getattr(channel, "channel_type", None) or getattr(self, "channel_type", None) or conf().get("channel_type", "wx")
+        return f"[{str(channel_type).upper()}]"
 
     def _cache_quoted_image(self, context: Context):
         quoted_image_path = context.get("quoted_image_path")
         session_id = context.get("session_id")
         if not quoted_image_path or not session_id:
             return
+        channel = self._get_channel(context)
         try:
             img = Image.open(quoted_image_path)
             memory.USER_QUOTED_IMAGE_CACHE[session_id] = {
                 "path": [quoted_image_path],
                 "files": [img]
             }
-            logger.info(f"[WX] quoted image cached, session_id={session_id}, path={quoted_image_path}")
+            logger.info(f"{channel} quoted image cached, session_id={session_id}, path={quoted_image_path}")
         except Exception as e:
-            logger.warning(f"[WX] failed to cache quoted image: {e}")
+            logger.warning(f"{channel} failed to cache quoted image: {e}")
 
     def _generate_reply(self, context: Context, reply: Reply = Reply()) -> Reply:
         session_id = context["session_id"]
