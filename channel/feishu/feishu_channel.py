@@ -79,7 +79,21 @@ class FeiShuChanel(ChatChannel):
     # https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/events/receive
     def do_p2_im_message_receive_v1(self, data: P2ImMessageReceiveV1) -> None:
         # Print tool_button stasus to console
-        toUserName = data.event.sender.sender_id.open_id
+        event = data.event
+        message = event.message
+        sender = event.sender.sender_id
+        toUserName = sender.open_id
+        logger.info(
+            "[Lark-event] event_id=%s, message_id=%s, parent_id=%s, create_time=%s, chat_type=%s, chat_id=%s, open_id=%s, message_type=%s",
+            getattr(data.header, "event_id", None),
+            message.message_id,
+            getattr(message, "parent_id", None),
+            message.create_time,
+            message.chat_type,
+            message.chat_id,
+            toUserName,
+            message.message_type,
+        )
         logger.info(
             f'[Lark-search] is {tool_state.get_search_state(toUserName)},\
             [Lark-image] is {tool_state.get_image_state(toUserName)},\
