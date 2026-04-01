@@ -97,7 +97,8 @@ GOOGLE_IMAGE_LIST = [
 VEO_2 = "veo-2.0-generate-001"
 VEO_31 = 'veo-3.1-generate-preview'
 VEO_31_FAST = 'veo-3.1-fast-generate-preview'
-VEO_LIST = [VEO_2, VEO_31, VEO_31_FAST]
+VEO_31_LITE = 'veo-3.1-lite-generate-preview'
+VEO_LIST = [VEO_2, VEO_31, VEO_31_FAST, VEO_31_LITE]
 
 GEMINI_GENAI_SDK = [
     GEMINI_2_FLASH,
