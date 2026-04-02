@@ -5,6 +5,7 @@ from xai_sdk import Client
 from bot.bot import Bot
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
+from common.aspect_ratio import parse_aspect_ratio_from_prompt
 from common import const, memory
 from common.log import logger
 from common.model_status import model_state
@@ -40,7 +41,7 @@ class GrokVideoBot(Bot):
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
             session_manager.session_query(query, session_id)
 
-            request_args = self._build_video_args(session_id, model)
+            request_args = self._build_video_args(query, session_id, model)
             if request_args.get("video_url"):
                 logger.info(f"[{model.upper()}] 使用视频编辑模式")
             response = self.client.video.generate(
@@ -73,7 +74,12 @@ class GrokVideoBot(Bot):
             logger.error(f"[{model.upper()}] fetch reply error: {e}")
             return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
 
-    def _build_video_args(self, session_id, model):
+    def _build_video_args(self, query, session_id, model):
+        prompt_ratio = self._parse_aspect_ratio_from_prompt(query, model)
+        duration = self._normalize_duration(video_state.get_video_duration(session_id), model)
+        if prompt_ratio:
+            logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
+
         video_cache = memory.USER_VIDEO_CACHE.get(session_id)
         if video_cache:
             memory.USER_VIDEO_CACHE.pop(session_id)
@@ -86,13 +92,26 @@ class GrokVideoBot(Bot):
                 logger.warning(f"[{model.upper()}] 检测到上传视频，但未配置可访问的媒体公网地址")
                 raise ValueError("当前上传视频还没有可访问的公网 URL。请先在配置中设置 media_public_base_url，再重试 Grok 视频编辑。")
 
-        session_videos = get_video_urls_from_session(session_id)
-        if session_videos:
-            logger.info(f"[{model.upper()}] 从 session 历史取参考视频, count={len(session_videos)}")
-            return {"video_url": session_videos[0]}
+        file_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
+        image_urls = []
+        if file_cache:
+            image_urls = [
+                self._encode_pil_image(image_file, model)
+                for image_file in file_cache.get("files", [])
+            ]
+            image_urls = [image_url for image_url in image_urls if image_url]
+            memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
+            if image_urls:
+                aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(image_urls, model)
+                if not prompt_ratio:
+                    logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
+                return {
+                    "duration": duration,
+                    "image_url": image_urls[0],
+                    "aspect_ratio": aspect_ratio,
+                }
 
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
-        image_urls = []
         if file_cache:
             image_urls = [
                 self._encode_pil_image(image_file, model)
@@ -101,20 +120,30 @@ class GrokVideoBot(Bot):
             image_urls = [image_url for image_url in image_urls if image_url]
             memory.USER_IMAGE_CACHE.pop(session_id)
             if image_urls:
-                aspect_ratio = self._infer_aspect_ratio_from_data_urls(image_urls, model)
-                logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
-                return {"image_url": image_urls[0]}
+                aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(image_urls, model)
+                if not prompt_ratio:
+                    logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
+                return {
+                    "duration": duration,
+                    "image_url": image_urls[0],
+                    "aspect_ratio": aspect_ratio,
+                }
 
         session_images = get_image_urls_from_session(session_id)
         if session_images:
-            aspect_ratio = self._infer_aspect_ratio_from_data_urls(session_images, model)
+            aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(session_images, model)
             logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
-            logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}")
-            return {"image_url": session_images[0]}
+            if not prompt_ratio:
+                logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}")
+            return {
+                "duration": duration,
+                "image_url": session_images[0],
+                "aspect_ratio": aspect_ratio,
+            }
 
         return {
-            "duration": self._normalize_duration(video_state.get_video_duration(session_id)),
-            "aspect_ratio": self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model),
+            "duration": duration,
+            "aspect_ratio": prompt_ratio or self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model),
             "resolution": self._normalize_resolution(video_state.get_video_resolution(session_id), model),
         }
 
@@ -135,13 +164,15 @@ class GrokVideoBot(Bot):
             logger.warning(f"[{model.upper()}] failed to encode cached image: {e}")
             return None
 
-    def _normalize_duration(self, duration):
-        value = int(duration or 5)
-        if value < 5:
-            return 5
-        if value > 15:
-            return 15
-        return value
+    def _normalize_duration(self, duration, model):
+        try:
+            value = int(duration or 5)
+        except (TypeError, ValueError):
+            value = 5
+        if 1 <= value <= 15:
+            return value
+        logger.warning(f"[{model.upper()}] invalid duration={duration}, fallback to 5")
+        return 5
 
     def _normalize_resolution(self, resolution, model):
         normalized = str(resolution).strip().lower()
@@ -156,6 +187,16 @@ class GrokVideoBot(Bot):
             return normalized
         logger.warning(f"[{model.upper()}] invalid aspect_ratio={aspect_ratio}, fallback to 16:9")
         return "16:9"
+
+    def _parse_aspect_ratio_from_prompt(self, prompt, model):
+        ratio_candidates = {value: key for key, value in _GROK_VIDEO_RATIO_MAP.items()}
+        aspect_ratio = parse_aspect_ratio_from_prompt(
+            prompt,
+            ratio_map=ratio_candidates,
+            decimal_tolerance=0.15,
+            ratio_tolerance=0.3
+        )
+        return self._normalize_aspect_ratio(aspect_ratio, model) if aspect_ratio else None
 
     def _infer_aspect_ratio_from_data_urls(self, image_urls, model):
         import base64
