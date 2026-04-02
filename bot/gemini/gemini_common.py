@@ -33,6 +33,10 @@ _GEMINI_IMAGE_RATIO_MAP = {
     "16:9": 16 / 9,
     "21:9": 21 / 9,
 }
+_GEMINI_VIDEO_RATIO_MAP = {
+    "16:9": 16 / 9,
+    "9:16": 9 / 16,
+}
 
 
 class GeminiVideoGenerationError(RuntimeError):
@@ -177,7 +181,7 @@ def build_ref_images_obj(ref_images):
     return ref_images_obj
 
 
-def generate_video(*, paid_client, session_id, video_model, prompt, image=None, last_image=None, ref_images=None):
+def generate_video(*, paid_client, session_id, video_model, prompt, image=None, last_image=None, ref_images=None, aspect_ratio=None):
     image_genai = convert_image_to_types(image) if image else None
     last_image_genai = convert_image_to_types(last_image) if last_image else None
     ref_images_obj = build_ref_images_obj(ref_images) if ref_images else None
@@ -188,6 +192,7 @@ def generate_video(*, paid_client, session_id, video_model, prompt, image=None, 
         number_of_videos=1,
         duration_seconds=video_duration,
         resolution=video_resolution,
+        aspect_ratio=_normalize_gemini_video_aspect_ratio(aspect_ratio),
         person_generation="allow_all"
     )
     gen_source = types.GenerateVideosSource(prompt=prompt)
@@ -283,6 +288,18 @@ def _normalize_gemini_image_aspect_ratio(aspect_ratio: str) -> str:
         return normalized
     logger.warning(f"[GeminiImage] invalid aspect_ratio={aspect_ratio}, fallback to 16:9")
     return "16:9"
+
+
+def _normalize_gemini_video_aspect_ratio(aspect_ratio: str | None) -> str:
+    normalized = str(aspect_ratio or conf().get("image_aspect_ratio", "16:9")).strip()
+    if normalized in _GEMINI_VIDEO_RATIO_MAP:
+        return normalized
+
+    image_ratio = _GEMINI_IMAGE_RATIO_MAP.get(normalized)
+    if image_ratio is None:
+        logger.warning(f"[GeminiVideo] invalid aspect_ratio={aspect_ratio}, fallback to 16:9")
+        return "16:9"
+    return "16:9" if image_ratio >= 1 else "9:16"
 
 
 def _infer_gemini_aspect_ratio_from_sizes(sizes):
