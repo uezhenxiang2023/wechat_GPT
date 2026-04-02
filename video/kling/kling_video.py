@@ -1,7 +1,6 @@
 # video/kling/kling_video.py
 
 import io
-import re
 import time
 import jwt
 import requests
@@ -12,6 +11,7 @@ from PIL import Image
 from bot.bot import Bot
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
+from common.aspect_ratio import parse_aspect_ratio_from_prompt
 from common.log import logger
 from common.utils import get_chat_session_manager, get_image_urls_from_session, url_to_base64
 from common import const, memory
@@ -24,6 +24,8 @@ class KlingVideoBot(Bot):
 
     API_BASE = "https://api-beijing.klingai.com"
     ENDPOINT_OMNI = "/v1/videos/omni-video"
+    _ALLOWED_VIDEO_RATIOS = {"16:9", "9:16", "1:1"}
+    _ALLOWED_VIDEO_DURATIONS = {str(value) for value in range(3, 16)}
 
     def __init__(self):
         super().__init__()
@@ -50,7 +52,7 @@ class KlingVideoBot(Bot):
         try:
             session_id = context["session_id"]
             model = model_state.get_video_state(session_id) or const.KLING_VIDEO_O1
-            duration = str(video_state.get_video_duration(session_id))
+            duration = self._normalize_duration(video_state.get_video_duration(session_id), model)
             session_manager = get_chat_session_manager(session_id)
 
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
@@ -72,8 +74,10 @@ class KlingVideoBot(Bot):
                 logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
 
             # 参考素材捕获：内存缓存优先，过期则从 session 历史捞
-            file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+            file_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
             session_images = []
+            if not file_cache:
+                file_cache = memory.USER_IMAGE_CACHE.get(session_id)
             if not file_cache:
                 session_images = get_image_urls_from_session(session_id, session_manager)
 
@@ -81,7 +85,7 @@ class KlingVideoBot(Bot):
                 paths = file_cache.get("path", [])
                 if paths:
                     if not prompt_ratio:
-                        payload["aspect_ratio"] = self.aspect_ratio_calculator(paths)
+                        payload["aspect_ratio"] = self._normalize_aspect_ratio(self.aspect_ratio_calculator(paths), model)
                     image_list = []
                     for p in paths:
                         with open(p, "rb") as f:
@@ -89,10 +93,20 @@ class KlingVideoBot(Bot):
                         image_list.append({"image_url": b64})
                     payload["image_list"] = image_list
                     logger.info(f"[{model.upper()}] 参考图已注入 payload, count={len(paths)}")
-                memory.USER_IMAGE_CACHE.pop(session_id)
+                    if memory.USER_QUOTED_IMAGE_CACHE.get(session_id):
+                        logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {payload.get('aspect_ratio')}, count={len(paths)}")
+                    else:
+                        logger.info(f"[{model.upper()}] 从内存参考图推断比例: {payload.get('aspect_ratio')}, count={len(paths)}")
+                if memory.USER_QUOTED_IMAGE_CACHE.get(session_id):
+                    memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
+                else:
+                    memory.USER_IMAGE_CACHE.pop(session_id)
             elif session_images:
                 if not prompt_ratio:
-                    payload["aspect_ratio"] = self._get_aspect_ratio_from_base64(session_images[0])
+                    payload["aspect_ratio"] = self._normalize_aspect_ratio(
+                        self._get_aspect_ratio_from_base64(session_images[0]),
+                        model
+                    )
                 payload["image_list"] = [
                     {"image_url": url.split(",", 1)[1]} for url in session_images
                 ]
@@ -100,7 +114,7 @@ class KlingVideoBot(Bot):
             else:
                 # 纯文生视频，必须传 aspect_ratio
                 if not prompt_ratio:
-                    payload["aspect_ratio"] = conf().get("image_aspect_ratio", "16:9")
+                    payload["aspect_ratio"] = self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model)
 
             resp = requests.post(
                 f"{self.API_BASE}{self.ENDPOINT_OMNI}",
@@ -210,6 +224,30 @@ class KlingVideoBot(Bot):
             return f"[{code}] {desc.format(message)}"
         return f"[{code}] {desc}" + (f"：{message}" if message else "")
 
+    def _normalize_duration(self, duration, model) -> str:
+        normalized = str(duration).strip()
+        if normalized in self._ALLOWED_VIDEO_DURATIONS:
+            return normalized
+        logger.warning(f"[{model.upper()}] invalid duration={duration}, fallback to 5")
+        return "5"
+
+    def _normalize_aspect_ratio(self, aspect_ratio, model) -> str:
+        normalized = str(aspect_ratio).strip()
+        if normalized in self._ALLOWED_VIDEO_RATIOS:
+            return normalized
+        ratio_value = self._ratio_to_float(normalized)
+        if ratio_value is None:
+            logger.warning(f"[{model.upper()}] invalid aspect_ratio={aspect_ratio}, fallback to 16:9")
+            return "16:9"
+        allowed_values = {
+            "16:9": 16 / 9,
+            "9:16": 9 / 16,
+            "1:1": 1.0,
+        }
+        mapped_ratio = min(allowed_values, key=lambda key: abs(allowed_values[key] - ratio_value))
+        logger.info(f"[{model.upper()}] aspect_ratio {aspect_ratio} 不在白名单内，已映射为 {mapped_ratio}")
+        return mapped_ratio
+
     def aspect_ratio_calculator(self, paths: list) -> str:
         ratio_map = {
             1.0: "1:1", 
@@ -236,23 +274,15 @@ class KlingVideoBot(Bot):
 
     def _parse_aspect_ratio_from_prompt(self, prompt: str) -> str | None:
         ratio_map = {
-            1.0: "1:1", 
-            1.78: "16:9", 
-            0.56: "9:16"
+            1.0: "1:1",
+            16 / 9: "16:9",
+            9 / 16: "9:16",
         }
-        decimal_pattern = r'(?<!\d)(\d+\.\d+)(?!\d)'
-        for match in re.finditer(decimal_pattern, prompt):
-            ratio = round(float(match.group(1)), 2)
-            closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
-            if abs(closest - ratio) <= 0.15:
-                return ratio_map[closest]
-        pattern = r'(\d+)\s*(?::|：|比)\s*(\d+)'
-        match = re.search(pattern, prompt)
-        if not match:
+        return parse_aspect_ratio_from_prompt(prompt, ratio_map=ratio_map, decimal_tolerance=0.7)
+
+    def _ratio_to_float(self, ratio):
+        try:
+            width, height = str(ratio).split(":", 1)
+            return float(width) / float(height)
+        except (TypeError, ValueError, ZeroDivisionError):
             return None
-        w, h = int(match.group(1)), int(match.group(2))
-        ratio = round(w / h, 2)
-        closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
-        if abs(closest - ratio) > 0.3:
-            return None
-        return ratio_map[closest]

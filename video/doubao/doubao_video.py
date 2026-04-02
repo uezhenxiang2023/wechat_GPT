@@ -6,6 +6,7 @@ from bot.bot import Bot
 from bot.ark.ark_media import process_image_files, size_calculator, size_calculator_from_data_urls
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
+from common.aspect_ratio import parse_aspect_ratio_from_prompt
 from common import const, memory
 from common.log import logger
 from common.model_status import model_state
@@ -29,25 +30,36 @@ class DoubaoVideoBot(Bot):
 
             file_cache = memory.USER_IMAGE_CACHE.get(session_id)
             session_images = []
-            duration_seconds = video_state.get_video_duration(session_id)
-            resolution = video_state.get_video_resolution(session_id)
+            quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
+            duration_seconds = self._normalize_duration_for_model(model, video_state.get_video_duration(session_id))
+            resolution = self._normalize_resolution_for_model(model, video_state.get_video_resolution(session_id), has_reference=False)
             content = [{
                 "type": "text",
                 "text": query
             }]
-            ratio = conf().get("image_aspect_ratio", "16:9")
+            prompt_ratio = self._parse_aspect_ratio_from_prompt(query)
+            if prompt_ratio:
+                logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
+            ratio = prompt_ratio or conf().get("image_aspect_ratio", "16:9")
             request_resolution = "480p"
 
-            if file_cache:
-                ratio = size_calculator(file_cache["files"])
+            if quoted_cache:
+                ratio = prompt_ratio or size_calculator(quoted_cache["files"])
+                request_resolution = self._normalize_resolution_for_model(model, resolution, has_reference=True)
+                content.extend(process_image_files(quoted_cache))
+                logger.info(f"[{model.upper()}] 从回复引用图取参考图, count={len(quoted_cache['files'])}")
+                memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
+            elif file_cache:
+                ratio = prompt_ratio or size_calculator(file_cache["files"])
                 request_resolution = resolution
                 content.extend(process_image_files(file_cache))
+                logger.info(f"[{model.upper()}] 从内存参考图取参考图, count={len(file_cache['files'])}")
                 memory.USER_IMAGE_CACHE.pop(session_id)
             else:
                 session_images = get_image_urls_from_session(session_id, session_manager)
                 if session_images:
-                    ratio = size_calculator_from_data_urls(session_images)
-                    request_resolution = resolution
+                    ratio = prompt_ratio or size_calculator_from_data_urls(session_images)
+                    request_resolution = self._normalize_resolution_for_model(model, resolution, has_reference=True)
                     content.extend([
                         {
                             "type": "image_url",
@@ -63,7 +75,7 @@ class DoubaoVideoBot(Bot):
                 **self._build_task_params(
                     model=model,
                     content=content,
-                    resolution=request_resolution,
+                    resolution=self._normalize_resolution_for_model(model, request_resolution, has_reference=bool(content[1:])),
                     ratio=self._normalize_ratio_for_model(model, ratio),
                     duration_seconds=duration_seconds
                 )
@@ -118,6 +130,9 @@ class DoubaoVideoBot(Bot):
 
         return params
 
+    def _parse_aspect_ratio_from_prompt(self, prompt):
+        return parse_aspect_ratio_from_prompt(prompt)
+
     def _normalize_ratio_for_model(self, model, ratio):
         if model not in const.DOUBAO_SEEDANCE_LIST:
             return ratio
@@ -143,6 +158,32 @@ class DoubaoVideoBot(Bot):
         normalized_ratio = min(candidate_ratios, key=lambda key: abs(candidate_ratios[key] - ratio_value))
         logger.info(f"[{model.upper()}] ratio {ratio} 不在白名单内，已映射为 {normalized_ratio}")
         return normalized_ratio
+
+    def _normalize_duration_for_model(self, model, duration):
+        if model not in const.DOUBAO_SEEDANCE_LIST:
+            return duration
+        try:
+            normalized_duration = int(duration)
+        except (TypeError, ValueError):
+            logger.warning(f"[{model.upper()}] invalid duration={duration}, fallback to 5")
+            return 5
+        if 2 <= normalized_duration <= 12:
+            return normalized_duration
+        logger.warning(f"[{model.upper()}] invalid duration={duration}, fallback to 5")
+        return 5
+
+    def _normalize_resolution_for_model(self, model, resolution, has_reference):
+        if model not in const.DOUBAO_SEEDANCE_LIST:
+            return resolution
+        normalized_resolution = str(resolution).strip().lower()
+        allowed_resolutions = {"480p", "720p", "1080p"}
+        if normalized_resolution not in allowed_resolutions:
+            logger.warning(f"[{model.upper()}] invalid resolution={resolution}, fallback to 720p")
+            normalized_resolution = "720p"
+        if has_reference and normalized_resolution == "1080p":
+            logger.warning(f"[{model.upper()}] resolution=1080p is not supported with reference images, fallback to 720p")
+            return "720p"
+        return normalized_resolution
 
     def _ratio_to_float(self, ratio):
         try:
