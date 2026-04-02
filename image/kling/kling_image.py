@@ -3,13 +3,13 @@ import time
 import jwt
 import requests
 import base64
-import re
 
 from PIL import Image
 
 from bot.bot import Bot
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
+from common.aspect_ratio import parse_aspect_ratio_from_prompt
 from common.log import logger
 from common.utils import get_chat_session_manager, get_image_urls_from_session, url_to_base64
 from common import const, memory
@@ -304,32 +304,4 @@ class KlingImageBot(Bot):
         return ratio_map[closest]
 
     def _parse_aspect_ratio_from_prompt(self, prompt: str) -> str | None:
-        ratio_map = {
-            1.0: "1:1", 
-            1.33: "4:3", 
-            0.75: "3:4",
-            1.78: "16:9", 
-            0.56: "9:16", 
-            1.5: "3:2",
-            0.67: "2:3", 
-            2.33: "21:9"
-        }
-        # 先匹配小数格式：1.78 / 2.39 / 0.75 等
-        decimal_pattern = r'(?<!\d)(\d+\.\d+)(?!\d)'
-        for match in re.finditer(decimal_pattern, prompt):
-            ratio = round(float(match.group(1)), 2)
-            closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
-            if abs(closest - ratio) <= 0.15:  # 容差比整数比例更严格
-                return ratio_map[closest]
-
-        # 再匹配整数比格式：16:9 / 16比9 / 16：9
-        pattern = r'(\d+)\s*(?::|：|比)\s*(\d+)'
-        match = re.search(pattern, prompt)
-        if not match:
-            return None
-        w, h = int(match.group(1)), int(match.group(2))
-        ratio = round(w / h, 2)
-        closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
-        if abs(closest - ratio) > 0.3:
-            return None
-        return ratio_map[closest]
+        return parse_aspect_ratio_from_prompt(prompt)

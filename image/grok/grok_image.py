@@ -4,6 +4,7 @@ import io
 from PIL import Image
 from xai_sdk import Client
 
+from common.aspect_ratio import parse_aspect_ratio_from_prompt
 from bot.bot import Bot
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
@@ -48,7 +49,7 @@ class GrokImageBot(Bot):
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
             session_manager.session_query(query, session_id)
 
-            image_args, model = self._build_image_args(session_id, model)
+            image_args, model = self._build_image_args(query, session_id, model)
             response = self.client.image.sample(
                 prompt=query,
                 model=model,
@@ -76,7 +77,11 @@ class GrokImageBot(Bot):
             logger.error(f"[{model.upper()}] fetch reply error: {e}")
             return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
 
-    def _build_image_args(self, session_id, model):
+    def _build_image_args(self, query, session_id, model):
+        prompt_ratio = self._parse_aspect_ratio_from_prompt(query, model)
+        if prompt_ratio:
+            logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
+
         file_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
         if file_cache:
             image_urls = [
@@ -87,8 +92,9 @@ class GrokImageBot(Bot):
             memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
             if image_urls:
                 image_urls = [self._compress_data_url(image_url, model) for image_url in image_urls]
-                aspect_ratio = self._infer_aspect_ratio_from_data_urls(image_urls, model)
-                logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
+                aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(image_urls, model)
+                if not prompt_ratio:
+                    logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
                 return self._build_edit_args(image_urls, aspect_ratio, model)
 
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
@@ -101,20 +107,22 @@ class GrokImageBot(Bot):
             memory.USER_IMAGE_CACHE.pop(session_id)
             if image_urls:
                 image_urls = [self._compress_data_url(image_url, model) for image_url in image_urls]
-                aspect_ratio = self._infer_aspect_ratio_from_data_urls(image_urls, model)
-                logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
+                aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(image_urls, model)
+                if not prompt_ratio:
+                    logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
                 return self._build_edit_args(image_urls, aspect_ratio, model)
 
         session_images = get_image_urls_from_session(session_id)
         if session_images:
             session_images = [self._compress_data_url(image_url, model) for image_url in session_images]
-            aspect_ratio = self._infer_aspect_ratio_from_data_urls(session_images, model)
+            aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(session_images, model)
             logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
-            logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}")
+            if not prompt_ratio:
+                logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}")
             return self._build_edit_args(session_images, aspect_ratio, model)
 
         return {
-            "aspect_ratio": self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model)
+            "aspect_ratio": prompt_ratio or self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model)
         }, model
 
     def _build_edit_args(self, image_urls, aspect_ratio, model):
@@ -204,6 +212,16 @@ class GrokImageBot(Bot):
             return normalized
         logger.warning(f"[{model.upper()}] invalid aspect_ratio={aspect_ratio}, fallback to 16:9")
         return "16:9"
+
+    def _parse_aspect_ratio_from_prompt(self, prompt, model):
+        ratio_candidates = {value: key for key, value in _GROK_IMAGE_RATIO_MAP.items()}
+        aspect_ratio = parse_aspect_ratio_from_prompt(
+            prompt,
+            ratio_map=ratio_candidates,
+            decimal_tolerance=0.25,
+            ratio_tolerance=0.3
+        )
+        return self._normalize_aspect_ratio(aspect_ratio, model) if aspect_ratio else None
 
     def _infer_aspect_ratio_from_data_urls(self, image_urls, model):
         sizes = []
