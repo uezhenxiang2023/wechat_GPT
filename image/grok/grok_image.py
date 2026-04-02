@@ -48,7 +48,7 @@ class GrokImageBot(Bot):
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
             session_manager.session_query(query, session_id)
 
-            image_args = self._build_image_args(session_id, model)
+            image_args, model = self._build_image_args(session_id, model)
             response = self.client.image.sample(
                 prompt=query,
                 model=model,
@@ -89,7 +89,7 @@ class GrokImageBot(Bot):
                 image_urls = [self._compress_data_url(image_url, model) for image_url in image_urls]
                 aspect_ratio = self._infer_aspect_ratio_from_data_urls(image_urls, model)
                 logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
-                return self._build_edit_args(image_urls, aspect_ratio)
+                return self._build_edit_args(image_urls, aspect_ratio, model)
 
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
         if file_cache:
@@ -103,7 +103,7 @@ class GrokImageBot(Bot):
                 image_urls = [self._compress_data_url(image_url, model) for image_url in image_urls]
                 aspect_ratio = self._infer_aspect_ratio_from_data_urls(image_urls, model)
                 logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
-                return self._build_edit_args(image_urls, aspect_ratio)
+                return self._build_edit_args(image_urls, aspect_ratio, model)
 
         session_images = get_image_urls_from_session(session_id)
         if session_images:
@@ -111,22 +111,27 @@ class GrokImageBot(Bot):
             aspect_ratio = self._infer_aspect_ratio_from_data_urls(session_images, model)
             logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
             logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}")
-            return self._build_edit_args(session_images, aspect_ratio)
+            return self._build_edit_args(session_images, aspect_ratio, model)
 
         return {
             "aspect_ratio": self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model)
-        }
+        }, model
 
-    def _build_edit_args(self, image_urls, aspect_ratio):
+    def _build_edit_args(self, image_urls, aspect_ratio, model):
         if len(image_urls) == 1:
             return {
                 "image_url": image_urls[0],
                 "aspect_ratio": aspect_ratio
-            }
+            }, model
+        if model == const.GROK_IMAGINE_IMAGE_PRO:
+            logger.info(
+                f"[{model.upper()}] pro 暂时不支持多图编辑，自动降级到 {const.GROK_IMAGINE_IMAGE}"
+            )
+            model = const.GROK_IMAGINE_IMAGE
         return {
             "image_urls": image_urls[:5],
             "aspect_ratio": aspect_ratio
-        }
+        }, model
 
     def _split_response_base64(self, encoded):
         if not encoded:
