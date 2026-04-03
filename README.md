@@ -242,6 +242,15 @@ bash scripts/restart_feishu.sh
 - `logs/error.log` 中出现 `Listening at: http://0.0.0.0:7777`
 - `logs/access.log` 中飞书请求返回 `200`
 
+如果需要在 VS Code 中使用 Python Debugger 做断点调试，可临时打开开发模式：
+
+```bash
+source .venv_314/bin/activate
+DEBUG_FEISHU_WEBHOOK=1 python app.py
+```
+
+此模式下会重新走 `python app.py` 的开发服务器启动路径，便于本地断点调试；生产环境仍建议使用 `gunicorn app:application`。
+
 ### 2.服务器部署
 
 使用nohup命令在后台运行程序：

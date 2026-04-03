@@ -49,7 +49,7 @@ class ChatChannel(Channel):
             thread.start()
             self.__class__._consumer_thread = thread
             self.__class__._consumer_pid = current_pid
-            logger.info("[WX] consumer thread started in pid=%s", current_pid)
+            logger.info("%s consumer thread started in pid=%s", self._get_channel(), current_pid)
 
     # 根据消息构造context，消息内容相关的触发项写在这里
     def _compose_context(self, ctype: ContextType, content, **kwargs):
@@ -103,14 +103,14 @@ class ChatChannel(Channel):
             if e_context.is_pass() or context is None:
                 return context
             if cmsg.from_user_id == self.user_id and not config.get("trigger_by_self", True):
-                logger.debug("[WX]self message skipped")
+                logger.debug("%s self message skipped", self._get_channel(context))
                 return None
 
         # 消息内容匹配过程，并处理content
         if ctype == ContextType.TEXT:
             if first_in and "」\n- - - - - - -" in content:  # 初次匹配 过滤引用消息
                 logger.debug(content)
-                logger.debug("[WX]reference query skipped")
+                logger.debug("%s reference query skipped", self._get_channel(context))
                 return None
 
             nick_name_black_list = conf().get("nick_name_black_list", [])
@@ -128,10 +128,10 @@ class ChatChannel(Channel):
                         nick_name = context["msg"].actual_user_nickname
                         if nick_name and nick_name in nick_name_black_list:
                             # 黑名单过滤
-                            logger.warning(f"[WX] Nickname {nick_name} in In BlackList, ignore")
+                            logger.warning("%s Nickname %s in In BlackList, ignore", self._get_channel(context), nick_name)
                             return None
 
-                        logger.info("[WX]receive group at")
+                        logger.info("%s receive group at", self._get_channel(context))
                         if not conf().get("group_at_off", False):
                             flag = True
                         pattern = f"@{re.escape(self.name)}(\u2005|\u0020)"
@@ -147,13 +147,13 @@ class ChatChannel(Channel):
                         content = subtract_res
                 if not flag:
                     if context["origin_ctype"] == ContextType.VOICE:
-                        logger.info("[WX]receive group voice, but checkprefix didn't match")
+                        logger.info("%s receive group voice, but checkprefix didn't match", self._get_channel(context))
                     return None
             else:  # 单聊
                 nick_name = context["msg"].from_user_nickname
                 if nick_name and nick_name in nick_name_black_list:
                     # 黑名单过滤
-                    logger.warning(f"[WX] Nickname '{nick_name}' in In BlackList, ignore")
+                    logger.warning("%s Nickname '%s' in In BlackList, ignore", self._get_channel(context), nick_name)
                     return None
 
                 match_prefix = check_prefix(content, conf().get("single_chat_prefix", [""]))
@@ -186,11 +186,11 @@ class ChatChannel(Channel):
     def _handle(self, context: Context):
         if context is None or not context.content:
             return
-        logger.debug("[WX] ready to handle context: {}".format(context))
+        logger.debug("%s ready to handle context: %s", self._get_channel(context), context)
         # reply的构建步骤
         reply = self._generate_reply(context)
 
-        logger.debug("[WX] ready to decorate reply: {}".format(reply))
+        logger.debug("%s ready to decorate reply: %s", self._get_channel(context), reply)
         # reply的包装步骤
         reply = self._decorate_reply(context, reply)
 
@@ -237,7 +237,7 @@ class ChatChannel(Channel):
         reply = e_context["reply"]
         model = model_state.get_basic_state(session_id)
         if not e_context.is_pass():
-            logger.debug("[WX] ready to handle context: type={}, content={}".format(context.type, context.content))
+            logger.debug("%s ready to handle context: type=%s, content=%s", self._get_channel(context), context.type, context.content)
             if context.type in (ContextType.IMAGE_CREATE, ContextType.VIDEO_CREATE):
                 self._cache_quoted_image(context)
             if context.type == ContextType.VOICE:  # 语音消息
@@ -248,7 +248,7 @@ class ChatChannel(Channel):
                 try:
                     any_to_wav(file_path, wav_path)
                 except Exception as e:  # 转换失败，直接使用mp3，对于某些api，mp3也可以识别
-                    logger.warning("[WX]any to wav error, use raw path. " + str(e))
+                    logger.warning("%s any to wav error, use raw path. %s", self._get_channel(context), e)
                     wav_path = file_path
                 # 语音识别
                 reply = super().build_voice_to_text(wav_path)
@@ -382,7 +382,7 @@ class ChatChannel(Channel):
                         memory.USER_VIDEO_CACHE[session_id] = {"files": [video_cache_item]}
                     logger.info(f'[{model.upper()}] {file_path} cached to video memory')
             else:
-                logger.warning("[WX] unknown context type: {}".format(context.type))
+                logger.warning("%s unknown context type: %s", self._get_channel(context), context.type)
                 return
         return reply
 
@@ -393,12 +393,12 @@ class ChatChannel(Channel):
                     Event.ON_DECORATE_REPLY,
                     {"channel": self, "context": context, "reply": reply},
                 )
-            )
+                )
             reply = e_context["reply"]
             desire_rtype = context.get("desire_rtype")
             if not e_context.is_pass() and reply and reply.type:
                 if reply.type in self.NOT_SUPPORT_REPLYTYPE:
-                    logger.error("[WX]reply type not support: " + str(reply.type))
+                    logger.error("%s reply type not support: %s", self._get_channel(context), reply.type)
                     reply.type = ReplyType.ERROR
                     reply.content = "不支持发送的消息类型: " + str(reply.type)
 
@@ -427,10 +427,15 @@ class ChatChannel(Channel):
                 ):
                     pass
                 else:
-                    logger.error("[WX] unknown reply type: {}".format(reply.type))
+                    logger.error("%s unknown reply type: %s", self._get_channel(context), reply.type)
                     return
             if desire_rtype and desire_rtype != reply.type and reply.type not in [ReplyType.ERROR, ReplyType.INFO]:
-                logger.warning("[WX] desire_rtype: {}, but reply type: {}".format(context.get("desire_rtype"), reply.type))
+                logger.warning(
+                    "%s desire_rtype: %s, but reply type: %s",
+                    self._get_channel(context),
+                    context.get("desire_rtype"),
+                    reply.type,
+                )
             return reply
 
     def _send_reply(self, context: Context, reply: Reply):
@@ -443,14 +448,14 @@ class ChatChannel(Channel):
             )
             reply = e_context["reply"]
             if not e_context.is_pass() and reply and reply.type:
-                logger.debug("[WX] ready to send reply: {}, context: {}".format(reply, context))
+                logger.debug("%s ready to send reply: %s, context: %s", self._get_channel(context), reply, context)
                 self._send(reply, context)
 
     def _send(self, reply: Reply, context: Context, retry_cnt=0):
         try:
             self.send(reply, context)
         except Exception as e:
-            logger.error("[WX] sendMsg error: {}".format(str(e)))
+            logger.error("%s sendMsg error: %s", self._get_channel(context), str(e))
             if isinstance(e, NotImplementedError):
                 return
             logger.exception(e)
@@ -506,7 +511,7 @@ class ChatChannel(Channel):
                         if semaphore.acquire(blocking=False):  # 等线程处理完毕才能删除
                             if not context_queue.empty():
                                 context = context_queue.get()
-                                logger.debug("[WX] consume context: {}".format(context))
+                                logger.debug("%s consume context: %s", self._get_channel(context), context)
                                 future: Future = self.handler_pool.submit(self._handle, context)
                                 future.add_done_callback(self._thread_pool_callback(session_id, context=context))
                                 self.futures.setdefault(session_id, []).append(future)
@@ -519,7 +524,7 @@ class ChatChannel(Channel):
                             else:
                                 semaphore.release()
             except Exception as e:
-                logger.exception("[WX] consume loop error: {}".format(e))
+                logger.exception("%s consume loop error: %s", self._get_channel(), e)
             time.sleep(0.1)
 
     # 取消session_id对应的所有任务，只能取消排队的消息和已提交线程池但未执行的任务

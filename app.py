@@ -28,6 +28,10 @@ _BOOTSTRAP_CHANNEL_NAME = None
 _PLUGINS_LOADED = False
 
 
+def is_feishu_webhook_debug_enabled():
+    return os.environ.get("DEBUG_FEISHU_WEBHOOK", "").lower() in {"1", "true", "yes", "on"}
+
+
 def sigterm_handler_wrap(_signo):
     old_handler = signal.getsignal(_signo)
 
@@ -92,11 +96,12 @@ application = create_wsgi_application()
 def run():
     try:
         channel_name = bootstrap(register_signals=True)
-        if is_feishu_webhook_mode(channel_name):
+        channel = create_channel(channel_name)
+        if is_feishu_webhook_mode(channel_name) and not is_feishu_webhook_debug_enabled():
             logger.info("Feishu webhook mode detected, please start with gunicorn app:application")
+            logger.info("For local breakpoint debugging, set DEBUG_FEISHU_WEBHOOK=1 and run python app.py")
             return
 
-        channel = create_channel(channel_name)
         channel.startup()
     except Exception as e:
         logger.error("App startup failed!")
