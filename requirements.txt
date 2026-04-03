@@ -1,40 +1,27 @@
-pandas
-Pillow
+# Feishu webhook runtime
+flask
+gunicorn
+gevent
+lark-oapi
+requests
 
-# google General Availability SDK for Gemini 2.0+
+# Current chat/image/video providers used by Feishu
+volcengine-python-sdk
+xai-sdk
 google-genai
 
-# google legacy SDK ended on November 30, 2025
-google-generativeai
-
-# wechatcom & wechatmp
-wechatpy
-
-# 飞书应用
-lark-oapi
-
-# Telegram 应用
-python-telegram-bot
-
-# 火山方舟
-volcengine-python-sdk
-
-# grok
-xai-sdk
-
-# RAG based documents file
+# Feishu channel media and document handling
+Pillow
+opencv-python
+pandas
 python-docx
 pypdf
 docx2pdf
 
-# Patch asyncio to allow nested event loops
-nest_asyncio
-
-#install plugin
-dulwich
-flask
-gunicorn
-gevent
-
-# opencv
-opencv-python
+# Voice handling enabled in current Feishu config
+openai
+# ElevenLabs is required when config.json sets text_to_voice=elevenlabs.
+elevenlabs==1.0.3
+# pydub currently fails on Python 3.14 in this environment because audioop/pyaudioop
+# is unavailable. Feishu voice conversion may require Python <= 3.13 or an alternative fix.
+pydub
