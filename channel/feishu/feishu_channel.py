@@ -275,7 +275,17 @@ class FeiShuChanel(ChatChannel):
             error_reply = e
             self.send_text(error_reply, msg.chat_id)
             return None
-        self.handle_single(cmsg)
+        try:
+            self.handle_single(cmsg)
+        except Exception as e:
+            logger.exception(
+                "[Lark] handler_single_msg failed, message_id=%s, content=%s, ctype=%s, sender=%s",
+                getattr(cmsg, "msg_id", None),
+                getattr(cmsg, "content", None),
+                getattr(cmsg, "ctype", None),
+                getattr(cmsg, "from_user_id", None),
+            )
+            raise
         return None
 
     def handler_group_msg(self, msg):
@@ -309,7 +319,17 @@ class FeiShuChanel(ChatChannel):
             logger.debug("[Lark]receive text msg: {}, cmsg={}".format(cmsg.content, cmsg))
         else:
             logger.debug("[Lark]receive msg: {}, cmsg={}".format(cmsg.content, cmsg))
-        context = self._compose_context(cmsg.ctype, cmsg.content, isgroup=False, msg=cmsg)
+        try:
+            context = self._compose_context(cmsg.ctype, cmsg.content, isgroup=False, msg=cmsg)
+        except Exception as e:
+            logger.exception(
+                "[Lark] _compose_context failed, message_id=%s, content=%s, ctype=%s, sender=%s",
+                getattr(cmsg, "msg_id", None),
+                getattr(cmsg, "content", None),
+                getattr(cmsg, "ctype", None),
+                getattr(cmsg, "from_user_id", None),
+            )
+            raise
         if context and cmsg.ctype == ContextType.VIDEO:
             public_url = self.build_public_media_url(cmsg.content)
             if public_url:
@@ -325,7 +345,17 @@ class FeiShuChanel(ChatChannel):
                 if public_url:
                     context["video_public_url"] = public_url
         if context:
-            self.produce(context)
+            try:
+                self.produce(context)
+            except Exception as e:
+                logger.exception(
+                    "[Lark] produce failed, session_id=%s, receiver=%s, content=%s, ctype=%s",
+                    context.get("session_id"),
+                    context.get("receiver"),
+                    context.content,
+                    context.type,
+                )
+                raise
 
     def handle_group(self, cmsg: ChatMessage):
         if cmsg.ctype == ContextType.VOICE:

@@ -201,6 +201,47 @@ python3 app.py                                    # windows环境下该命令通
 
 终端输出二维码后，使用微信进行扫码，当输出 "Start auto replying" 时表示自动回复程序已经成功运行了（注意：用于登录的微信需要在支付处已完成实名认证）。扫码登录后你的账号就成为机器人了，可以在微信手机端通过配置的关键词触发自动回复 (任意好友发送消息给你，或是自己发消息给好友)，参考[#142](https://github.com/zhayujie/chatgpt-on-wechat/issues/142)。
 
+### 1.1 飞书 Webhook 模式
+
+当 `config.json` 中配置为：
+
+```json
+{
+  "channel_type": "feishu",
+  "feishu_websocket": false
+}
+```
+
+建议使用 `gunicorn` 托管 `app.py` 暴露的 WSGI 应用，而不是直接运行 Flask 开发服务器。
+
+启动命令：
+
+```bash
+source .venv_314/bin/activate
+gunicorn -w 1 -k gevent -b 0.0.0.0:7777 --timeout 180 \
+  --access-logfile logs/access.log \
+  --error-logfile logs/error.log \
+  app:application
+```
+
+也可以直接使用仓库内脚本：
+
+```bash
+bash scripts/restart_feishu.sh
+```
+
+脚本会自动：
+
+- 停掉占用 `7777` 端口的旧进程
+- 清理 `~/.gunicorn/gunicorn.ctl`
+- 使用 `gunicorn app:application` 重新启动飞书 webhook 服务
+
+启动成功后，可通过以下日志确认：
+
+- `logs/error.log` 中出现 `Starting gunicorn`
+- `logs/error.log` 中出现 `Listening at: http://0.0.0.0:7777`
+- `logs/access.log` 中飞书请求返回 `200`
+
 ### 2.服务器部署
 
 使用nohup命令在后台运行程序：

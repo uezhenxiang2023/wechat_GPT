@@ -19,6 +19,9 @@ python-telegram-bot
 # 火山方舟
 volcengine-python-sdk
 
+# grok
+xai-sdk
+
 # RAG based documents file
 python-docx
 pypdf
@@ -30,6 +33,8 @@ nest_asyncio
 #install plugin
 dulwich
 flask
+gunicorn
+gevent
 
 # opencv
 opencv-python
