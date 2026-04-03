@@ -16,6 +16,7 @@ from channel.feishu.feishu_message import FeishuMessage
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.media_store import build_public_media_url
 from common.singleton import singleton
 from common import const
 from common.tool_button import tool_state
@@ -872,16 +873,7 @@ class FeiShuChanel(ChatChannel):
         return send_file(target_path, conditional=True)
 
     def build_public_media_url(self, file_path):
-        base_url = str(conf().get("media_public_base_url", "") or "").rstrip("/")
-        if not base_url:
-            return None
-        tmp_root = os.path.abspath(TmpDir().path())
-        abs_path = os.path.abspath(file_path)
-        if not abs_path.startswith(tmp_root + os.sep) and abs_path != tmp_root:
-            logger.warning(f"[Lark] media path is outside tmp dir, skip public url build: {file_path}")
-            return None
-        relative_path = os.path.relpath(abs_path, tmp_root).replace(os.sep, "/")
-        return f"{base_url}/tmp_media/{quote(relative_path, safe='/')}"
+        return build_public_media_url(file_path)
     
     def _extract_video_cover(self, video_path: str) -> str | None:
         """截取视频第一帧，上传飞书返回 image_key"""

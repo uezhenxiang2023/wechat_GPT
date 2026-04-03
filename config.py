@@ -153,7 +153,15 @@ available_setting = {
     "feishu_websocket": False,  # 是否使用websocket长链接接收飞书事件
     "feishu_webhook_port": 7777, # 本地回调服务器端口
     "media_public_base_url": "",  # 用于对外暴露 tmp 媒体文件的公网根地址，如 https://bot.example.com
-    
+    "media_store_provider": "local",  # 媒体对外访问方式，支持：local、tos
+    "tos_access_key": "",  # 火山引擎 TOS Access Key
+    "tos_secret_key": "",  # 火山引擎 TOS Secret Key
+    "tos_endpoint": "",  # 火山引擎 TOS Endpoint
+    "tos_region": "",  # 火山引擎 TOS Region
+    "tos_bucket": "",  # 火山引擎 TOS Bucket
+    "tos_public_base_url": "",  # TOS 对外访问域名，如 https://bucket.tos-cn-beijing.volces.com
+    "tos_prefix": "bigchao/tmp_media/",  # TOS 对象前缀
+
     # 钉钉配置
     "dingtalk_client_id": "",  # 钉钉机器人Client ID 
     "dingtalk_client_secret": "",  # 钉钉机器人Client Secret 

@@ -272,6 +272,27 @@ kill $(lsof -tiTCP:7777 -sTCP:LISTEN)
 kill -9 $(lsof -tiTCP:7777 -sTCP:LISTEN)
 ```
 
+如果需要给 Doubao / Grok 等视频链路提供更稳定的参考素材公网地址，可以将临时媒体从本机 `tmp_media + ngrok` 切换到火山引擎 TOS 对象存储。项目已经预留了统一媒体存储入口，默认仍是本地直链模式。
+
+可选配置项：
+
+- `media_store_provider`: 媒体对外访问方式，默认 `local`，可切到 `tos`
+- `media_public_base_url`: `local` 模式下使用的公网根地址
+- `tos_access_key`: 火山引擎 TOS Access Key
+- `tos_secret_key`: 火山引擎 TOS Secret Key
+- `tos_endpoint`: 火山引擎 TOS Endpoint
+- `tos_region`: 火山引擎 TOS Region
+- `tos_bucket`: TOS bucket 名
+- `tos_public_base_url`: TOS 对外访问域名
+- `tos_prefix`: 上传对象前缀，默认 `bigchao/tmp_media/`
+
+说明：
+
+- 默认 `media_store_provider=local`，现有飞书临时媒体链路不会受影响
+- 当切到 `tos` 时，项目会尝试把临时媒体上传到 TOS，并将返回的稳定公网 URL 写入 `public_url`
+- 启用 `tos` 模式前，需要先安装 TOS Python SDK，当前依赖文件中已加入 `tos`
+- `video/doubao/doubao_video.py`、`video/grok/grok_video.py` 这类参考视频链路本身不需要改，它们继续复用现有的 `public_url` 字段即可
+
 ### 2.服务器部署
 
 使用nohup命令在后台运行程序：
