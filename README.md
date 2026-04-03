@@ -251,6 +251,27 @@ DEBUG_FEISHU_WEBHOOK=1 python app.py
 
 此模式下会重新走 `python app.py` 的开发服务器启动路径，便于本地断点调试；生产环境仍建议使用 `gunicorn app:application`。
 
+如果使用仓库内的 `.vscode/launch.json` 里的 `Python Debugger: Feishu Webhook` 启动项，本质上也是通过注入 `DEBUG_FEISHU_WEBHOOK=1` 来本地启动 webhook 调试服务。
+
+注意：
+
+- 本地断点调试前，请先确认 `7777` 端口上没有正在运行的 `gunicorn app:application`
+- 不要同时运行 `bash scripts/restart_feishu.sh` 和 VS Code 的 `Python Debugger: Feishu Webhook`
+- 如果终端出现 `Address already in use` 或 `Port 7777 is in use by another program`，通常说明旧的 gunicorn/webhook 进程还没有退出，需要先停掉旧进程再重新调试
+
+可以使用下面的命令查看并清理旧进程：
+
+```bash
+lsof -nP -iTCP:7777 -sTCP:LISTEN
+kill $(lsof -tiTCP:7777 -sTCP:LISTEN)
+```
+
+如果普通 `kill` 后端口仍未释放，再执行：
+
+```bash
+kill -9 $(lsof -tiTCP:7777 -sTCP:LISTEN)
+```
+
 ### 2.服务器部署
 
 使用nohup命令在后台运行程序：

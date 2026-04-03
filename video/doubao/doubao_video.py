@@ -31,6 +31,7 @@ class DoubaoVideoBot(Bot):
             file_cache = memory.USER_IMAGE_CACHE.get(session_id)
             session_images = []
             quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
+            video_cache = memory.USER_VIDEO_CACHE.get(session_id)
             duration_seconds = self._normalize_duration_for_model(model, video_state.get_video_duration(session_id))
             resolution = self._normalize_resolution_for_model(model, video_state.get_video_resolution(session_id), has_reference=False)
             content = [{
@@ -70,6 +71,13 @@ class DoubaoVideoBot(Bot):
                         for image_url in session_images
                     ])
                     logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
+
+            if video_cache:
+                reference_videos = self._build_reference_videos(video_cache, model)
+                if reference_videos:
+                    content.extend(reference_videos)
+                    logger.info(f"[{model.upper()}] 从内存参考视频取参考视频, count={len(reference_videos)}")
+                memory.USER_VIDEO_CACHE.pop(session_id)
 
             response = self.client.content_generation.tasks.create(
                 **self._build_task_params(
@@ -130,6 +138,23 @@ class DoubaoVideoBot(Bot):
 
         return params
 
+    def _build_reference_videos(self, video_cache, model):
+        reference_videos = []
+        for video_file in video_cache.get("files", []):
+            public_url = video_file.get("public_url")
+            if not public_url:
+                logger.warning(f"[{model.upper()}] reference video missing public_url, skipped")
+                continue
+            logger.info(f"[{model.upper()}] reference video public_url={public_url}")
+            reference_videos.append({
+                "type": "video_url",
+                "video_url": {
+                    "url": public_url
+                },
+                "role": "reference_video",
+            })
+        return reference_videos[:3]
+
     def _parse_aspect_ratio_from_prompt(self, prompt):
         return parse_aspect_ratio_from_prompt(prompt)
 
@@ -137,15 +162,7 @@ class DoubaoVideoBot(Bot):
         if model not in const.DOUBAO_SEEDANCE_LIST:
             return ratio
 
-        allowed_ratios = {
-            "16:9": 16 / 9,
-            "4:3": 4 / 3,
-            "1:1": 1.0,
-            "3:4": 3 / 4,
-            "9:16": 9 / 16,
-            "21:9": 21 / 9,
-            "adaptive": -1,
-        }
+        allowed_ratios = self._get_allowed_ratios_for_model(model)
         if ratio in allowed_ratios:
             return ratio
 
@@ -165,25 +182,69 @@ class DoubaoVideoBot(Bot):
         try:
             normalized_duration = int(duration)
         except (TypeError, ValueError):
-            logger.warning(f"[{model.upper()}] invalid duration={duration}, fallback to 5")
-            return 5
-        if 2 <= normalized_duration <= 12:
+            fallback_duration = self._get_default_duration_for_model(model)
+            logger.warning(f"[{model.upper()}] invalid duration={duration}, fallback to {fallback_duration}")
+            return fallback_duration
+        minimum_duration, maximum_duration = self._get_duration_range_for_model(model)
+        if minimum_duration <= normalized_duration <= maximum_duration:
             return normalized_duration
-        logger.warning(f"[{model.upper()}] invalid duration={duration}, fallback to 5")
-        return 5
+        fallback_duration = self._get_default_duration_for_model(model)
+        logger.warning(f"[{model.upper()}] invalid duration={duration}, fallback to {fallback_duration}")
+        return fallback_duration
 
     def _normalize_resolution_for_model(self, model, resolution, has_reference):
         if model not in const.DOUBAO_SEEDANCE_LIST:
             return resolution
         normalized_resolution = str(resolution).strip().lower()
-        allowed_resolutions = {"480p", "720p", "1080p"}
+        allowed_resolutions = self._get_allowed_resolutions_for_model(model)
         if normalized_resolution not in allowed_resolutions:
-            logger.warning(f"[{model.upper()}] invalid resolution={resolution}, fallback to 720p")
-            normalized_resolution = "720p"
+            fallback_resolution = self._get_default_resolution_for_model(model)
+            logger.warning(f"[{model.upper()}] invalid resolution={resolution}, fallback to {fallback_resolution}")
+            normalized_resolution = fallback_resolution
         if has_reference and normalized_resolution == "1080p":
             logger.warning(f"[{model.upper()}] resolution=1080p is not supported with reference images, fallback to 720p")
             return "720p"
         return normalized_resolution
+
+    def _get_allowed_ratios_for_model(self, model):
+        if model in {const.DOUBAO_SEEDANCE_20, const.DOUBAO_SEEDANCE_20_FAST}:
+            return {
+                "21:9": 21 / 9,
+                "16:9": 16 / 9,
+                "4:3": 4 / 3,
+                "1:1": 1.0,
+                "3:4": 3 / 4,
+                "9:16": 9 / 16,
+            }
+        return {
+            "16:9": 16 / 9,
+            "4:3": 4 / 3,
+            "1:1": 1.0,
+            "3:4": 3 / 4,
+            "9:16": 9 / 16,
+            "21:9": 21 / 9,
+            "adaptive": -1,
+        }
+
+    def _get_duration_range_for_model(self, model):
+        if model in {const.DOUBAO_SEEDANCE_20, const.DOUBAO_SEEDANCE_20_FAST}:
+            return 4, 15
+        return 2, 12
+
+    def _get_default_duration_for_model(self, model):
+        if model in {const.DOUBAO_SEEDANCE_20, const.DOUBAO_SEEDANCE_20_FAST}:
+            return 5
+        return 5
+
+    def _get_allowed_resolutions_for_model(self, model):
+        if model in {const.DOUBAO_SEEDANCE_20, const.DOUBAO_SEEDANCE_20_FAST}:
+            return {"480p", "720p"}
+        return {"480p", "720p", "1080p"}
+
+    def _get_default_resolution_for_model(self, model):
+        if model in {const.DOUBAO_SEEDANCE_20, const.DOUBAO_SEEDANCE_20_FAST}:
+            return "720p"
+        return "720p"
 
     def _ratio_to_float(self, ratio):
         try:
@@ -194,12 +255,38 @@ class DoubaoVideoBot(Bot):
 
     def _format_error_message(self, model, error):
         error_text = str(error)
+        if self._is_reference_video_fetch_timeout_error(error_text):
+            return (
+                "参考视频拉取超时了。"
+                "通常是因为视频码流过高、文件过大，或公网地址下载速度太慢。"
+                "建议先压低码流、减小体积后再试。"
+            )
+        if self._is_reference_video_too_short_error(model, error_text):
+            return (
+                "参考视频时长不符合官方要求。"
+                "请使用单个视频时长在 2 到 15 秒之间的参考视频后再试。"
+            )
         if self._is_seedance_duration_error(model, error_text):
             return (
                 "Seedance 当前不支持这个视频时长。"
-                "请先把视频长度设置为 4 到 12 秒之间的整数，再重新生成。"
+                "请先把视频长度设置为该模型支持的整数范围后，再重新生成。"
             )
         return f"[{model.upper()}] {error_text}"
+
+    def _is_reference_video_fetch_timeout_error(self, error_text):
+        lowered = error_text.lower()
+        return "video_url" in lowered and "timeout while fetching resource" in lowered
+
+    def _is_reference_video_too_short_error(self, model, error_text):
+        if model not in const.DOUBAO_SEEDANCE_LIST:
+            return False
+        lowered = error_text.lower()
+        return (
+            "content[" in lowered
+            and "video duration" in lowered
+            and "greater than or equal to" in lowered
+            and "r2v" in lowered
+        )
 
     def _is_seedance_duration_error(self, model, error_text):
         if model != const.DOUBAO_SEEDANCE_15_PRO:
