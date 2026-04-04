@@ -31,6 +31,7 @@ class DoubaoVideoBot(Bot):
             file_cache = memory.USER_IMAGE_CACHE.get(session_id)
             session_images = []
             quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
+            quoted_video_cache = memory.USER_QUOTED_VIDEO_CACHE.get(session_id)
             video_cache = memory.USER_VIDEO_CACHE.get(session_id)
             duration_seconds = self._normalize_duration_for_model(model, video_state.get_video_duration(session_id))
             resolution = self._normalize_resolution_for_model(model, video_state.get_video_resolution(session_id), has_reference=False)
@@ -43,17 +44,23 @@ class DoubaoVideoBot(Bot):
                 logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
             ratio = prompt_ratio or conf().get("image_aspect_ratio", "16:9")
             request_resolution = "480p"
+            reference_image_count = 0
+            reference_video_count = 0
 
             if quoted_cache:
                 ratio = prompt_ratio or size_calculator(quoted_cache["files"])
                 request_resolution = self._normalize_resolution_for_model(model, resolution, has_reference=True)
-                content.extend(process_image_files(quoted_cache))
+                image_contents = process_image_files(quoted_cache)
+                reference_image_count = len(image_contents)
+                content.extend(image_contents)
                 logger.info(f"[{model.upper()}] 从回复引用图取参考图, count={len(quoted_cache['files'])}")
                 memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
             elif file_cache:
                 ratio = prompt_ratio or size_calculator(file_cache["files"])
                 request_resolution = resolution
-                content.extend(process_image_files(file_cache))
+                image_contents = process_image_files(file_cache)
+                reference_image_count = len(image_contents)
+                content.extend(image_contents)
                 logger.info(f"[{model.upper()}] 从内存参考图取参考图, count={len(file_cache['files'])}")
                 memory.USER_IMAGE_CACHE.pop(session_id)
             else:
@@ -61,6 +68,7 @@ class DoubaoVideoBot(Bot):
                 if session_images:
                     ratio = prompt_ratio or size_calculator_from_data_urls(session_images)
                     request_resolution = self._normalize_resolution_for_model(model, resolution, has_reference=True)
+                    reference_image_count = len(session_images)
                     content.extend([
                         {
                             "type": "image_url",
@@ -72,19 +80,38 @@ class DoubaoVideoBot(Bot):
                     ])
                     logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
 
-            if video_cache:
+            if quoted_video_cache:
+                reference_videos = self._build_reference_videos(quoted_video_cache, model)
+                if reference_videos:
+                    reference_video_count = len(reference_videos)
+                    content.extend(reference_videos)
+                    logger.info(f"[{model.upper()}] 从回复引用视频取参考视频, count={len(reference_videos)}")
+                memory.USER_QUOTED_VIDEO_CACHE.pop(session_id)
+            elif video_cache:
                 reference_videos = self._build_reference_videos(video_cache, model)
                 if reference_videos:
+                    reference_video_count = len(reference_videos)
                     content.extend(reference_videos)
                     logger.info(f"[{model.upper()}] 从内存参考视频取参考视频, count={len(reference_videos)}")
                 memory.USER_VIDEO_CACHE.pop(session_id)
+
+            final_resolution = self._normalize_resolution_for_model(model, request_resolution, has_reference=bool(content[1:]))
+            final_ratio = self._normalize_ratio_for_model(model, ratio)
+            logger.info(
+                f"[{model.upper()}] 参考素材统计: reference_images={reference_image_count}, "
+                f"reference_videos={reference_video_count}"
+            )
+            logger.info(
+                f"[{model.upper()}] 请求参数: resolution={final_resolution}, "
+                f"ratio={final_ratio}, duration={duration_seconds}"
+            )
 
             response = self.client.content_generation.tasks.create(
                 **self._build_task_params(
                     model=model,
                     content=content,
-                    resolution=self._normalize_resolution_for_model(model, request_resolution, has_reference=bool(content[1:])),
-                    ratio=self._normalize_ratio_for_model(model, ratio),
+                    resolution=final_resolution,
+                    ratio=final_ratio,
                     duration_seconds=duration_seconds
                 )
             )

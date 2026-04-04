@@ -339,6 +339,13 @@ class FeiShuChanel(ChatChannel):
             quoted_image_path = cmsg.get_quoted_image_path()
             if quoted_image_path:
                 context["quoted_image_path"] = quoted_image_path
+        if context and hasattr(cmsg, "get_quoted_video_path"):
+            quoted_video_path = cmsg.get_quoted_video_path()
+            if quoted_video_path:
+                context["quoted_video_path"] = quoted_video_path
+                quoted_video_public_url = self.build_public_media_url(quoted_video_path)
+                if quoted_video_public_url:
+                    context["quoted_video_public_url"] = quoted_video_public_url
         if context and cmsg.ctype == ContextType.FILE:
             suffix = os.path.splitext(cmsg.content)[1].lstrip(".").lower()
             if suffix in const.VIDEO:
@@ -383,6 +390,13 @@ class FeiShuChanel(ChatChannel):
             quoted_image_path = cmsg.get_quoted_image_path()
             if quoted_image_path:
                 context["quoted_image_path"] = quoted_image_path
+        if context and hasattr(cmsg, "get_quoted_video_path"):
+            quoted_video_path = cmsg.get_quoted_video_path()
+            if quoted_video_path:
+                context["quoted_video_path"] = quoted_video_path
+                quoted_video_public_url = self.build_public_media_url(quoted_video_path)
+                if quoted_video_public_url:
+                    context["quoted_video_public_url"] = quoted_video_public_url
         if context and cmsg.ctype == ContextType.FILE:
             suffix = os.path.splitext(cmsg.content)[1].lstrip(".").lower()
             if suffix in const.VIDEO:

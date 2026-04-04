@@ -91,6 +91,43 @@ def download_referenced_image(parent_message_id, file_path):
                     return file_path
     return None
 
+
+def download_referenced_video(parent_message_id, user_dir):
+    message = get_message_detail(parent_message_id)
+    if not message or not message.body or not message.body.content:
+        return None
+
+    try:
+        content = json.loads(message.body.content)
+    except Exception as e:
+        logger.warning(f"[Lark] failed to parse referenced message body: {e}")
+        return None
+
+    file_key = None
+    file_name = None
+    resource_type = None
+
+    if message.msg_type == 'media':
+        file_key = content.get("file_key")
+        file_name = content.get("file_name") or f"quoted_{parent_message_id}.mp4"
+        resource_type = "media"
+    elif message.msg_type == 'file':
+        file_key = content.get("file_key")
+        file_name = content.get("file_name")
+        if not file_name or os.path.splitext(file_name)[1].lstrip(".").lower() not in {"mp4", "mov", "avi", "mkv", "webm", "m4v"}:
+            return None
+        resource_type = "file"
+    else:
+        return None
+
+    if not file_key or not file_name:
+        return None
+
+    os.makedirs(user_dir, exist_ok=True)
+    file_path = os.path.join(user_dir, f"quoted_{parent_message_id}_{os.path.basename(file_name)}")
+    get_message_resource(message_id=parent_message_id, file_key=file_key, type=resource_type, file_path=file_path)
+    return file_path
+
 def get_file_name(file):
     file_path = file.file_path
     file_name_index = file_path.rfind("/")
@@ -162,3 +199,8 @@ class FeishuMessage(ChatMessage):
         os.makedirs(self.user_dir, exist_ok=True)
         file_path = os.path.join(self.user_dir, f"quoted_{self.parent_id}.png")
         return download_referenced_image(self.parent_id, file_path)
+
+    def get_quoted_video_path(self):
+        if not self.parent_id:
+            return None
+        return download_referenced_video(self.parent_id, self.user_dir)

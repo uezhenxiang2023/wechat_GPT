@@ -218,6 +218,23 @@ class ChatChannel(Channel):
         except Exception as e:
             logger.warning(f"{channel} failed to cache quoted image: {e}")
 
+    def _cache_quoted_video(self, context: Context):
+        quoted_video_path = context.get("quoted_video_path")
+        session_id = context.get("session_id")
+        if not quoted_video_path or not session_id:
+            return
+        channel = self._get_channel(context)
+        try:
+            video_cache_item = {
+                "path": quoted_video_path,
+                "public_url": context.get("quoted_video_public_url"),
+                "mime_type": f"video/{os.path.splitext(quoted_video_path)[1].lstrip('.').lower() or 'mp4'}",
+            }
+            memory.USER_QUOTED_VIDEO_CACHE[session_id] = {"files": [video_cache_item]}
+            logger.info(f"{channel} quoted video cached, session_id={session_id}, path={quoted_video_path}")
+        except Exception as e:
+            logger.warning(f"{channel} failed to cache quoted video: {e}")
+
     def _generate_reply(self, context: Context, reply: Reply = Reply()) -> Reply:
         session_id = context["session_id"]
                 
@@ -240,6 +257,8 @@ class ChatChannel(Channel):
             logger.debug("%s ready to handle context: type=%s, content=%s", self._get_channel(context), context.type, context.content)
             if context.type in (ContextType.IMAGE_CREATE, ContextType.VIDEO_CREATE):
                 self._cache_quoted_image(context)
+            if context.type == ContextType.VIDEO_CREATE:
+                self._cache_quoted_video(context)
             if context.type == ContextType.VOICE:  # 语音消息
                 cmsg = context["msg"]
                 cmsg.prepare()
