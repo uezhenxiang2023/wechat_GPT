@@ -1,6 +1,8 @@
 import io
 import os
 import requests, base64
+import re
+import subprocess
 
 from urllib.parse import urlparse
 from PIL import Image
@@ -119,3 +121,35 @@ def get_video_urls_from_session(session_id, session_manager=None, include_data_u
         if videos:
             return videos
     return []
+
+
+def get_video_dimensions(video_path):
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-i", video_path],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        output = f"{result.stdout}\n{result.stderr}"
+        match = re.search(r"(\d{2,5})x(\d{2,5})", output)
+        if not match:
+            return None
+        return int(match.group(1)), int(match.group(2))
+    except Exception:
+        return None
+
+
+def infer_aspect_ratio_from_video_cache(video_cache, size_to_ratio):
+    if not video_cache:
+        return None
+    for video_file in video_cache.get("files", []):
+        video_path = video_file.get("path")
+        if not video_path:
+            continue
+        video_size = get_video_dimensions(video_path)
+        if not video_size:
+            continue
+        return size_to_ratio(video_size)
+    return None

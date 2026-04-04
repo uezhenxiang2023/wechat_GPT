@@ -3,14 +3,14 @@ import time
 from volcenginesdkarkruntime import Ark
 
 from bot.bot import Bot
-from bot.ark.ark_media import process_image_files, size_calculator, size_calculator_from_data_urls
+from bot.ark.ark_media import process_image_files, size_calculator, size_calculator_from_data_urls, aspect_ratio_from_size
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
 from common.aspect_ratio import parse_aspect_ratio_from_prompt
 from common import const, memory
 from common.log import logger
 from common.model_status import model_state
-from common.utils import get_chat_session_manager, get_image_urls_from_session, url_to_base64
+from common.utils import get_chat_session_manager, get_image_urls_from_session, infer_aspect_ratio_from_video_cache, url_to_base64
 from common.video_status import video_state
 from config import conf
 
@@ -33,6 +33,7 @@ class DoubaoVideoBot(Bot):
             quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
             quoted_video_cache = memory.USER_QUOTED_VIDEO_CACHE.get(session_id)
             video_cache = memory.USER_VIDEO_CACHE.get(session_id)
+            has_video_reference_source = bool(quoted_video_cache or video_cache)
             duration_seconds = self._normalize_duration_for_model(model, video_state.get_video_duration(session_id))
             resolution = self._normalize_resolution_for_model(model, video_state.get_video_resolution(session_id), has_reference=False)
             content = [{
@@ -46,9 +47,11 @@ class DoubaoVideoBot(Bot):
             request_resolution = "480p"
             reference_image_count = 0
             reference_video_count = 0
+            selected_video_cache = None
 
             if quoted_cache:
-                ratio = prompt_ratio or size_calculator(quoted_cache["files"])
+                if not has_video_reference_source:
+                    ratio = prompt_ratio or size_calculator(quoted_cache["files"])
                 request_resolution = self._normalize_resolution_for_model(model, resolution, has_reference=True)
                 image_contents = process_image_files(quoted_cache)
                 reference_image_count = len(image_contents)
@@ -56,7 +59,8 @@ class DoubaoVideoBot(Bot):
                 logger.info(f"[{model.upper()}] 从回复引用图取参考图, count={len(quoted_cache['files'])}")
                 memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
             elif file_cache:
-                ratio = prompt_ratio or size_calculator(file_cache["files"])
+                if not has_video_reference_source:
+                    ratio = prompt_ratio or size_calculator(file_cache["files"])
                 request_resolution = resolution
                 image_contents = process_image_files(file_cache)
                 reference_image_count = len(image_contents)
@@ -66,7 +70,8 @@ class DoubaoVideoBot(Bot):
             else:
                 session_images = get_image_urls_from_session(session_id, session_manager)
                 if session_images:
-                    ratio = prompt_ratio or size_calculator_from_data_urls(session_images)
+                    if not has_video_reference_source:
+                        ratio = prompt_ratio or size_calculator_from_data_urls(session_images)
                     request_resolution = self._normalize_resolution_for_model(model, resolution, has_reference=True)
                     reference_image_count = len(session_images)
                     content.extend([
@@ -81,6 +86,7 @@ class DoubaoVideoBot(Bot):
                     logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
 
             if quoted_video_cache:
+                selected_video_cache = quoted_video_cache
                 reference_videos = self._build_reference_videos(quoted_video_cache, model)
                 if reference_videos:
                     reference_video_count = len(reference_videos)
@@ -88,12 +94,23 @@ class DoubaoVideoBot(Bot):
                     logger.info(f"[{model.upper()}] 从回复引用视频取参考视频, count={len(reference_videos)}")
                 memory.USER_QUOTED_VIDEO_CACHE.pop(session_id)
             elif video_cache:
+                selected_video_cache = video_cache
                 reference_videos = self._build_reference_videos(video_cache, model)
                 if reference_videos:
                     reference_video_count = len(reference_videos)
                     content.extend(reference_videos)
                     logger.info(f"[{model.upper()}] 从内存参考视频取参考视频, count={len(reference_videos)}")
                 memory.USER_VIDEO_CACHE.pop(session_id)
+
+            if reference_video_count and selected_video_cache:
+                video_ratio = self._infer_aspect_ratio_from_video_cache(selected_video_cache, model)
+                if video_ratio:
+                    ratio = video_ratio
+                    logger.info(f"[{model.upper()}] 从参考视频推断比例: {video_ratio}")
+
+            if reference_image_count and reference_video_count:
+                self._mark_images_as_reference(content)
+                logger.info(f"[{model.upper()}] 图视频混合参考模式: 已将图片内容标记为 reference_image")
 
             final_resolution = self._normalize_resolution_for_model(model, request_resolution, has_reference=bool(content[1:]))
             final_ratio = self._normalize_ratio_for_model(model, ratio)
@@ -181,6 +198,20 @@ class DoubaoVideoBot(Bot):
                 "role": "reference_video",
             })
         return reference_videos[:3]
+
+    def _mark_images_as_reference(self, content):
+        for item in content:
+            if item.get("type") == "image_url":
+                item["role"] = "reference_image"
+
+    def _infer_aspect_ratio_from_video_cache(self, video_cache, model):
+        ratio = infer_aspect_ratio_from_video_cache(
+            video_cache,
+            lambda video_size: self._normalize_ratio_for_model(model, aspect_ratio_from_size(video_size))
+        )
+        if ratio is None:
+            logger.warning(f"[{model.upper()}] failed to infer aspect ratio from reference video cache")
+        return ratio
 
     def _parse_aspect_ratio_from_prompt(self, prompt):
         return parse_aspect_ratio_from_prompt(prompt)
