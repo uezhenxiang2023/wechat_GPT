@@ -15,6 +15,24 @@ fi
 
 source "${VENV_DIR}/bin/activate"
 
+if command -v zsh >/dev/null 2>&1; then
+  # Read TOS-related exports from the user's zsh environment without sourcing
+  # zsh-specific config directly inside this bash script.
+  while IFS='=' read -r key value; do
+    case "${key}" in
+      TOS_ACCESS_KEY|TOS_SECRET_KEY)
+        export "${key}=${value}"
+        ;;
+    esac
+  done < <(zsh -ic 'env | grep -E "^(TOS_ACCESS_KEY|TOS_SECRET_KEY)=" 2>/dev/null')
+fi
+
+if [ "${MEDIA_STORE_PROVIDER:-}" = "tos" ] || [ -n "${TOS_ACCESS_KEY:-}" ] || [ -n "${TOS_SECRET_KEY:-}" ]; then
+  if [ -z "${TOS_ACCESS_KEY:-}" ] || [ -z "${TOS_SECRET_KEY:-}" ]; then
+    echo "Warning: TOS mode may be enabled, but TOS_ACCESS_KEY / TOS_SECRET_KEY are not fully set."
+  fi
+fi
+
 PIDS="$(lsof -tiTCP:${PORT} -sTCP:LISTEN 2>/dev/null || true)"
 if [ -n "${PIDS}" ]; then
   echo "Stopping existing listeners on port ${PORT}: ${PIDS}"

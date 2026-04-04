@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import pickle
+from copy import deepcopy
 
 from common.log import logger
 
@@ -261,6 +262,48 @@ class Config(dict):
 config = Config()
 
 
+_SENSITIVE_KEYWORDS = (
+    "key",
+    "secret",
+    "token",
+    "password",
+    "cookie",
+    "credential",
+)
+
+
+def _is_sensitive_config_key(key):
+    lowered = str(key).lower()
+    return any(keyword in lowered for keyword in _SENSITIVE_KEYWORDS)
+
+
+def _mask_sensitive_value(value):
+    if value is None:
+        return None
+    text = str(value)
+    if not text:
+        return text
+    if len(text) <= 8:
+        return "*" * len(text)
+    return f"{text[:4]}***{text[-4:]}"
+
+
+def _sanitize_config_for_log(value):
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, item in value.items():
+            if _is_sensitive_config_key(key):
+                sanitized[key] = _mask_sensitive_value(item)
+            else:
+                sanitized[key] = _sanitize_config_for_log(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_config_for_log(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_config_for_log(item) for item in value)
+    return value
+
+
 def load_config():
     global config
     config_path = "./config.json"
@@ -279,7 +322,8 @@ def load_config():
     for name, value in os.environ.items():
         name = name.lower()
         if name in available_setting:
-            logger.info("[INIT] override config by environ args: {}={}".format(name, value))
+            display_value = _mask_sensitive_value(value) if _is_sensitive_config_key(name) else value
+            logger.info("[INIT] override config by environ args: {}={}".format(name, display_value))
             try:
                 config[name] = eval(value)
             except:
@@ -294,7 +338,7 @@ def load_config():
         logger.setLevel(logging.DEBUG)
         logger.debug("[INIT] set log level to DEBUG")
 
-    logger.info("[INIT] load config: {}".format(config))
+    logger.info("[INIT] load config: {}".format(_sanitize_config_for_log(deepcopy(config))))
 
     config.load_user_datas()
 

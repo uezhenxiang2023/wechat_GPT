@@ -35,8 +35,8 @@ def _build_tos_public_url(file_path):
     public_base_url = str(conf().get("tos_public_base_url", "") or "").rstrip("/")
     bucket = str(conf().get("tos_bucket", "") or "").strip()
     endpoint = str(conf().get("tos_endpoint", "") or "").strip()
-    access_key = str(conf().get("tos_access_key", "") or "").strip()
-    secret_key = str(conf().get("tos_secret_key", "") or "").strip()
+    access_key = _get_tos_access_key()
+    secret_key = _get_tos_secret_key()
     object_key = _build_tos_object_key(file_path)
     if object_key is None:
         return None
@@ -49,9 +49,9 @@ def _build_tos_public_url(file_path):
     if not endpoint:
         missing_config.append("tos_endpoint")
     if not access_key:
-        missing_config.append("tos_access_key")
+        missing_config.append("TOS_ACCESS_KEY/tos_access_key")
     if not secret_key:
-        missing_config.append("tos_secret_key")
+        missing_config.append("TOS_SECRET_KEY/tos_secret_key")
     if missing_config:
         logger.warning(
             "[MediaStore] media_store_provider=tos but missing config: %s",
@@ -101,6 +101,14 @@ def _build_tos_object_key(file_path):
     if prefix:
         return f"{prefix}/{relative_path}"
     return relative_path
+
+
+def _get_tos_access_key():
+    return str(os.getenv("TOS_ACCESS_KEY") or conf().get("tos_access_key", "") or "").strip()
+
+
+def _get_tos_secret_key():
+    return str(os.getenv("TOS_SECRET_KEY") or conf().get("tos_secret_key", "") or "").strip()
 
 
 def _get_tmp_relative_path(file_path):
