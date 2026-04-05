@@ -6,6 +6,7 @@ from PIL import Image
 from common import const
 from common.utils import get_ark_sessions
 from common.log import logger
+from config import conf
 
 
 def encode_image_content(image_path, image_file):
@@ -38,6 +39,50 @@ def process_image_files(file_cache):
     for image_path, image_file in zip(image_paths, image_files):
         image_contents.append(encode_image_content(image_path, image_file))
     return image_contents
+
+
+def encode_video_content(video_path, video_file, fps=1):
+    """将视频组装为多模态会话消息块，优先使用公网 URL，回退到 data URL。"""
+    video_url = encode_video(video_path, video_file)
+    return {
+        "type": "video_url",
+        "video_url": {
+            "url": video_url,
+            "fps": fps,
+        }
+    }
+
+
+def encode_video(video_path, video_file):
+    """将视频转为模型可用的 URL 或 data URL。"""
+    public_url = video_file.get("public_url") if isinstance(video_file, dict) else None
+    input_mode = str(conf().get("ark_video_input_mode", "base64")).strip().lower()
+    if input_mode not in {"base64", "public_url"}:
+        logger.warning(f"[ArkMedia] invalid ark_video_input_mode={input_mode}, fallback to base64")
+        input_mode = "base64"
+    if input_mode == "public_url" and public_url:
+        return public_url
+    if public_url:
+        logger.info("[ArkMedia] ark video input mode=base64, using inline data URL")
+    mime_type = _get_video_mime_type(video_path, video_file)
+    with open(video_path, "rb") as file:
+        base64_video = base64.b64encode(file.read()).decode("utf-8")
+    return f"data:{mime_type};base64,{base64_video}"
+
+
+def process_video_files(file_cache, fps=1):
+    """处理视频缓存，返回按原顺序编码后的视频内容列表。"""
+    if not file_cache:
+        return []
+
+    video_contents = []
+    for video_file in file_cache.get("files", []):
+        video_path = video_file.get("path") if isinstance(video_file, dict) else None
+        if not video_path:
+            logger.warning("[ArkMedia] video cache item missing path, skipped")
+            continue
+        video_contents.append(encode_video_content(video_path, video_file, fps=fps))
+    return video_contents
 
 
 def size_calculator(files):
@@ -76,6 +121,14 @@ def _get_image_mime_type(image_file):
     if image_type == "PngImageFile":
         return "image/png"
     return "image/jpeg"
+
+
+def _get_video_mime_type(video_path, video_file):
+    mime_type = video_file.get("mime_type") if isinstance(video_file, dict) else None
+    if isinstance(mime_type, str) and mime_type:
+        return mime_type
+    suffix = video_path.rsplit(".", 1)[-1].lower() if "." in video_path else "mp4"
+    return f"video/{suffix}"
 
 
 def _decode_image_size(image_url):

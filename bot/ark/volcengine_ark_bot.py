@@ -9,7 +9,7 @@ from volcenginesdkarkruntime import Ark
 
 from config import conf
 from bot.bot import Bot
-from bot.ark.ark_media import process_image_files
+from bot.ark.ark_media import process_image_files, process_video_files
 from bot.session_manager import SessionManager
 from bot.ark.volcengine_ark_session import VolcengineArkSession
 from bridge.context import ContextType, Context
@@ -44,13 +44,23 @@ class VolcengineArkBot(Bot):
             logger.info(f"[{self.Model_ID}] query={query}, requester={session_id}")
 
             # 检查缓存中是否媒体文件
-            file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+            image_cache = memory.USER_IMAGE_CACHE.get(session_id)
+            video_cache = memory.USER_VIDEO_CACHE.get(session_id)
 
-            if file_cache:
-                image_contents = process_image_files(file_cache)
-                image_contents.append({"type": "text", "text": query})
-                query = image_contents
+            media_contents = []
+            if image_cache:
+                image_contents = process_image_files(image_cache)
+                media_contents.extend(image_contents)
+                logger.info(f"[{self.Model_ID}] 从内存参考图取内容, count={len(image_contents)}")
                 memory.USER_IMAGE_CACHE.pop(session_id)
+            if video_cache:
+                video_contents = process_video_files(video_cache)
+                media_contents.extend(video_contents)
+                logger.info(f"[{self.Model_ID}] 从内存参考视频取内容, count={len(video_contents)}")
+                memory.USER_VIDEO_CACHE.pop(session_id)
+            if media_contents:
+                media_contents.append({"type": "text", "text": query})
+                query = media_contents
 
             session = self.sessions.session_query(query, session_id)
             client_attr = 'bot_chat' if self.model in const.DOUBAO_BOT_LIST else 'chat'
