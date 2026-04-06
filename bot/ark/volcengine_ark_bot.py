@@ -46,8 +46,13 @@ class VolcengineArkBot(Bot):
             # 检查缓存中是否媒体文件
             image_cache = memory.USER_IMAGE_CACHE.get(session_id)
             video_cache = memory.USER_VIDEO_CACHE.get(session_id)
+            file_cache = memory.USER_FILE_CACHE.get(session_id)
 
             media_contents = []
+            if file_cache:
+                file_count = len(file_cache.get("files", [])) if isinstance(file_cache.get("files"), list) else 1
+                logger.info(f"[{self.Model_ID}] 从内存文档缓存取内容, count={file_count}")
+                return Reply(ReplyType.ERROR, "Ark 文档缓存已归位到 USER_FILE_CACHE，文档消息体结构下一步再补。")
             if image_cache:
                 image_contents = process_image_files(image_cache)
                 media_contents.extend(image_contents)

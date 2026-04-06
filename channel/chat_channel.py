@@ -355,24 +355,39 @@ class ChatChannel(Channel):
                             memory.USER_VIDEO_CACHE[session_id] = {"files": [video_cache_item]}
                         logger.info(f'[{model.upper()}] {file_path} cached to video memory from file branch')
                 elif mime_type in const.DOCUMENT:
-                    # 将文件下载到本地/tmp目录
-                    context['msg'].prepare()
-                    if mime_type == 'pdf':
-                        with open(file_path, 'rb') as file:
-                            pdf_data = file.read()
-                            b64 = base64.b64encode(pdf_data).decode('utf-8')
-                    elif mime_type == 'docx':
-                        doc = docx.Document(file_path)
-                        full_text = []
-                        for paragraph in doc.paragraphs:
-                            full_text.append(paragraph.text)
-                        docx_text = '\n'.join(full_text)
-                        b64 = docx_text
-                    file_part = {
-                        'mime_type': f'{type_id}/{mime_type}',
-                        'data': b64
-                    }
-                    cache_media(file_path, file_part, context)
+                    with cache_lock:
+                        context["msg"].prepare()
+                        if mime_type == 'pdf':
+                            with open(file_path, 'rb') as file:
+                                file_data = file.read()
+                                encoded_data = base64.b64encode(file_data).decode('utf-8')
+                        elif mime_type == 'docx':
+                            doc = docx.Document(file_path)
+                            full_text = []
+                            for paragraph in doc.paragraphs:
+                                full_text.append(paragraph.text)
+                            encoded_data = '\n'.join(full_text)
+                        else:
+                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
+                                encoded_data = file.read()
+                        file_cache_item = {
+                            "path": file_path,
+                            "msg": context.get("msg"),
+                            "mime_type": f'{type_id}/{mime_type}',
+                            "data": encoded_data,
+                        }
+                        existing_cache = memory.USER_FILE_CACHE.get(session_id)
+                        if existing_cache and isinstance(existing_cache.get("files"), list):
+                            existing_cache["files"].append(file_cache_item)
+                            existing_cache["path"] = file_path
+                            existing_cache["msg"] = context.get("msg")
+                        else:
+                            memory.USER_FILE_CACHE[session_id] = {
+                                "path": file_path,
+                                "msg": context.get("msg"),
+                                "files": [file_cache_item],
+                            }
+                        logger.info(f'[{model.upper()}] {file_path} cached to file memory from file branch')
                 else:
                     logger.warning(f'[{model.upper()}] query with unsupported file type:{mime_type}')
             elif context.type == ContextType.IMAGE_CREATE:

@@ -1,4 +1,5 @@
 import io
+import os
 import time
 import base64
 
@@ -18,6 +19,10 @@ from common.model_status import model_state
 
 
 class ClaudeAIBot(Bot, OpenAIImage):
+    _CLAUDE_FILES_API_BETA = "files-api-2025-04-14"
+    _CLAUDE_BASE64_PDF_LIMIT_BYTES = 32 * 1024 * 1024
+    _CLAUDE_OFFICIAL_BASE_URL = "https://api.anthropic.com"
+
     def __init__(self):
         super().__init__()
         self.client = Anthropic(
@@ -98,7 +103,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
                 ]
             if is_searching and not self.stream:
                 # 搜索开启 + stream 关闭 → IMAGE_URL 模式
-                response = self.client.messages.create(**create_kwargs)
+                response = self._create_claude_message(create_kwargs, current_content)
                 # 提取文本回复
                 reply_content = ""
                 for block in response.content:
@@ -115,7 +120,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
                 
                 def stream_generator():
                     full_text = ""
-                    with self.client.messages.stream(**create_kwargs) as s:
+                    with self._stream_claude_message(create_kwargs, current_content) as s:
                         for text_chunk in s.text_stream:
                             full_text += text_chunk
                             yield text_chunk
@@ -132,7 +137,7 @@ class ClaudeAIBot(Bot, OpenAIImage):
 
             else:
                 # 普通模式
-                response = self.client.messages.create(**create_kwargs)
+                response = self._create_claude_message(create_kwargs, current_content)
                 reply_content = ""
                 for block in response.content:
                     if hasattr(block, "text"):
@@ -152,14 +157,13 @@ class ClaudeAIBot(Bot, OpenAIImage):
         """
         current_content = []
 
-        file_cache = memory.USER_IMAGE_CACHE.get(session_id)
-        if file_cache:
-            for cached_file in file_cache.get("files", []):
+        image_cache = memory.USER_IMAGE_CACHE.get(session_id)
+        if image_cache:
+            for cached_file in image_cache.get("files", []):
                 data_type = type(cached_file).__name__
 
                 if data_type in ("JpegImageFile", "PngImageFile", "Image"):
                     try:
-                        import io
                         img = cached_file
                         if img.mode in ("RGBA", "LA", "P"):
                             img = img.convert("RGB")
@@ -184,36 +188,38 @@ class ClaudeAIBot(Bot, OpenAIImage):
                         logger.debug(f"[{self.Model_ID}] image block added, format={fmt}")
                     except Exception as e:
                         logger.error(f"[{self.Model_ID}] failed to encode image: {e}")
-
-                elif data_type == "dict":
-                    mime_type = cached_file.get("mime_type", "")
-                    raw_data = cached_file.get("data", "")
-
-                    if mime_type == "application/pdf":
-                        current_content.append({
-                            "type": "document",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "application/pdf",
-                                "data": raw_data
-                            }
-                        })
-                        logger.debug(f"[{self.Model_ID}] PDF document block added")
-
-                    elif mime_type in ("application/docx", "application/doc"):
-                        current_content.append({
-                            "type": "text",
-                            "text": f"<document>\n{raw_data}\n</document>"
-                        })
-                        logger.debug(f"[{self.Model_ID}] DOCX text block added")
-
-                    else:
-                        logger.warning(f"[{self.Model_ID}] unsupported mime_type: {mime_type}")
-
                 else:
-                    logger.warning(f"[{self.Model_ID}] unsupported cached file type: {data_type}")
+                    logger.warning(f"[{self.Model_ID}] unsupported cached image type: {data_type}")
 
             memory.USER_IMAGE_CACHE.pop(session_id)
+
+        file_cache = memory.USER_FILE_CACHE.get(session_id)
+        if file_cache:
+            for cached_file in file_cache.get("files", []):
+                if not isinstance(cached_file, dict):
+                    logger.warning(f"[{self.Model_ID}] unsupported cached file type: {type(cached_file).__name__}")
+                    continue
+
+                mime_type = cached_file.get("mime_type", "")
+                raw_data = cached_file.get("data", "")
+                file_path = cached_file.get("path", "")
+
+                if mime_type == "application/pdf":
+                    pdf_block = self._build_pdf_document_block(file_path, raw_data)
+                    if pdf_block:
+                        current_content.append(pdf_block)
+
+                elif mime_type in ("application/docx", "application/doc", "application/plain"):
+                    current_content.append({
+                        "type": "text",
+                        "text": f"<document>\n{raw_data}\n</document>"
+                    })
+                    logger.debug(f"[{self.Model_ID}] document text block added, mime_type={mime_type}")
+
+                else:
+                    logger.warning(f"[{self.Model_ID}] unsupported mime_type: {mime_type}")
+
+            memory.USER_FILE_CACHE.pop(session_id)
 
         # 文本块追加在末尾
         current_content.append({
@@ -222,3 +228,78 @@ class ClaudeAIBot(Bot, OpenAIImage):
         })
 
         return current_content
+
+    def _build_pdf_document_block(self, file_path: str, raw_data: str):
+        file_size = os.path.getsize(file_path) if file_path and os.path.exists(file_path) else 0
+        if file_size > self._CLAUDE_BASE64_PDF_LIMIT_BYTES:
+            if not self._supports_claude_files_api():
+                raise ValueError("当前 Claude 代理不支持 Files API，大于 32MB 的 PDF 请切换到官方 Claude 接口后再试。")
+            file_upload = self._upload_pdf_to_claude(file_path)
+            if not file_upload:
+                return None
+            logger.info(f"[{self.Model_ID}] PDF exceeds 32MB, use Claude Files API, file_id={file_upload.id}")
+            return {
+                "type": "document",
+                "source": {
+                    "type": "file",
+                    "file_id": file_upload.id,
+                }
+            }
+
+        logger.debug(f"[{self.Model_ID}] PDF document block added")
+        return {
+            "type": "document",
+            "source": {
+                "type": "base64",
+                "media_type": "application/pdf",
+                "data": raw_data
+            }
+        }
+
+    def _upload_pdf_to_claude(self, file_path: str):
+        with open(file_path, "rb") as pdf_file:
+            return self.client.beta.files.upload(
+                file=(os.path.basename(file_path), pdf_file, "application/pdf"),
+                betas=[self._CLAUDE_FILES_API_BETA]
+            )
+
+    def _supports_claude_files_api(self):
+        base_url = str(conf().get("claude_base_url") or self._CLAUDE_OFFICIAL_BASE_URL).rstrip("/")
+        return base_url == self._CLAUDE_OFFICIAL_BASE_URL
+
+    def _contains_file_document(self, content_blocks):
+        if not isinstance(content_blocks, list):
+            return False
+        for block in content_blocks:
+            if block.get("type") != "document":
+                continue
+            source = block.get("source", {})
+            if source.get("type") == "file":
+                return True
+        return False
+
+    def _requires_files_api(self, current_content, session_messages):
+        if self._contains_file_document(current_content):
+            return True
+        for message in session_messages:
+            if self._contains_file_document(message.get("content")):
+                return True
+        return False
+
+    def _create_claude_message(self, create_kwargs, current_content):
+        session_messages = create_kwargs.get("messages", [])
+        if self._requires_files_api(current_content, session_messages):
+            return self.client.beta.messages.create(
+                **create_kwargs,
+                betas=[self._CLAUDE_FILES_API_BETA]
+            )
+        return self.client.messages.create(**create_kwargs)
+
+    def _stream_claude_message(self, create_kwargs, current_content):
+        session_messages = create_kwargs.get("messages", [])
+        if self._requires_files_api(current_content, session_messages):
+            return self.client.beta.messages.stream(
+                **create_kwargs,
+                betas=[self._CLAUDE_FILES_API_BETA]
+            )
+        return self.client.messages.stream(**create_kwargs)
