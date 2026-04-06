@@ -6,7 +6,10 @@ Google gemini bot
 """
 # encoding:utf-8
 
+import base64
 import os, time
+import shutil
+import tempfile
 
 from google import genai
 from google.genai import types
@@ -34,6 +37,8 @@ from plugins.bigchao.script_breakdown import screenplay_scenes_breakdown, screen
 
 # OpenAI对话模型API (可用)
 class GoogleGeminiBot(Bot):
+    _GEMINI_INLINE_PDF_LIMIT_BYTES = 20 * 1024 * 1024
+    _GEMINI_MAX_PDF_LIMIT_BYTES = 50 * 1024 * 1024
 
     def __init__(self):
         super().__init__()
@@ -382,28 +387,44 @@ class GoogleGeminiBot(Bot):
         # 创建文本Part对象并添加到列表
         text = Part.from_text(text=query)
         request_contents = [text]
+        request_warnings = []
         
-        # 检查缓存中是否媒体文件
-        file_cache = memory.USER_IMAGE_CACHE.get(session_id)
-        if file_cache:
-            first_data = file_cache['files'][0]
+        image_cache = memory.USER_IMAGE_CACHE.get(session_id)
+        if image_cache:
+            first_data = image_cache['files'][0]
             data_type = type(first_data).__name__
-            
-            if data_type == 'dict':
-                mime_type = first_data.get('mime_type')
-                if mime_type in ['application/docx', 'application/doc']:
-                    file_content = Part.from_text(text=first_data.get('data'))
-                    request_contents.insert(0, file_content)
-                elif mime_type == 'application/pdf':
-                    file_content = Part.from_bytes(**first_data)
-                    request_contents.insert(0, file_content)
-            elif data_type in ['JpegImageFile', 'PngImageFile', 'File']:
-                request_contents.extend(file_cache['files'])
+
+            if data_type in ['JpegImageFile', 'PngImageFile', 'File']:
+                request_contents.extend(image_cache['files'])
             elif data_type in ['FileData']:
                 request_contents.append({'fileData': first_data})
-            
+
             memory.USER_IMAGE_CACHE.pop(session_id)
-        else:
+
+        file_cache = memory.USER_FILE_CACHE.get(session_id)
+        if file_cache:
+            for cached_file in file_cache.get("files", []):
+                if not isinstance(cached_file, dict):
+                    logger.warning(f"[{self.Model_ID}] unsupported cached file type: {type(cached_file).__name__}")
+                    continue
+
+                mime_type = cached_file.get("mime_type")
+                raw_data = cached_file.get("data", "")
+                file_path = cached_file.get("path", "")
+
+                if mime_type in ['application/docx', 'application/doc', 'application/plain']:
+                    request_contents.insert(0, Part.from_text(text=raw_data))
+                    logger.debug(f"[{self.Model_ID}] document text part added, mime_type={mime_type}")
+                elif mime_type == 'application/pdf':
+                    file_content = self._build_pdf_part(file_path, raw_data, request_warnings)
+                    if file_content is not None:
+                        request_contents.insert(0, file_content)
+                else:
+                    logger.warning(f"[{self.Model_ID}] unsupported file mime_type: {mime_type}")
+
+            memory.USER_FILE_CACHE.pop(session_id)
+
+        if not image_cache and not file_cache:
             image_context = get_image_context_from_session(session_id)
             session_images = image_context["images"]
             if session_images and should_inject_image_context(session_id, image_context["signature"]):
@@ -417,7 +438,28 @@ class GoogleGeminiBot(Bot):
                 mark_image_context_injected(session_id, image_context["signature"])
                 logger.info(f"[{self.Model_ID}] 从 session 历史注入图片上下文, count={len(session_images)}, has_prompt={bool(image_context['prompt'])}")
         
-        return request_contents
+        return request_contents, request_warnings
+
+    def _build_pdf_part(self, file_path: str, raw_data: str, request_warnings=None):
+        file_size = os.path.getsize(file_path) if file_path and os.path.exists(file_path) else 0
+        if file_size > self._GEMINI_MAX_PDF_LIMIT_BYTES:
+            warning = "Gemini 官方目前只支持 50MB 以内的 PDF，请压缩或拆分后再试。"
+            logger.warning(
+                f"[{self.Model_ID}] skip oversized PDF, path={file_path}, size={file_size}, "
+                f"limit={self._GEMINI_MAX_PDF_LIMIT_BYTES}"
+            )
+            if request_warnings is not None and warning not in request_warnings:
+                request_warnings.append(warning)
+            return None
+        if file_size > self._GEMINI_INLINE_PDF_LIMIT_BYTES and file_path:
+            logger.info(f"[{self.Model_ID}] PDF exceeds inline threshold, upload to Gemini Files API, path={file_path}")
+            return self.upload_to_gemini(file_path, mime_type='application/pdf')
+
+        logger.debug(f"[{self.Model_ID}] PDF document part added")
+        return Part.from_bytes(
+            data=base64.b64decode(raw_data),
+            mime_type='application/pdf'
+        )
 
     def reply(self, query, context: Context = None) -> Reply:
         try:
@@ -433,7 +475,9 @@ class GoogleGeminiBot(Bot):
 
                 session = self.sessions.session_query(query, session_id)
                 user_chat = self._get_user_chat(session_id, self.model)
-                resquest_contents = self._build_request_contents(query, session_id)
+                resquest_contents, request_warnings = self._build_request_contents(query, session_id)
+                if len(resquest_contents) == 1 and request_warnings:
+                    raise ValueError("\n".join(request_warnings))
                 if tool_state.get_print_state(session_id):
                     response = user_chat.send_message(resquest_contents, config=self.print_config)
                     tool_state.toggle_printing(session_id)
@@ -485,17 +529,19 @@ class GoogleGeminiBot(Bot):
                     # 是否监测到函数响应内容
                     if function_response != []:
                         response = {
-                            'reply_text': response.text,
+                            'reply_text': ("\n".join(request_warnings) + "\n\n" if request_warnings else "") + response.text,
                             'function_response': function_response[0].function_response.response
                         }
                         return Reply(ReplyType.FILE, response)
                     else:
-                        return Reply(ReplyType.TEXT, response.text)
+                        reply_text = ("\n".join(request_warnings) + "\n\n" if request_warnings else "") + response.text
+                        return Reply(ReplyType.TEXT, reply_text)
                 else:
                     grounding_metadata = response.candidates[0].grounding_metadata
                     # 响应中是否有网页链接
                     if grounding_metadata.grounding_chunks is None:
-                        return Reply(ReplyType.TEXT, response.text)
+                        reply_text = ("\n".join(request_warnings) + "\n\n" if request_warnings else "") + response.text
+                        return Reply(ReplyType.TEXT, reply_text)
                     else:
                         return Reply(ReplyType.IMAGE_URL, response)
             else:
@@ -591,13 +637,28 @@ class GoogleGeminiBot(Bot):
 
         https://ai.google.dev/gemini-api/docs/prompting_with_media
         """
+        upload_config = {}
+        if mime_type:
+            upload_config["mime_type"] = mime_type
+        temp_path = None
+        upload_path = path
+        try:
+            os.path.basename(path).encode("ascii")
+        except UnicodeEncodeError:
+            suffix = os.path.splitext(path)[1] or ".bin"
+            temp_dir = os.path.join(os.getcwd(), "tmp", "gemini_uploads")
+            os.makedirs(temp_dir, exist_ok=True)
+            with tempfile.NamedTemporaryFile(prefix="gemini_upload_", suffix=suffix, dir=temp_dir, delete=False) as tmp_file:
+                temp_path = tmp_file.name
+            shutil.copyfile(path, temp_path)
+            upload_path = temp_path
+            logger.info(f"[{self.Model_ID}] normalized upload filename for Gemini Files API, tmp_path={upload_path}")
         file = self.client.files.upload(
-            file=path,
-            config=dict(
-                display_name=os.path.basename(path),
-                mime_type=mime_type
-            )
+            file=upload_path,
+            config=upload_config or None
         )
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
         self.wait_for_files_active(file)
         print(f"Uploaded file '{file.display_name}' as: {file.uri}")
