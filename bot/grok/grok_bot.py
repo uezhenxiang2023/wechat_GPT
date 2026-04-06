@@ -1,6 +1,7 @@
 import base64
 import io
 import mimetypes
+import os
 
 from bot.bot import Bot
 from bot.grok.grok_session import GrokSession
@@ -21,6 +22,8 @@ _grok_sessions = SessionManager(GrokSession, model="grok-4.20-0309-non-reasoning
 
 
 class GrokBot(Bot):
+    _GROK_MAX_FILE_LIMIT_BYTES = 48 * 1024 * 1024
+
     def __init__(self):
         super().__init__()
         self.api_key = conf().get("grok_api_key")
@@ -43,28 +46,31 @@ class GrokBot(Bot):
         self.Model_ID = self.model.upper()
 
         try:
-            current_content, uploaded_file_ids = self._build_current_content(query, session_id)
+            current_content, uploaded_file_ids, request_warnings = self._build_current_content(query, session_id)
             logger.info(f"[{self.Model_ID}] query={query}")
+            if len(current_content) == 1 and request_warnings:
+                raise ValueError("\n".join(request_warnings))
 
             if self.stream:
-                return Reply(ReplyType.STREAM, self._stream_reply(current_content, session_id, uploaded_file_ids))
+                return Reply(ReplyType.STREAM, self._stream_reply(current_content, session_id, uploaded_file_ids, request_warnings))
 
             session = self.sessions.session_query(current_content, session_id)
             chat = self._create_chat(session, current_content)
             response = chat.sample()
             reply_text = response.content
+            if request_warnings:
+                reply_text = "\n".join(request_warnings) + "\n\n" + reply_text
             total_tokens = self._extract_total_tokens(response)
             session.previous_response_id = getattr(response, "id", None)
             session.remote_history_outdated = False
             logger.info(f"[{self.Model_ID}] reply={reply_text}, requester={session_id}")
             self.sessions.session_reply(reply_text, session_id, total_tokens)
-            self._cleanup_uploaded_files(uploaded_file_ids)
             return Reply(ReplyType.TEXT, reply_text)
         except Exception as e:
             logger.error(f"[{self.Model_ID}] fetch reply error, {e}")
             return Reply(ReplyType.ERROR, f"[{self.Model_ID}] {e}")
 
-    def _stream_reply(self, current_content, session_id, uploaded_file_ids):
+    def _stream_reply(self, current_content, session_id, uploaded_file_ids, request_warnings):
         def generate():
             full_text = ""
             total_tokens = None
@@ -72,6 +78,10 @@ class GrokBot(Bot):
                 session = self.sessions.session_query(current_content, session_id)
                 chat = self._create_chat(session, current_content)
                 response = None
+                if request_warnings:
+                    warning_text = "\n".join(request_warnings) + "\n\n"
+                    full_text += warning_text
+                    yield warning_text
                 for response, chunk in chat.stream():
                     content = getattr(chunk, "content", "")
                     if content:
@@ -86,17 +96,18 @@ class GrokBot(Bot):
                 self.sessions.session_reply(full_text, session_id, total_tokens)
                 logger.info(f"[{self.Model_ID}] stream completed, requester={session_id}, tokens={total_tokens}")
             finally:
-                self._cleanup_uploaded_files(uploaded_file_ids)
+                pass
 
         return generate()
 
     def _build_current_content(self, query, session_id):
         current_content = []
         uploaded_file_ids = []
-        file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+        request_warnings = []
+        image_cache = memory.USER_IMAGE_CACHE.get(session_id)
 
-        if file_cache:
-            for cached_file, file_path in zip(file_cache.get("files", []), file_cache.get("path", [])):
+        if image_cache:
+            for cached_file, file_path in zip(image_cache.get("files", []), image_cache.get("path", [])):
                 data_type = type(cached_file).__name__
 
                 if data_type in ("JpegImageFile", "PngImageFile", "Image"):
@@ -113,8 +124,27 @@ class GrokBot(Bot):
 
             memory.USER_IMAGE_CACHE.pop(session_id)
 
+        file_cache = memory.USER_FILE_CACHE.get(session_id)
+        if file_cache:
+            logger.info(f"[{self.Model_ID}] 从内存文档缓存取内容, count={len(file_cache.get('files', []))}")
+            for cached_file in file_cache.get("files", []):
+                if not isinstance(cached_file, dict):
+                    logger.warning(f"[{self.Model_ID}] unsupported cached file type: {type(cached_file).__name__}")
+                    continue
+
+                uploaded_file = self._upload_cached_file(
+                    cached_file,
+                    cached_file.get("path"),
+                    request_warnings,
+                )
+                if uploaded_file:
+                    current_content.append(xai_file(uploaded_file.id))
+                    uploaded_file_ids.append(uploaded_file.id)
+
+            memory.USER_FILE_CACHE.pop(session_id)
+
         current_content.insert(0, query)
-        return current_content, uploaded_file_ids
+        return current_content, uploaded_file_ids, request_warnings
 
     def _create_chat(self, session, current_content):
         if session.previous_response_id and not session.remote_history_outdated:
@@ -147,12 +177,22 @@ class GrokBot(Bot):
             logger.error(f"[{self.Model_ID}] failed to encode image: {e}")
             return None
 
-    def _upload_cached_file(self, cached_file, file_path):
+    def _upload_cached_file(self, cached_file, file_path, request_warnings=None):
         mime_type = cached_file.get("mime_type", "")
         raw_data = cached_file.get("data")
         filename = self._guess_filename(file_path, mime_type)
+        file_size = os.path.getsize(file_path) if file_path and os.path.exists(file_path) else 0
 
         try:
+            if file_size > self._GROK_MAX_FILE_LIMIT_BYTES:
+                warning = "Grok 官方目前只支持 48MB 以内的文档，请压缩或拆分后再试。"
+                logger.warning(
+                    f"[{self.Model_ID}] skip oversized file, path={file_path}, size={file_size}, "
+                    f"limit={self._GROK_MAX_FILE_LIMIT_BYTES}"
+                )
+                if request_warnings is not None and warning not in request_warnings:
+                    request_warnings.append(warning)
+                return None
             file_bytes = self._decode_file_bytes(raw_data, mime_type)
             return self.client.files.upload(file_bytes, filename=filename)
         except Exception as e:
