@@ -86,6 +86,7 @@ available_setting = {
     "gemini_api_key_paid": "", # Paid tier 
     # Volcengine ARK 配置
     "ark_api_key": "",
+    "ark_use_responses_api": False,  # Ark 文本/图片/视频理解是否切换到 Responses API
     "ark_video_input_mode": "base64",  # Ark 视频理解输入方式，支持：base64、public_url
     "thinking": "", # "disabled",不使用深度思考能力; "enabled",使用深度思考能力; "auto",模型自行判断是否使用深度思考能力
     # xAI Grok 配置

@@ -6,7 +6,21 @@ class VolcengineArkSession(Session):
         super().__init__(session_id, system_prompt)
         self.model = model
         self.last_total_tokens = None  # 上一轮 API 返回的准确 token 数
+        self.previous_response_id = None
+        self.remote_history_outdated = False
         self.reset()
+
+    def reset(self):
+        super().reset()
+        self.previous_response_id = None
+        self.remote_history_outdated = False
+
+    def set_system_prompt(self, system_prompt):
+        self.system_prompt = system_prompt
+        self.reset()
+
+    def mark_remote_history_outdated(self):
+        self.remote_history_outdated = True
 
     def calc_tokens(self):
         """
