@@ -73,7 +73,7 @@ class KlingVideoBot(Bot):
                 payload["aspect_ratio"] = prompt_ratio
                 logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
 
-            # 参考素材捕获：内存缓存优先，过期则从 session 历史捞
+            # 参考图捕获：引用缓存——>内存缓存——>session 历史
             file_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
             session_images = []
             if not file_cache:
