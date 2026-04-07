@@ -6,6 +6,8 @@ Bytedance volcengine_ark bot
 """
 
 import json
+import os
+import time
 
 from volcenginesdkarkruntime import Ark
 
@@ -23,6 +25,10 @@ from common.model_status import model_state
 _ark_sessions = SessionManager(VolcengineArkSession, model=const.DOUBAO_SEED_20)
 
 class VolcengineArkBot(Bot):
+    _ARK_INLINE_PDF_LIMIT_BYTES = 50 * 1024 * 1024
+    _ARK_MAX_FILE_API_PDF_LIMIT_BYTES = 512 * 1024 * 1024
+    _ARK_FILE_POLL_TIMEOUT_SECONDS = 300
+    _ARK_FILE_POLL_INTERVAL_SECONDS = 2
 
     def __init__(self):
         super().__init__()
@@ -53,9 +59,11 @@ class VolcengineArkBot(Bot):
 
             media_contents = []
             if file_cache:
-                file_count = len(file_cache.get("files", [])) if isinstance(file_cache.get("files"), list) else 1
-                logger.info(f"[{self.Model_ID}] 从内存文档缓存取内容, count={file_count}")
-                return Reply(ReplyType.ERROR, "Ark 文档缓存已归位到 USER_FILE_CACHE，文档消息体结构下一步再补。")
+                file_contents = self._build_file_contents(file_cache)
+                if file_contents:
+                    media_contents.extend(file_contents)
+                    logger.info(f"[{self.Model_ID}] 从内存文档缓存取内容, count={len(file_contents)}")
+                memory.USER_FILE_CACHE.pop(session_id, None)
             if image_cache:
                 image_contents = process_image_files(image_cache)
                 media_contents.extend(image_contents)
@@ -230,7 +238,111 @@ class VolcengineArkBot(Bot):
                     })
                 continue
 
+            if block_type == "file":
+                file_payload = block.get("file", {})
+                file_content = self._normalize_file_block(file_payload)
+                if file_content:
+                    normalized.append(file_content)
+                continue
+
             normalized.append(block)
+        return normalized
+
+    def _build_file_contents(self, file_cache):
+        contents = []
+        for cached_file in file_cache.get("files", []):
+            if not isinstance(cached_file, dict):
+                logger.warning(f"[{self.Model_ID}] unsupported cached file type: {type(cached_file).__name__}")
+                continue
+
+            mime_type = cached_file.get("mime_type", "")
+            if mime_type != "application/pdf":
+                logger.warning(f"[{self.Model_ID}] unsupported file mime_type: {mime_type}")
+                continue
+
+            file_block = self._build_pdf_file_block(cached_file)
+            if file_block is not None:
+                contents.append(file_block)
+        return contents
+
+    def _build_pdf_file_block(self, cached_file):
+        file_path = cached_file.get("path", "")
+        raw_data = cached_file.get("data", "")
+        file_name = os.path.basename(file_path) if file_path else "upload.pdf"
+        file_size = os.path.getsize(file_path) if file_path and os.path.exists(file_path) else 0
+
+        if file_size > self._ARK_MAX_FILE_API_PDF_LIMIT_BYTES:
+            raise ValueError("Ark 官方目前只支持 512MB 以内的文档，请压缩或拆分后再试。")
+
+        if file_size >= self._ARK_INLINE_PDF_LIMIT_BYTES:
+            file_id = self._upload_pdf_to_ark(file_path)
+            logger.info(f"[{self.Model_ID}] PDF exceeds 50MB, use Ark Files API, file_id={file_id}, path={file_path}")
+            return {
+                "type": "file",
+                "file": {
+                    "file_id": file_id,
+                    "filename": file_name,
+                    "mime_type": "application/pdf",
+                }
+            }
+
+        return {
+            "type": "file",
+            "file": {
+                "filename": file_name,
+                "file_data": f"data:application/pdf;base64,{raw_data}",
+            }
+        }
+
+    def _upload_pdf_to_ark(self, file_path):
+        if not file_path or not os.path.exists(file_path):
+            raise ValueError("Ark Files API upload failed: missing local PDF path")
+
+        with open(file_path, "rb") as pdf_file:
+            uploaded_file = self.client.files.create(
+                file=pdf_file,
+                purpose="user_data",
+            )
+        file_id = getattr(uploaded_file, "id", None)
+        if not file_id:
+            raise ValueError(f"Ark Files API upload failed: missing file id in response {uploaded_file}")
+        self._wait_for_ark_file_ready(file_id)
+        return file_id
+
+    def _wait_for_ark_file_ready(self, file_id):
+        deadline = time.time() + self._ARK_FILE_POLL_TIMEOUT_SECONDS
+        last_status = None
+
+        while time.time() < deadline:
+            file_obj = self.client.files.retrieve(file_id)
+            status = getattr(file_obj, "status", None)
+            last_status = status
+            logger.info(f"[{self.Model_ID}] Ark file status, file_id={file_id}, status={status}")
+            if status in (None, "active"):
+                return
+            if status == "failed":
+                error = getattr(file_obj, "error", None)
+                raise ValueError(f"Ark file preprocessing failed, file_id={file_id}, status={status}, error={error}")
+            time.sleep(self._ARK_FILE_POLL_INTERVAL_SECONDS)
+
+        raise ValueError(f"Ark file preprocessing timeout, file_id={file_id}, last_status={last_status}")
+
+    def _normalize_file_block(self, file_payload):
+        file_id = file_payload.get("file_id")
+        file_name = file_payload.get("filename", "upload.pdf")
+        mime_type = file_payload.get("mime_type", "application/pdf")
+        file_data = file_payload.get("file_data")
+
+        normalized = {
+            "type": "input_file",
+        }
+        if file_id:
+            normalized["file_id"] = file_id
+        elif file_data:
+            normalized["filename"] = file_name
+            normalized["file_data"] = file_data
+        else:
+            return None
         return normalized
 
     def _extract_response_text(self, response):
