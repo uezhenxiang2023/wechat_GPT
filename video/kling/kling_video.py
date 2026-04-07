@@ -31,7 +31,6 @@ class KlingVideoBot(Bot):
         super().__init__()
         self.access_key = conf().get("kling_access_key")
         self.secret_key = conf().get("kling_secret_key")
-        self.mode = "pro"
 
     def _get_token(self) -> str:
         headers = {"alg": "HS256", "typ": "JWT"}
@@ -53,6 +52,8 @@ class KlingVideoBot(Bot):
             session_id = context["session_id"]
             model = model_state.get_video_state(session_id) or const.KLING_VIDEO_O1
             duration = self._normalize_duration(video_state.get_video_duration(session_id), model)
+            resolution = self._normalize_resolution(video_state.get_video_resolution(session_id), model)
+            mode = self._mode_from_resolution(resolution)
             session_manager = get_chat_session_manager(session_id)
 
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
@@ -61,7 +62,7 @@ class KlingVideoBot(Bot):
             payload = {
                 "model_name": model,
                 "prompt": query,
-                "mode": self.mode,
+                "mode": mode,
                 "duration": duration,
                 "watermark_info": {"enabled": True},
                 "sound": conf().get("video_sound", "off")
@@ -76,6 +77,7 @@ class KlingVideoBot(Bot):
             # 参考图捕获：引用缓存——>内存缓存——>session 历史
             file_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
             session_images = []
+            reference_image_count = 0
             if not file_cache:
                 file_cache = memory.USER_IMAGE_CACHE.get(session_id)
             if not file_cache:
@@ -92,10 +94,12 @@ class KlingVideoBot(Bot):
                             b64 = base64.b64encode(f.read()).decode("utf-8")
                         image_list.append({"image_url": b64})
                     payload["image_list"] = image_list
-                    logger.info(f"[{model.upper()}] 参考图已注入 payload, count={len(paths)}")
+                    reference_image_count = len(image_list)
                     if memory.USER_QUOTED_IMAGE_CACHE.get(session_id):
-                        logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {payload.get('aspect_ratio')}, count={len(paths)}")
+                        logger.info(f"[{model.upper()}] 从回复引用图取参考图, count={len(paths)}")
+                        logger.info(f"[{model.upper()}] 从回复引用图推断比例: {payload.get('aspect_ratio')}, count={len(paths)}")
                     else:
+                        logger.info(f"[{model.upper()}] 从内存参考图取参考图, count={len(paths)}")
                         logger.info(f"[{model.upper()}] 从内存参考图推断比例: {payload.get('aspect_ratio')}, count={len(paths)}")
                 if memory.USER_QUOTED_IMAGE_CACHE.get(session_id):
                     memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
@@ -110,11 +114,20 @@ class KlingVideoBot(Bot):
                 payload["image_list"] = [
                     {"image_url": url.split(",", 1)[1]} for url in session_images
                 ]
+                reference_image_count = len(session_images)
                 logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
             else:
                 # 纯文生视频，必须传 aspect_ratio
                 if not prompt_ratio:
                     payload["aspect_ratio"] = self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model)
+
+            logger.info(
+                f"[{model.upper()}] 参考素材统计: reference_images={reference_image_count}"
+            )
+            logger.info(
+                f"[{model.upper()}] 请求参数: mode={payload.get('mode')}, resolution={resolution}, "
+                f"aspect_ratio={payload.get('aspect_ratio')}, duration={payload.get('duration')}, sound={payload.get('sound')}"
+            )
 
             resp = requests.post(
                 f"{self.API_BASE}{self.ENDPOINT_OMNI}",
@@ -163,6 +176,7 @@ class KlingVideoBot(Bot):
     def _poll_task(self, task_id: str, model: str, max_retries=120, interval=5) -> tuple:
         query_url = f"{self.API_BASE}{self.ENDPOINT_OMNI}/{task_id}"
         retry_delay = interval
+        logger.info(f"[{model.upper()}] polling task status, task_id={task_id}")
 
         for i in range(max_retries):
             time.sleep(retry_delay)
@@ -189,15 +203,16 @@ class KlingVideoBot(Bot):
                     if videos:
                         url = videos[0].get("url")
                         duration = float(videos[0].get("duration", 5))
-                        logger.info(f"[{model.upper()}] 视频生成成功, task_id={task_id}, url={url}")
+                        logger.info(f"[{model.upper()}] task succeeded, task_id={task_id}")
                         return url, duration, None
 
                 elif status == "failed":
                     msg = data.get("task_status_msg", "")
+                    logger.error(f"[{model.upper()}] task failed, task_id={task_id}, error={msg}")
                     return None, None, f"任务失败：{msg}"
 
                 retry_delay = interval
-                logger.debug(f"[{model.upper()}] 轮询中 ({i+1}/{max_retries}), status={status}")
+                logger.info(f"[{model.upper()}] current status={status}, task_id={task_id}, retry after {retry_delay} seconds")
 
             except Exception as e:
                 logger.warning(f"[{model.upper()}] 轮询异常: {e}")
@@ -230,6 +245,16 @@ class KlingVideoBot(Bot):
             return normalized
         logger.warning(f"[{model.upper()}] invalid duration={duration}, fallback to 5")
         return "5"
+
+    def _normalize_resolution(self, resolution, model) -> str:
+        normalized = str(resolution).strip().lower()
+        if normalized in {"720p", "1080p"}:
+            return normalized
+        logger.warning(f"[{model.upper()}] invalid resolution={resolution}, fallback to 720p")
+        return "720p"
+
+    def _mode_from_resolution(self, resolution: str) -> str:
+        return "pro" if resolution == "1080p" else "std"
 
     def _normalize_aspect_ratio(self, aspect_ratio, model) -> str:
         normalized = str(aspect_ratio).strip()

@@ -87,18 +87,19 @@ def get_chat_session_manager(session_id):
 def get_image_urls_from_session(session_id, session_manager=None):
     session_manager = session_manager or get_chat_session_manager(session_id)
     session = session_manager.build_session(session_id)
-    for msg in reversed(session.messages):
+    images = []
+    for msg in session.messages:
         content = msg.get("content")
         if not isinstance(content, list):
             continue
-        images = [
-            item["image_url"]["url"]
-            for item in content
-            if item.get("type") == "image_url"
-        ]
-        if images:
-            return images
-    return []
+        for item in content:
+            if not isinstance(item, dict) or item.get("type") != "image_url":
+                continue
+            image_info = item.get("image_url", {})
+            image_url = image_info.get("url")
+            if isinstance(image_url, str):
+                images.append(image_url)
+    return images
 
 
 def get_video_urls_from_session(session_id, session_manager=None, include_data_urls=False):
@@ -152,4 +153,30 @@ def infer_aspect_ratio_from_video_cache(video_cache, size_to_ratio):
         if not video_size:
             continue
         return size_to_ratio(video_size)
+    return None
+
+
+def infer_resolution_from_video_cache(video_cache, allowed_resolutions=None):
+    if not video_cache:
+        return None
+    resolution_levels = [480, 720, 1080]
+    if allowed_resolutions:
+        normalized = []
+        for resolution in allowed_resolutions:
+            try:
+                normalized.append(int(str(resolution).rstrip("pP")))
+            except (TypeError, ValueError):
+                continue
+        if normalized:
+            resolution_levels = sorted(set(normalized))
+    for video_file in video_cache.get("files", []):
+        video_path = video_file.get("path")
+        if not video_path:
+            continue
+        video_size = get_video_dimensions(video_path)
+        if not video_size:
+            continue
+        target = min(video_size)
+        best = min(resolution_levels, key=lambda level: abs(level - target))
+        return f"{best}p"
     return None

@@ -181,13 +181,33 @@ def build_ref_images_obj(ref_images):
     return ref_images_obj
 
 
-def generate_video(*, paid_client, session_id, video_model, prompt, image=None, last_image=None, ref_images=None, aspect_ratio=None):
+def generate_video(
+    *,
+    paid_client,
+    session_id,
+    video_model,
+    prompt,
+    image=None,
+    last_image=None,
+    ref_images=None,
+    aspect_ratio=None,
+    resolution=None,
+    duration_seconds=None
+):
     image_genai = convert_image_to_types(image) if image else None
     last_image_genai = convert_image_to_types(last_image) if last_image else None
     ref_images_obj = build_ref_images_obj(ref_images) if ref_images else None
 
-    video_duration = 8 if video_state.get_video_resolution(session_id) == "1080p" else video_state.get_video_duration(session_id)
-    video_resolution = video_state.get_video_resolution(session_id)
+    video_resolution = _normalize_gemini_video_resolution(
+        video_model,
+        resolution or video_state.get_video_resolution(session_id)
+    )
+    has_reference_images = bool(ref_images_obj)
+    video_duration = _normalize_gemini_video_duration(
+        duration_seconds if duration_seconds is not None else video_state.get_video_duration(session_id),
+        video_resolution,
+        has_reference_images=has_reference_images
+    )
     gen_config = types.GenerateVideosConfig(
         number_of_videos=1,
         duration_seconds=video_duration,
@@ -204,14 +224,12 @@ def generate_video(*, paid_client, session_id, video_model, prompt, image=None, 
         if last_image_genai:
             logger.info(f"[{video_model}] Detected Last Image. Using transition mode.")
             gen_config.last_frame = last_image_genai
-            gen_config.duration_seconds = 8
         if ref_images_obj:
             logger.info(f"[{video_model}] Reference images dropped because start/end frame is present.")
             gen_config.reference_images = None
     elif ref_images_obj:
         logger.info(f"[{video_model}] Using reference-guided mode.")
         gen_config.reference_images = ref_images_obj
-        gen_config.duration_seconds = 8
         gen_config.person_generation = "allow_adult"
     else:
         logger.info(f"[{video_model}] Text-to-video mode.")
@@ -222,9 +240,11 @@ def generate_video(*, paid_client, session_id, video_model, prompt, image=None, 
         config=gen_config
     )
 
+    poll_interval_seconds = 10
     logger.info(f"[{video_model}] Waiting for video generation to complete...")
     while not operation.done:
-        time.sleep(10)
+        logger.info(f"[{video_model}] Polling task status, retry after {poll_interval_seconds} seconds")
+        time.sleep(poll_interval_seconds)
         operation = paid_client.operations.get(operation)
     logger.info(f"[{video_model}] Video generation completed successfully.")
 
@@ -300,6 +320,57 @@ def _normalize_gemini_video_aspect_ratio(aspect_ratio: str | None) -> str:
         logger.warning(f"[GeminiVideo] invalid aspect_ratio={aspect_ratio}, fallback to 16:9")
         return "16:9"
     return "16:9" if image_ratio >= 1 else "9:16"
+
+
+def _normalize_gemini_video_resolution(video_model: str, resolution: str | None) -> str:
+    normalized = str(resolution or "720p").strip().lower()
+    allowed = _get_allowed_gemini_video_resolutions(video_model)
+    if normalized in allowed:
+        return normalized
+    fallback = "720p"
+    logger.warning(f"[{video_model}] invalid resolution={resolution}, fallback to {fallback}")
+    return fallback
+
+
+def _get_allowed_gemini_video_resolutions(video_model: str) -> set[str]:
+    if video_model in {const.VEO_31, const.VEO_31_FAST}:
+        return {"720p", "1080p", "4k"}
+    if video_model == const.VEO_31_LITE:
+        return {"720p", "1080p"}
+    return {"720p", "1080p"}
+
+
+def _normalize_gemini_video_duration(duration, resolution: str, *, has_reference_images: bool = False) -> int:
+    if has_reference_images or resolution in {"1080p", "4k"}:
+        return 8
+    try:
+        value = int(duration or 5)
+    except (TypeError, ValueError):
+        logger.warning(f"[GeminiVideo] invalid duration={duration}, fallback to 5")
+        return 5
+    if 5 <= value <= 8:
+        return value
+    logger.warning(f"[GeminiVideo] invalid duration={duration}, fallback to 5")
+    return 5
+
+
+def get_gemini_video_settings(
+    video_model: str,
+    *,
+    resolution=None,
+    duration=None,
+    has_reference_images: bool = False,
+) -> dict:
+    normalized_resolution = _normalize_gemini_video_resolution(video_model, resolution)
+    normalized_duration = _normalize_gemini_video_duration(
+        duration,
+        normalized_resolution,
+        has_reference_images=has_reference_images,
+    )
+    return {
+        "resolution": normalized_resolution,
+        "duration_seconds": normalized_duration,
+    }
 
 
 def _infer_gemini_aspect_ratio_from_sizes(sizes):

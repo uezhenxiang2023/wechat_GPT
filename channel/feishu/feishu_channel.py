@@ -19,6 +19,7 @@ from common.log import logger
 from common.media_store import build_public_media_url
 from common.singleton import singleton
 from common import const
+from common.expired_dict import ExpiredDict
 from common.tool_button import tool_state
 from common.model_status import model_state
 from common.tmp_dir import TmpDir
@@ -69,6 +70,8 @@ class FeiShuChanel(ChatChannel):
             event_handler=self.event_handler,
             log_level=lark.LogLevel.INFO,
         )
+        self._recent_message_events = ExpiredDict(60 * 5)
+        self._recent_message_events_lock = threading.Lock()
 
     def _get_current_image_model_id(self, user_id):
         return model_state.get_image_model(user_id).upper()
@@ -84,9 +87,28 @@ class FeiShuChanel(ChatChannel):
         message = event.message
         sender = event.sender.sender_id
         toUserName = sender.open_id
+        event_id = getattr(data.header, "event_id", None)
+        dedupe_key = event_id or getattr(message, "message_id", None)
+        if dedupe_key:
+            with self._recent_message_events_lock:
+                if dedupe_key in self._recent_message_events:
+                    logger.warning(
+                        "[Lark-event] duplicate event ignored, event_id=%s, message_id=%s, create_time=%s, open_id=%s",
+                        event_id,
+                        message.message_id,
+                        message.create_time,
+                        toUserName,
+                    )
+                    return
+                self._recent_message_events[dedupe_key] = {
+                    "event_id": event_id,
+                    "message_id": message.message_id,
+                    "create_time": message.create_time,
+                    "open_id": toUserName,
+                }
         logger.info(
             "[Lark-event] event_id=%s, message_id=%s, parent_id=%s, create_time=%s, chat_type=%s, chat_id=%s, open_id=%s, message_type=%s",
-            getattr(data.header, "event_id", None),
+            event_id,
             message.message_id,
             getattr(message, "parent_id", None),
             message.create_time,

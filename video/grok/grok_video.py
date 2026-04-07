@@ -41,9 +41,30 @@ class GrokVideoBot(Bot):
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
             session_manager.session_query(query, session_id)
 
-            request_args = self._build_video_args(query, session_id, model)
+            request_args, request_meta = self._build_video_args(query, session_id, model)
             if request_args.get("video_url"):
                 logger.info(f"[{model.upper()}] 使用视频编辑模式")
+            if request_meta["reference_image_count"] and (request_args.get("duration") or 0) > 10:
+                logger.warning(
+                    f"[{model.upper()}] 参考图模式时长超限: "
+                    f"duration={request_args.get('duration')}, reference_images={request_meta['reference_image_count']}"
+                )
+                return Reply(
+                    ReplyType.ERROR,
+                    "Grok 参考图生视频当前最长只支持 10 秒。请将视频时长调整到 10 秒及以内后再试。"
+                )
+            logger.info(
+                f"[{model.upper()}] 参考素材统计: reference_images={request_meta['reference_image_count']}, "
+                f"reference_videos={request_meta['reference_video_count']}"
+            )
+            logger.info(
+                f"[{model.upper()}] 请求参数: aspect_ratio={request_args.get('aspect_ratio')}, "
+                f"duration={request_args.get('duration')}, resolution={request_args.get('resolution')}"
+            )
+            logger.info(
+                f"[{model.upper()}] polling task status via SDK, interval="
+                f"{datetime.timedelta(seconds=3)}"
+            )
             response = self.client.video.generate(
                 prompt=query,
                 model=model,
@@ -54,6 +75,7 @@ class GrokVideoBot(Bot):
 
             video_url = response.url
             video_duration = response.duration
+            logger.info(f"[{model.upper()}] task succeeded")
 
             try:
                 base64_data = url_to_base64(video_url)
@@ -77,6 +99,11 @@ class GrokVideoBot(Bot):
     def _build_video_args(self, query, session_id, model):
         prompt_ratio = self._parse_aspect_ratio_from_prompt(query, model)
         duration = self._normalize_duration(video_state.get_video_duration(session_id), model)
+        resolution = self._normalize_resolution(video_state.get_video_resolution(session_id), model)
+        request_meta = {
+            "reference_image_count": 0,
+            "reference_video_count": 0,
+        }
         if prompt_ratio:
             logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
 
@@ -88,7 +115,10 @@ class GrokVideoBot(Bot):
                 public_url = cached_videos[-1].get("public_url")
                 if public_url:
                     logger.info(f"[{model.upper()}] 从内存视频缓存取参考视频")
-                    return {"video_url": public_url}
+                    request_meta["reference_video_count"] = 1
+                    return {
+                        "video_url": public_url,
+                    }, request_meta
                 logger.warning(f"[{model.upper()}] 检测到上传视频，但未配置可访问的媒体公网地址")
                 raise ValueError("当前上传视频还没有可访问的公网 URL。请先在配置中设置 media_public_base_url，再重试 Grok 视频编辑。")
 
@@ -102,14 +132,21 @@ class GrokVideoBot(Bot):
             image_urls = [image_url for image_url in image_urls if image_url]
             memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
             if image_urls:
+                request_meta["reference_image_count"] = len(image_urls)
                 aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(image_urls, model)
+                logger.info(f"[{model.upper()}] 从回复引用图取参考图, count={len(image_urls)}")
                 if not prompt_ratio:
                     logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
-                return {
-                    "duration": duration,
-                    "image_url": image_urls[0],
-                    "aspect_ratio": aspect_ratio,
-                }
+                return self._build_reference_image_args(image_urls, duration, aspect_ratio, resolution), request_meta
+
+        session_images = get_image_urls_from_session(session_id)
+        if session_images:
+            request_meta["reference_image_count"] = len(session_images)
+            aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(session_images, model)
+            logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
+            if not prompt_ratio:
+                logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}")
+            return self._build_reference_image_args(session_images, duration, aspect_ratio, resolution), request_meta
 
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
         if file_cache:
@@ -120,31 +157,32 @@ class GrokVideoBot(Bot):
             image_urls = [image_url for image_url in image_urls if image_url]
             memory.USER_IMAGE_CACHE.pop(session_id)
             if image_urls:
+                request_meta["reference_image_count"] = len(image_urls)
                 aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(image_urls, model)
+                logger.info(f"[{model.upper()}] 从内存参考图取参考图, count={len(image_urls)}")
                 if not prompt_ratio:
                     logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
-                return {
-                    "duration": duration,
-                    "image_url": image_urls[0],
-                    "aspect_ratio": aspect_ratio,
-                }
-
-        session_images = get_image_urls_from_session(session_id)
-        if session_images:
-            aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(session_images, model)
-            logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
-            if not prompt_ratio:
-                logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}")
-            return {
-                "duration": duration,
-                "image_url": session_images[0],
-                "aspect_ratio": aspect_ratio,
-            }
+                return self._build_reference_image_args(image_urls, duration, aspect_ratio, resolution), request_meta
 
         return {
             "duration": duration,
             "aspect_ratio": prompt_ratio or self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model),
-            "resolution": self._normalize_resolution(video_state.get_video_resolution(session_id), model),
+            "resolution": resolution,
+        }, request_meta
+
+    def _build_reference_image_args(self, image_urls, duration, aspect_ratio, resolution):
+        if len(image_urls) == 1:
+            return {
+                "duration": duration,
+                "image_url": image_urls[0],
+                "aspect_ratio": aspect_ratio,
+                "resolution": resolution,
+            }
+        return {
+            "duration": duration,
+            "reference_image_urls": image_urls[:7],
+            "aspect_ratio": aspect_ratio,
+            "resolution": resolution,
         }
 
     def _encode_pil_image(self, image, model):
