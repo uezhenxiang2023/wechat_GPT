@@ -1,5 +1,6 @@
 import base64
 import io
+import time
 
 from PIL import Image
 from xai_sdk import Client
@@ -49,14 +50,18 @@ class GrokImageBot(Bot):
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
             session_manager.session_query(query, session_id)
 
-            image_args, model = self._build_image_args(query, session_id, model)
+            image_args, model, request_meta = self._build_image_args(query, session_id, model)
             image_size = self._normalize_resolution(conf().get("image_create_size", "1k"), model)
-            response = self.client.image.sample(
-                prompt=query,
+            logger.info(
+                f"[{model.upper()}] request summary: mode={request_meta['mode']}, "
+                f"reference_count={request_meta['reference_count']}, "
+                f"aspect_ratio={image_args.get('aspect_ratio')}, image_size={image_size}"
+            )
+            response = self._sample_image_with_retry(
+                query=query,
                 model=model,
-                image_format="base64",
-                resolution=image_size,
-                **image_args
+                image_size=image_size,
+                image_args=image_args
             )
             mime_type, base64_data = self._split_response_base64(response.base64)
             image_storage = io.BytesIO(base64.b64decode(base64_data))
@@ -96,7 +101,11 @@ class GrokImageBot(Bot):
                 aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(image_urls, model)
                 if not prompt_ratio:
                     logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
-                return self._build_edit_args(image_urls, aspect_ratio, model)
+                image_args, model = self._build_edit_args(image_urls, aspect_ratio, model)
+                return image_args, model, {
+                    "mode": "edit",
+                    "reference_count": len(image_urls),
+                }
 
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
         if file_cache:
@@ -111,7 +120,11 @@ class GrokImageBot(Bot):
                 aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(image_urls, model)
                 if not prompt_ratio:
                     logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
-                return self._build_edit_args(image_urls, aspect_ratio, model)
+                image_args, model = self._build_edit_args(image_urls, aspect_ratio, model)
+                return image_args, model, {
+                    "mode": "edit",
+                    "reference_count": len(image_urls),
+                }
 
         aspect_ratio = prompt_ratio or self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model)
         image_size = self._normalize_resolution(conf().get("image_create_size", "1k"), model)
@@ -120,7 +133,10 @@ class GrokImageBot(Bot):
         )
         return {
             "aspect_ratio": aspect_ratio
-        }, model
+        }, model, {
+            "mode": "generate",
+            "reference_count": 0,
+        }
 
     def _build_edit_args(self, image_urls, aspect_ratio, model):
         if len(image_urls) == 1:
@@ -195,6 +211,42 @@ class GrokImageBot(Bot):
         except Exception as e:
             logger.warning(f"[{model.upper()}] failed to compress image for edit: {e}")
             return image_url
+
+    def _sample_image_with_retry(self, query, model, image_size, image_args):
+        max_attempts = 3
+        retry_delays = [2, 4]
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return self.client.image.sample(
+                    prompt=query,
+                    model=model,
+                    image_format="base64",
+                    resolution=image_size,
+                    **image_args
+                )
+            except Exception as e:
+                last_error = e
+                if attempt >= max_attempts or not self._is_retryable_error(e):
+                    raise
+                delay = retry_delays[attempt - 1]
+                logger.warning(
+                    f"[{model.upper()}] image request failed temporarily, retry {attempt}/{max_attempts - 1} "
+                    f"after {delay}s: {e}"
+                )
+                time.sleep(delay)
+        raise last_error
+
+    def _is_retryable_error(self, error):
+        error_text = str(error)
+        retry_markers = (
+            "StatusCode.UNAVAILABLE",
+            "status: 502",
+            "status = 502",
+            "http2 header with status: 502",
+            "Bad Gateway",
+        )
+        return any(marker in error_text for marker in retry_markers)
 
     def _normalize_resolution(self, resolution, model):
         normalized = str(resolution).strip().lower()
