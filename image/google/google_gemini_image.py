@@ -83,7 +83,9 @@ class GoogleGeminiImageBot(Bot):
             aspect_ratio = prompt_aspect_ratio or infer_gemini_aspect_ratio_from_images(quoted_cache["files"])
             memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
             if not prompt_aspect_ratio:
-                logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}")
+                logger.info(
+                    f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(quoted_cache['files'])}"
+                )
             return request_contents, aspect_ratio
 
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
@@ -93,7 +95,9 @@ class GoogleGeminiImageBot(Bot):
             aspect_ratio = prompt_aspect_ratio or infer_gemini_aspect_ratio_from_images(file_cache["files"])
             memory.USER_IMAGE_CACHE.pop(session_id)
             if not prompt_aspect_ratio:
-                logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}")
+                logger.info(
+                    f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(file_cache['files'])}"
+                )
             return request_contents, aspect_ratio
 
         image_settings = get_gemini_image_settings(prompt_aspect_ratio)
