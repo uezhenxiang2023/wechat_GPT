@@ -7,6 +7,7 @@ from bot.gemini.gemini_common import (
     clear_image_context_marker,
     data_url_to_part,
     extract_inline_image,
+    get_gemini_image_settings,
     get_image_context_from_session,
     get_paid_client,
     get_user_image_chat,
@@ -109,6 +110,10 @@ class GoogleGeminiImageBot(Bot):
                 logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}")
             return request_contents, aspect_ratio
 
+        image_settings = get_gemini_image_settings(prompt_aspect_ratio)
+        logger.info(
+            f"[{model.upper()}] 当前为文生图模式, aspect_ratio={image_settings['aspect_ratio']}, image_size={image_settings['size']}"
+        )
         return [text], prompt_aspect_ratio
 
     def _parse_aspect_ratio_from_prompt(self, prompt):

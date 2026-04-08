@@ -96,7 +96,12 @@ class KlingImageBot(Bot):
                     else:
                         payload["image"] = session_images[0].split(",", 1)[1]
                     logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
-                    logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {payload['aspect_ratio']}")
+                    if not prompt_ratio:
+                        logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {payload['aspect_ratio']}")
+                else:
+                    logger.info(
+                        f"[{model.upper()}] 当前为文生图模式, aspect_ratio={payload['aspect_ratio']}, image_size={payload['resolution']}"
+                    )
             elif file_cache:
                 paths = file_cache.get("path", [])
                 if paths:

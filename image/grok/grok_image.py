@@ -50,11 +50,12 @@ class GrokImageBot(Bot):
             session_manager.session_query(query, session_id)
 
             image_args, model = self._build_image_args(query, session_id, model)
+            image_size = self._normalize_resolution(conf().get("image_create_size", "1k"), model)
             response = self.client.image.sample(
                 prompt=query,
                 model=model,
                 image_format="base64",
-                resolution=self._normalize_resolution(conf().get("image_create_size", "1k"), model),
+                resolution=image_size,
                 **image_args
             )
             mime_type, base64_data = self._split_response_base64(response.base64)
@@ -121,8 +122,13 @@ class GrokImageBot(Bot):
                 logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}")
             return self._build_edit_args(session_images, aspect_ratio, model)
 
+        aspect_ratio = prompt_ratio or self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model)
+        image_size = self._normalize_resolution(conf().get("image_create_size", "1k"), model)
+        logger.info(
+            f"[{model.upper()}] 当前为文生图模式, aspect_ratio={aspect_ratio}, image_size={image_size}"
+        )
         return {
-            "aspect_ratio": prompt_ratio or self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model)
+            "aspect_ratio": aspect_ratio
         }, model
 
     def _build_edit_args(self, image_urls, aspect_ratio, model):

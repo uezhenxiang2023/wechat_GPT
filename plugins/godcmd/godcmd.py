@@ -436,11 +436,11 @@ class Godcmd(Plugin):
                     else:
                         ok, result = False, "请发送 #resolution 视频分辨率参数，可选数值为720p、1080p。例如#resolution 1080p"
                 elif cmd == "image_model":
-                    if not isadmin and not self.is_admin_in_group(e_context["context"]):
-                        ok, result = False, "需要管理员权限执行"
-                    elif len(args) == 0:
+                    if len(args) == 0:
                         image_model = model_state.get_image_model(user)
                         ok, result = True, "当前图片模型为：" + str(image_model)
+                    elif not isadmin and not self.is_admin_in_group(e_context["context"]):
+                        ok, result = False, "需要管理员权限执行"
                     elif len(args) == 1:
                         available = const.KLING_IMAGE_LIST + const.DOUBAO_SEEDREAM_LIST + const.GOOGLE_IMAGE_LIST + const.GROK_IMAGE_LIST
                         if args[0] not in available:
@@ -452,11 +452,11 @@ class Godcmd(Plugin):
                         ok, result = False, "请发送 #image_model 加模型名，或直接 #image_model 查看当前模型"
 
                 elif cmd == "video_model":
-                    if not isadmin and not self.is_admin_in_group(e_context["context"]):
-                        ok, result = False, "需要管理员权限执行"
-                    elif len(args) == 0:
+                    if len(args) == 0:
                         video_model = model_state.get_video_state(user)
                         ok, result = True, "当前视频模型为：" + str(video_model)
+                    elif not isadmin and not self.is_admin_in_group(e_context["context"]):
+                        ok, result = False, "需要管理员权限执行"
                     elif len(args) == 1:
                         available = const.KLING_VIDEO_LIST + const.DOUBAO_SEEDANCE_LIST + const.VEO_LIST + const.GROK_VIDEO_LIST  
                         if args[0] not in available:

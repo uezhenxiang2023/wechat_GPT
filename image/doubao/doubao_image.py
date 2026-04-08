@@ -95,7 +95,12 @@ class DoubaoImageBot(Bot):
                         if not prompt_aspect_ratio:
                             logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}, size={image_size}")
                     else:
-                        params["size"] = self._build_image_size(model, prompt_aspect_ratio or default_aspect_ratio)
+                        aspect_ratio = prompt_aspect_ratio or default_aspect_ratio
+                        image_size = self._build_image_size(model, aspect_ratio)
+                        params["size"] = image_size
+                        logger.info(
+                            f"[{model.upper()}] 当前为文生图模式, aspect_ratio={aspect_ratio}, image_size={image_size}"
+                        )
 
             response = self.client.images.generate(**params)
             image_url = response.data[0].url

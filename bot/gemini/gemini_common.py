@@ -66,8 +66,8 @@ def get_user_image_chat(session_id, image_model, *, paid_client, safety_settings
     )
     img_config.tools = [{"google_search": {}}] if image_model == const.GEMINI_3_PRO_IMAGE_PREVIEW else None
     logger.info(
-        f"[{image_model}] create image chat, session_id={session_id}, "
-        f"size={image_settings['size']}, aspect_ratio={image_settings['aspect_ratio']}"
+        f"[{image_model.upper()}] create image chat, session_id={session_id}, "
+        f"image_size={image_settings['size']}, aspect_ratio={image_settings['aspect_ratio']}"
     )
     return paid_client.chats.create(model=image_model, config=img_config)
 
