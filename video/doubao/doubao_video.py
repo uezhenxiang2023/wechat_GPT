@@ -181,8 +181,8 @@ class DoubaoVideoBot(Bot):
             if status == "failed":
                 logger.error(f"[{model.upper()}] task failed, task_id={task_id}, error={get_result.error}")
                 raise RuntimeError(get_result.error)
-            logger.info(f"[{model.upper()}] current status={status}, task_id={task_id}, retry after 3 seconds")
-            time.sleep(3)
+            logger.info(f"[{model.upper()}] current status={status}, task_id={task_id}, retry after 30 seconds")
+            time.sleep(30)
 
     def _build_task_params(self, *, model, content, resolution, ratio, duration_seconds):
         params = {

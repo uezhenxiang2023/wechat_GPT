@@ -97,6 +97,11 @@ COMMANDS = {
         "args": ["模型名"],
         "desc": "查看和设置视频模型",
     },
+    "video_mode": {
+        "alias": ["video_mode", "视频模式"],
+        "args": ["模式名"],
+        "desc": "查看和设置视频模式",
+    },
     "duration": {
         "alias": ["duration", "时长"],
         "desc": "生成视频的长度(秒)",
@@ -461,6 +466,19 @@ class Godcmd(Plugin):
                             ok, result = True, "视频模型已切换为：" + args[0]
                     else:
                         ok, result = False, "请发送 #video_model 加模型名，或直接 #video_model 查看当前模型"
+                elif cmd == "video_mode":
+                    if len(args) == 0:
+                        video_mode = model_state.get_video_mode(user)
+                        ok, result = True, "当前视频模式为：" + str(video_mode)
+                    elif len(args) == 1:
+                        available = ["FirstLast", "Reference"]
+                        if args[0] not in available:
+                            ok, result = False, "视频模式不存在，可选：\n" + "\n".join(available)
+                        else:
+                            model_state.toggle_video_mode(user, args[0])
+                            ok, result = True, "视频模式已切换为：" + args[0]
+                    else:
+                        ok, result = False, "请发送 #video_mode 加模式名，或直接 #video_mode 查看当前模式"
                 logger.debug("[Godcmd] command: %s by %s" % (cmd, user))
             elif any(cmd in info["alias"] for info in ADMIN_COMMANDS.values()):
                 if isadmin:

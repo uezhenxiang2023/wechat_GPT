@@ -22,14 +22,14 @@ def encode_image_content(image_path, image_file):
 
 
 def encode_image(image_path, image_file):
-    """将图片转为生成模型可用的 data URL。"""
+    """将seedream中引用的内存图片转为生成模型可用的 data URL。"""
     with open(image_path, "rb") as file:
         base64_image = base64.b64encode(file.read()).decode("utf-8")
     return f"data:{_get_image_mime_type(image_file)};base64,{base64_image}"
 
 
 def process_image_files(file_cache):
-    """处理图片缓存，返回按原顺序编码后的图片内容列表。"""
+    """处理seed和seedance中的图片缓存，返回按原顺序编码后的图片内容列表。"""
     if not file_cache:
         return []
 

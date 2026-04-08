@@ -119,8 +119,7 @@ class FeiShuChanel(ChatChannel):
         )
         logger.info(
             f'[Lark-search] is {tool_state.get_search_state(toUserName)},\
-            [Lark-image] is {tool_state.get_image_state(toUserName)},\
-            [Lark-edit] is {tool_state.get_edit_state(toUserName)},\
+            [Lark-video_mode] is {model_state.get_video_mode(toUserName)},\
             [Lark-print] is {tool_state.get_print_state(toUserName)},\
             [Lark-breakdown] is {tool_state.get_breakdown_state(toUserName)},\
             requester={toUserName}'
@@ -154,10 +153,14 @@ class FeiShuChanel(ChatChannel):
         logger.info(f'[ do_p2_application_bot_menu_v6 access ], data: {lark.JSON.marshal(data, indent=4)}')
         event_key = data.event.event_key
         open_id = data.event.operator.operator_id.open_id
-        if event_key == 'imaging':
-            self.image(open_id)
-        elif event_key == 'editing':
-            self.edit(open_id)
+        if event_key == 'FirstLast':
+            model_state.toggle_video_mode(open_id, event_key)
+            self.send_text(f"[INFO]\n视频模式已切换为：首尾帧模式", open_id)
+            logger.info(f'[Lark] switch image model to {event_key}, requester={open_id}')
+        elif event_key == 'Reference':
+            model_state.toggle_video_mode(open_id, event_key)
+            self.send_text(f"[INFO]\n视频模式已切换为：参考媒体模式", open_id)
+            logger.info(f'[Lark] switch image model to {event_key}, requester={open_id}')
         elif event_key == 'searching':
             self.search(open_id)
         elif event_key == 'printing':

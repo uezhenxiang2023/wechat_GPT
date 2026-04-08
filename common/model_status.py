@@ -13,7 +13,8 @@ class UserModelState:
                 'model': conf().get('model'),
                 'text_to_image': conf().get('text_to_image'),
                 'text_to_voice': conf().get('text_to_voice'),
-                'text_to_video': conf().get('text_to_video')
+                'text_to_video': conf().get('text_to_video'),
+                'video_mode': conf().get('video_mode', 'FirstLast')
             }
         return self._model_states[user_id]
     
@@ -41,6 +42,12 @@ class UserModelState:
         state['text_to_video'] = video_model
         return state['text_to_video']
 
+    def toggle_video_mode(self, user_id, video_mode):
+        """切换用户的视频模式状态"""
+        state = self.__get_model_state__(user_id)
+        state['video_mode'] = video_mode
+        return state['video_mode']
+
     def get_basic_state(self, user_id):
         """获取用户基础模型状态"""
         return self.__get_model_state__(user_id)['model']
@@ -56,6 +63,10 @@ class UserModelState:
     def get_video_state(self, user_id):
         """获取用户视频模型状态"""
         return self.__get_model_state__(user_id)['text_to_video']
+
+    def get_video_mode(self, user_id):
+        """获取用户视频模式状态"""
+        return self.__get_model_state__(user_id)['video_mode']
     
     def clear_model_state(self, user_id):
         """清除用户状态"""
