@@ -1,4 +1,5 @@
 import io
+import re
 import time
 import jwt
 import requests
@@ -27,7 +28,7 @@ class KlingImageBot(Bot):
         self.access_key = conf().get("kling_access_key")
         self.secret_key = conf().get("kling_secret_key")
         self.image_resolution = self._normalize_resolution(conf().get("image_create_size", "1k"))
-        self.image_aspect_ratio = conf().get("image_aspect_ratio", "16:9")
+        self.image_aspect_ratio = self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"))
 
     def _get_token(self) -> str:
         headers = {
@@ -168,6 +169,24 @@ class KlingImageBot(Bot):
         logger.warning(f"[Kling_Image] invalid resolution={resolution}, fallback to 1k")
         return "1k"
 
+    def _normalize_aspect_ratio(self, aspect_ratio: str) -> str:
+        normalized = str(aspect_ratio).strip().lower()
+        ratio_alias_map = {
+            "16:9": "16:9",
+            "9:16": "9:16",
+            "1:1": "1:1",
+            "4:3": "4:3",
+            "3:4": "3:4",
+            "3:2": "3:2",
+            "2:3": "2:3",
+            "21:9": "21:9",
+            "auto": "auto",
+        }
+        if normalized in ratio_alias_map:
+            return ratio_alias_map[normalized]
+        logger.warning(f"[Kling_Image] invalid aspect_ratio={aspect_ratio}, fallback to 16:9")
+        return "16:9"
+
     def _check_response_error(self, data: dict) -> str | None:
         """检查响应中的业务错误码，返回错误描述或 None"""
         code = data.get("code", 0)
@@ -274,24 +293,10 @@ class KlingImageBot(Bot):
         closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
         return ratio_map[closest]
 
-    def _get_aspect_ratio_from_base64(self, b64_url: str) -> str:
-        """从 base64 图片 url 推断宽高比"""
-        b64_data = b64_url.split(",", 1)[1]
-        img_bytes = base64.b64decode(b64_data)
-        img = Image.open(io.BytesIO(img_bytes))
-        ratio = round(img.size[0] / img.size[1], 2)
-        ratio_map = {
-            1.0: "1:1", 
-            1.33: "4:3", 
-            0.75: "3:4",
-            1.78: "16:9", 
-            0.56: "9:16", 
-            1.5: "3:2",
-            0.67: "2:3", 
-            2.33: "21:9"
-        }
-        closest = min(ratio_map.keys(), key=lambda x: abs(x - ratio))
-        return ratio_map[closest]
-
     def _parse_aspect_ratio_from_prompt(self, prompt: str) -> str | None:
-        return parse_aspect_ratio_from_prompt(prompt)
+        if not prompt:
+            return None
+        if re.search(r"\bauto\b|自动(?:比例|画幅|宽高比)?", prompt, re.IGNORECASE):
+            return "auto"
+        aspect_ratio = parse_aspect_ratio_from_prompt(prompt)
+        return self._normalize_aspect_ratio(aspect_ratio) if aspect_ratio else None
