@@ -5,13 +5,10 @@ from google.genai.types import Part
 from bot.bot import Bot
 from bot.gemini.gemini_common import (
     clear_image_context_marker,
-    data_url_to_part,
     extract_inline_image,
     get_gemini_image_settings,
-    get_image_context_from_session,
     get_paid_client,
     get_user_image_chat,
-    infer_gemini_aspect_ratio_from_data_urls,
     infer_gemini_aspect_ratio_from_images,
 )
 from bot.gemini.google_gemini_session import _gemini_sessions
@@ -97,17 +94,6 @@ class GoogleGeminiImageBot(Bot):
             memory.USER_IMAGE_CACHE.pop(session_id)
             if not prompt_aspect_ratio:
                 logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}")
-            return request_contents, aspect_ratio
-
-        image_context = get_image_context_from_session(session_id)
-        session_images = image_context["images"]
-        if session_images:
-            request_contents = [data_url_to_part(image_url) for image_url in session_images]
-            request_contents.append(text)
-            aspect_ratio = prompt_aspect_ratio or infer_gemini_aspect_ratio_from_data_urls(session_images)
-            logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
-            if not prompt_aspect_ratio:
-                logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}")
             return request_contents, aspect_ratio
 
         image_settings = get_gemini_image_settings(prompt_aspect_ratio)

@@ -4,9 +4,7 @@ from bot.bot import Bot
 from bot.ark.ark_media import (
     build_seedream_size,
     encode_image,
-    get_image_from_session,
     size_calculator,
-    size_calculator_from_data_urls,
 )
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
@@ -15,7 +13,7 @@ from common import memory
 from common.aspect_ratio import parse_aspect_ratio_from_prompt
 from common.log import logger
 from common.model_status import model_state
-from common.utils import get_chat_session_manager, get_image_urls_from_session, url_to_base64
+from common.utils import get_chat_session_manager, url_to_base64
 from config import conf
 
 
@@ -83,24 +81,12 @@ class DoubaoImageBot(Bot):
                         )
                     memory.USER_IMAGE_CACHE.pop(session_id)
                 else:
-                    session_images = get_image_urls_from_session(session_id, session_manager)
-                    if session_images:
-                        aspect_ratio = prompt_aspect_ratio or size_calculator_from_data_urls(session_images)
-                        image_size = self._build_image_size(model, aspect_ratio)
-                        params.update({
-                            "image": session_images,
-                            "size": image_size
-                        })
-                        logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
-                        if not prompt_aspect_ratio:
-                            logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}, size={image_size}")
-                    else:
-                        aspect_ratio = prompt_aspect_ratio or default_aspect_ratio
-                        image_size = self._build_image_size(model, aspect_ratio)
-                        params["size"] = image_size
-                        logger.info(
-                            f"[{model.upper()}] 当前为文生图模式, aspect_ratio={aspect_ratio}, image_size={image_size}"
-                        )
+                    aspect_ratio = prompt_aspect_ratio or default_aspect_ratio
+                    image_size = self._build_image_size(model, aspect_ratio)
+                    params["size"] = image_size
+                    logger.info(
+                        f"[{model.upper()}] 当前为文生图模式, aspect_ratio={aspect_ratio}, image_size={image_size}"
+                    )
 
             response = self.client.images.generate(**params)
             image_url = response.data[0].url

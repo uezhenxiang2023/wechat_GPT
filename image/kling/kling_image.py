@@ -11,7 +11,7 @@ from bridge.context import Context
 from bridge.reply import Reply, ReplyType
 from common.aspect_ratio import parse_aspect_ratio_from_prompt
 from common.log import logger
-from common.utils import get_chat_session_manager, get_image_urls_from_session, url_to_base64
+from common.utils import get_chat_session_manager, url_to_base64
 from common import const, memory
 from config import conf
 from common.model_status import model_state
@@ -81,27 +81,12 @@ class KlingImageBot(Bot):
 
             # 参考图捕获
             file_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
-            session_images = []
             if not file_cache:
                 file_cache = memory.USER_IMAGE_CACHE.get(session_id)
-            session_images = []
             if not file_cache:
-                session_images = get_image_urls_from_session(session_id, session_manager)
-                if session_images:
-                    if not prompt_ratio:
-                        # 如果用户没设置图片比例，则自动从缓存图片的比例
-                        payload["aspect_ratio"] = self._get_aspect_ratio_from_base64(session_images[0])
-                    if endpoint == self.ENDPOINT_OMNI:
-                        payload["image_list"] = [{"image": url.split(",", 1)[1]} for url in session_images]
-                    else:
-                        payload["image"] = session_images[0].split(",", 1)[1]
-                    logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
-                    if not prompt_ratio:
-                        logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {payload['aspect_ratio']}")
-                else:
-                    logger.info(
-                        f"[{model.upper()}] 当前为文生图模式, aspect_ratio={payload['aspect_ratio']}, image_size={payload['resolution']}"
-                    )
+                logger.info(
+                    f"[{model.upper()}] 当前为文生图模式, aspect_ratio={payload['aspect_ratio']}, image_size={payload['resolution']}"
+                )
             elif file_cache:
                 paths = file_cache.get("path", [])
                 if paths:

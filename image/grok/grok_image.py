@@ -11,7 +11,7 @@ from bridge.reply import Reply, ReplyType
 from common import const, memory
 from common.log import logger
 from common.model_status import model_state
-from common.utils import get_chat_session_manager, get_image_urls_from_session
+from common.utils import get_chat_session_manager
 from config import conf
 
 
@@ -112,15 +112,6 @@ class GrokImageBot(Bot):
                 if not prompt_ratio:
                     logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
                 return self._build_edit_args(image_urls, aspect_ratio, model)
-
-        session_images = get_image_urls_from_session(session_id)
-        if session_images:
-            session_images = [self._compress_data_url(image_url, model) for image_url in session_images]
-            aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(session_images, model)
-            logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
-            if not prompt_ratio:
-                logger.info(f"[{model.upper()}] 从 session 历史参考图推断比例: {aspect_ratio}")
-            return self._build_edit_args(session_images, aspect_ratio, model)
 
         aspect_ratio = prompt_ratio or self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model)
         image_size = self._normalize_resolution(conf().get("image_create_size", "1k"), model)
