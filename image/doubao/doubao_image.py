@@ -1,3 +1,7 @@
+import base64
+import io
+
+from PIL import Image
 from volcenginesdkarkruntime import Ark
 
 from bot.bot import Bot
@@ -18,6 +22,8 @@ from config import conf
 
 
 class DoubaoImageBot(Bot):
+    _MAX_REFERENCE_IMAGE_BYTES = int(9.5 * 1024 * 1024)
+
     def __init__(self):
         super().__init__()
         self.client = Ark(api_key=conf().get("ark_api_key"))
@@ -35,7 +41,7 @@ class DoubaoImageBot(Bot):
                 "model": model,
                 "prompt": query,
                 "response_format": "url",
-                "watermark": True,
+                "watermark": False,
                 "sequential_image_generation": "disabled"
             }
             default_aspect_ratio = conf().get("image_aspect_ratio", "16:9")
@@ -49,12 +55,17 @@ class DoubaoImageBot(Bot):
                     encode_image(path, file)
                     for path, file in zip(quoted_cache["path"], quoted_cache["files"])
                 ]
+                images = [self._ensure_reference_image_within_limit(image_url, model) for image_url in images]
                 aspect_ratio = prompt_aspect_ratio or size_calculator(quoted_cache["files"])
                 image_size = self._build_image_size(model, aspect_ratio)
                 params.update({
                     "image": images,
                     "size": image_size
                 })
+                logger.info(
+                    f"[{model.upper()}] request summary: mode=edit, reference_count={len(images)}, "
+                    f"aspect_ratio={aspect_ratio}, image_size={image_size}"
+                )
                 if not prompt_aspect_ratio:
                     logger.info(
                         f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, "
@@ -68,12 +79,17 @@ class DoubaoImageBot(Bot):
                         encode_image(path, file)
                         for path, file in zip(file_cache["path"], file_cache["files"])
                     ]
+                    images = [self._ensure_reference_image_within_limit(image_url, model) for image_url in images]
                     aspect_ratio = prompt_aspect_ratio or size_calculator(file_cache["files"])
                     image_size = self._build_image_size(model, aspect_ratio)
                     params.update({
                         "image": images,
                         "size": image_size
                     })
+                    logger.info(
+                        f"[{model.upper()}] request summary: mode=edit, reference_count={len(images)}, "
+                        f"aspect_ratio={aspect_ratio}, image_size={image_size}"
+                    )
                     if not prompt_aspect_ratio:
                         logger.info(
                             f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, "
@@ -112,6 +128,54 @@ class DoubaoImageBot(Bot):
         if model in const.DOUBAO_SEEDREAM_LIST:
             return build_seedream_size(model, self.image_size, aspect_ratio)
         return self.image_size
+
+    def _ensure_reference_image_within_limit(self, image_url, model):
+        original_size = len(image_url.encode("utf-8"))
+        if original_size <= self._MAX_REFERENCE_IMAGE_BYTES:
+            return image_url
+
+        logger.warning(
+            f"[{model.upper()}] reference image too large, start compressing, size={original_size} bytes, "
+            f"limit={self._MAX_REFERENCE_IMAGE_BYTES}"
+        )
+        compressed_url = self._compress_data_url(image_url, model)
+        compressed_size = len(compressed_url.encode("utf-8"))
+        logger.info(
+            f"[{model.upper()}] reference image compressed, before={original_size} bytes, "
+            f"after={compressed_size} bytes"
+        )
+        return compressed_url
+
+    def _compress_data_url(self, image_url, model):
+        try:
+            header, b64_data = image_url.split(",", 1)
+            image = Image.open(io.BytesIO(base64.b64decode(b64_data)))
+            if image.mode in ("RGBA", "LA", "P"):
+                image = image.convert("RGB")
+
+            quality = 90
+            width, height = image.size
+            resized = image
+            while True:
+                buf = io.BytesIO()
+                resized.save(buf, format="JPEG", quality=quality, optimize=True)
+                encoded = base64.b64encode(buf.getvalue()).decode("utf-8")
+                compressed_url = f"data:image/jpeg;base64,{encoded}"
+                if len(compressed_url.encode("utf-8")) <= self._MAX_REFERENCE_IMAGE_BYTES:
+                    return compressed_url
+                if quality > 55:
+                    quality -= 10
+                    continue
+                width = max(int(width * 0.85), 512)
+                height = max(int(height * 0.85), 512)
+                if (width, height) == resized.size:
+                    logger.warning(f"[{model.upper()}] reference image still exceeds limit after compression")
+                    return compressed_url
+                resized = image.resize((width, height), Image.LANCZOS)
+                quality = 85
+        except Exception as e:
+            logger.warning(f"[{model.upper()}] failed to compress reference image: {e}")
+            return image_url
 
     def _parse_aspect_ratio_from_prompt(self, prompt):
         return parse_aspect_ratio_from_prompt(prompt)

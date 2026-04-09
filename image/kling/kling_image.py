@@ -22,6 +22,7 @@ class KlingImageBot(Bot):
     API_BASE = "https://api-beijing.klingai.com"
     ENDPOINT_GENERATIONS = "/v1/images/generations"
     ENDPOINT_OMNI = "/v1/images/omni-image"
+    _MAX_REFERENCE_IMAGE_BYTES = int(9.5 * 1024 * 1024)
 
     def __init__(self):
         super().__init__()
@@ -100,13 +101,17 @@ class KlingImageBot(Bot):
                         for p in paths:
                             with open(p, "rb") as f:
                                 b64 = base64.b64encode(f.read()).decode("utf-8")
-                            image_list.append({"image": b64})
+                            image_list.append({"image": self._ensure_reference_image_within_limit(b64, model)})
                         payload["image_list"] = image_list
                     else:
                         # generations: image，只取第一张
                         with open(paths[0], "rb") as f:
                             b64 = base64.b64encode(f.read()).decode("utf-8")
-                        payload["image"] = b64
+                        payload["image"] = self._ensure_reference_image_within_limit(b64, model)
+                    logger.info(
+                        f"[{model.upper()}] request summary: mode=edit, reference_count={len(paths)}, "
+                        f"aspect_ratio={payload['aspect_ratio']}, image_size={payload['resolution']}"
+                    )
                     logger.info(f"[{model.upper()}] 参考图已注入 payload, model={model}, count={len(paths)}")
                     if memory.USER_QUOTED_IMAGE_CACHE.get(session_id):
                         logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {payload['aspect_ratio']}")
@@ -186,6 +191,54 @@ class KlingImageBot(Bot):
             return ratio_alias_map[normalized]
         logger.warning(f"[Kling_Image] invalid aspect_ratio={aspect_ratio}, fallback to 16:9")
         return "16:9"
+
+    def _ensure_reference_image_within_limit(self, image_base64, model):
+        image_url = f"data:image/jpeg;base64,{image_base64}"
+        original_size = len(image_url.encode("utf-8"))
+        if original_size <= self._MAX_REFERENCE_IMAGE_BYTES:
+            return image_base64
+
+        logger.warning(
+            f"[{model.upper()}] reference image too large, start compressing, size={original_size} bytes, "
+            f"limit={self._MAX_REFERENCE_IMAGE_BYTES}"
+        )
+        compressed_base64 = self._compress_base64_image(image_base64, model)
+        compressed_size = len(f'data:image/jpeg;base64,{compressed_base64}'.encode("utf-8"))
+        logger.info(
+            f"[{model.upper()}] reference image compressed, before={original_size} bytes, "
+            f"after={compressed_size} bytes"
+        )
+        return compressed_base64
+
+    def _compress_base64_image(self, image_base64, model):
+        try:
+            image = Image.open(io.BytesIO(base64.b64decode(image_base64)))
+            if image.mode in ("RGBA", "LA", "P"):
+                image = image.convert("RGB")
+
+            quality = 90
+            width, height = image.size
+            resized = image
+            while True:
+                buf = io.BytesIO()
+                resized.save(buf, format="JPEG", quality=quality, optimize=True)
+                encoded = base64.b64encode(buf.getvalue()).decode("utf-8")
+                encoded_size = len(f"data:image/jpeg;base64,{encoded}".encode("utf-8"))
+                if encoded_size <= self._MAX_REFERENCE_IMAGE_BYTES:
+                    return encoded
+                if quality > 55:
+                    quality -= 10
+                    continue
+                width = max(int(width * 0.85), 512)
+                height = max(int(height * 0.85), 512)
+                if (width, height) == resized.size:
+                    logger.warning(f"[{model.upper()}] reference image still exceeds limit after compression")
+                    return encoded
+                resized = image.resize((width, height), Image.LANCZOS)
+                quality = 85
+        except Exception as e:
+            logger.warning(f"[{model.upper()}] failed to compress reference image: {e}")
+            return image_base64
 
     def _check_response_error(self, data: dict) -> str | None:
         """检查响应中的业务错误码，返回错误描述或 None"""
