@@ -92,6 +92,11 @@ COMMANDS = {
     "args": ["模型名"],
     "desc": "查看和设置图片模型",
     },
+    "image_size": {
+        "alias": ["image_size", "图片尺寸"],
+        "args": ["尺寸"],
+        "desc": "查看和设置图片尺寸",
+    },
     "video_model": {
         "alias": ["video_model", "视频模型"],
         "args": ["模型名"],
@@ -450,6 +455,20 @@ class Godcmd(Plugin):
                             ok, result = True, "图片模型已切换为：" + args[0]
                     else:
                         ok, result = False, "请发送 #image_model 加模型名，或直接 #image_model 查看当前模型"
+                elif cmd == "image_size":
+                    if len(args) == 0:
+                        image_size = model_state.get_image_size(user)
+                        ok, result = True, "当前图片尺寸为：" + str(image_size)
+                    elif len(args) == 1:
+                        image_size = str(args[0]).strip().lower()
+                        available = ["512", "1k", "2k", "3k", "4k"]
+                        if image_size not in available:
+                            ok, result = False, "图片尺寸不存在，可选：\n" + "\n".join(available)
+                        else:
+                            model_state.toggle_image_size(user, image_size)
+                            ok, result = True, "图片尺寸已切换为：" + image_size
+                    else:
+                        ok, result = False, "请发送 #image_size 加尺寸，或直接 #image_size 查看当前尺寸"
 
                 elif cmd == "video_model":
                     if len(args) == 0:

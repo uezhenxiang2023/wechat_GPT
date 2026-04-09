@@ -12,6 +12,7 @@ from google.genai.types import Part, GenerateContentConfig
 from bot.gemini.google_gemini_session import _gemini_sessions
 from common import const
 from common.log import logger
+from common.model_status import model_state
 from common.utils import get_chat_session_manager
 from common.video_status import video_state
 from config import conf
@@ -55,7 +56,7 @@ def get_paid_client(api_key):
 
 
 def get_user_image_chat(session_id, image_model, *, paid_client, safety_settings, aspect_ratio=None):
-    image_settings = get_gemini_image_settings(aspect_ratio)
+    image_settings = get_gemini_image_settings_for_session(session_id, aspect_ratio)
     img_config = GenerateContentConfig(
         safety_settings=safety_settings,
         response_modalities=["TEXT", "Image"],
@@ -288,6 +289,15 @@ def _build_image_context_signature(images, prompt):
 def get_gemini_image_settings(aspect_ratio=None):
     return {
         "size": _normalize_gemini_image_size(conf().get("image_create_size", "1K")),
+        "aspect_ratio": _normalize_gemini_image_aspect_ratio(
+            aspect_ratio or conf().get("image_aspect_ratio", "16:9")
+        ),
+    }
+
+
+def get_gemini_image_settings_for_session(session_id, aspect_ratio=None):
+    return {
+        "size": _normalize_gemini_image_size(model_state.get_image_size(session_id)),
         "aspect_ratio": _normalize_gemini_image_aspect_ratio(
             aspect_ratio or conf().get("image_aspect_ratio", "16:9")
         ),

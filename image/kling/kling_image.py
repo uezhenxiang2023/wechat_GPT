@@ -28,7 +28,6 @@ class KlingImageBot(Bot):
         super().__init__()
         self.access_key = conf().get("kling_access_key")
         self.secret_key = conf().get("kling_secret_key")
-        self.image_resolution = self._normalize_resolution(conf().get("image_create_size", "1k"))
         self.image_aspect_ratio = self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"))
 
     def _get_token(self) -> str:
@@ -71,7 +70,7 @@ class KlingImageBot(Bot):
             payload = {
                 "model_name": model,
                 "prompt": query,
-                "resolution": self.image_resolution,
+                "resolution": self._normalize_resolution(model_state.get_image_size(session_id)),
                 "n": 1,
                 "aspect_ratio": self.image_aspect_ratio
             }

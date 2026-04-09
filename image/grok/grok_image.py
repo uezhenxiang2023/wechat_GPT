@@ -51,7 +51,7 @@ class GrokImageBot(Bot):
             session_manager.session_query(query, session_id)
 
             image_args, model, request_meta = self._build_image_args(query, session_id, model)
-            image_size = self._normalize_resolution(conf().get("image_create_size", "1k"), model)
+            image_size = self._normalize_resolution(model_state.get_image_size(session_id), model)
             logger.info(
                 f"[{model.upper()}] request summary: mode={request_meta['mode']}, "
                 f"reference_count={request_meta['reference_count']}, "
@@ -127,7 +127,7 @@ class GrokImageBot(Bot):
                 }
 
         aspect_ratio = prompt_ratio or self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model)
-        image_size = self._normalize_resolution(conf().get("image_create_size", "1k"), model)
+        image_size = self._normalize_resolution(model_state.get_image_size(session_id), model)
         logger.info(
             f"[{model.upper()}] 当前为文生图模式, aspect_ratio={aspect_ratio}, image_size={image_size}"
         )

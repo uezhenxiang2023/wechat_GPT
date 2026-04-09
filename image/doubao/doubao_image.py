@@ -27,7 +27,6 @@ class DoubaoImageBot(Bot):
     def __init__(self):
         super().__init__()
         self.client = Ark(api_key=conf().get("ark_api_key"))
-        self.image_size = conf().get("image_create_size")
 
     def reply(self, query, context: Context = None) -> Reply:
         try:
@@ -57,7 +56,7 @@ class DoubaoImageBot(Bot):
                 ]
                 images = [self._ensure_reference_image_within_limit(image_url, model) for image_url in images]
                 aspect_ratio = prompt_aspect_ratio or size_calculator(quoted_cache["files"])
-                image_size = self._build_image_size(model, aspect_ratio)
+                image_size = self._build_image_size(session_id, model, aspect_ratio)
                 params.update({
                     "image": images,
                     "size": image_size
@@ -81,7 +80,7 @@ class DoubaoImageBot(Bot):
                     ]
                     images = [self._ensure_reference_image_within_limit(image_url, model) for image_url in images]
                     aspect_ratio = prompt_aspect_ratio or size_calculator(file_cache["files"])
-                    image_size = self._build_image_size(model, aspect_ratio)
+                    image_size = self._build_image_size(session_id, model, aspect_ratio)
                     params.update({
                         "image": images,
                         "size": image_size
@@ -98,7 +97,7 @@ class DoubaoImageBot(Bot):
                     memory.USER_IMAGE_CACHE.pop(session_id)
                 else:
                     aspect_ratio = prompt_aspect_ratio or default_aspect_ratio
-                    image_size = self._build_image_size(model, aspect_ratio)
+                    image_size = self._build_image_size(session_id, model, aspect_ratio)
                     params["size"] = image_size
                     logger.info(
                         f"[{model.upper()}] 当前为文生图模式, aspect_ratio={aspect_ratio}, image_size={image_size}"
@@ -124,10 +123,11 @@ class DoubaoImageBot(Bot):
             logger.error(f"[{model.upper()}] fetch reply error: {e}")
             return Reply(ReplyType.ERROR, f"[{model.upper()}]s {e}")
 
-    def _build_image_size(self, model, aspect_ratio):
+    def _build_image_size(self, session_id, model, aspect_ratio):
+        image_size = model_state.get_image_size(session_id)
         if model in const.DOUBAO_SEEDREAM_LIST:
-            return build_seedream_size(model, self.image_size, aspect_ratio)
-        return self.image_size
+            return build_seedream_size(model, image_size, aspect_ratio)
+        return image_size
 
     def _ensure_reference_image_within_limit(self, image_url, model):
         original_size = len(image_url.encode("utf-8"))
