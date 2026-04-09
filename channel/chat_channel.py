@@ -214,7 +214,10 @@ class ChatChannel(Channel):
                 "path": [quoted_image_path],
                 "files": [img]
             }
-            logger.info(f"{channel} quoted image cached, session_id={session_id}, path={quoted_image_path}")
+            logger.info(
+                f"{channel} quoted image cached, session_id={session_id}, "
+                f"path={quoted_image_path}, size={getattr(img, 'size', None)}, mode={getattr(img, 'mode', None)}"
+            )
         except Exception as e:
             logger.warning(f"{channel} failed to cache quoted image: {e}")
 
@@ -234,6 +237,48 @@ class ChatChannel(Channel):
             logger.info(f"{channel} quoted video cached, session_id={session_id}, path={quoted_video_path}")
         except Exception as e:
             logger.warning(f"{channel} failed to cache quoted video: {e}")
+
+    def _cache_quoted_file(self, context: Context):
+        quoted_file_path = context.get("quoted_file_path")
+        session_id = context.get("session_id")
+        if not quoted_file_path or not session_id:
+            return
+        channel = self._get_channel(context)
+        try:
+            suffix = os.path.splitext(quoted_file_path)[1].lstrip(".").lower()
+            normalized_suffix = "plain" if suffix in {"txt", "plain"} else suffix
+            if normalized_suffix not in const.DOCUMENT:
+                logger.warning(f"{channel} unsupported quoted file type: {suffix}")
+                return
+
+            if normalized_suffix == "pdf":
+                with open(quoted_file_path, 'rb') as file:
+                    encoded_data = base64.b64encode(file.read()).decode('utf-8')
+            elif normalized_suffix == "docx":
+                doc = docx.Document(quoted_file_path)
+                encoded_data = '\n'.join(paragraph.text for paragraph in doc.paragraphs)
+            else:
+                with open(quoted_file_path, 'r', encoding='utf-8', errors='ignore') as file:
+                    encoded_data = file.read()
+
+            memory.USER_QUOTED_FILE_CACHE[session_id] = {
+                "path": quoted_file_path,
+                "msg": context.get("msg"),
+                "files": [{
+                    "path": quoted_file_path,
+                    "msg": context.get("msg"),
+                    "mime_type": f"application/{normalized_suffix}",
+                    "data": encoded_data,
+                }],
+            }
+            file_size = os.path.getsize(quoted_file_path) if os.path.exists(quoted_file_path) else 0
+            logger.info(
+                f"{channel} quoted file cached, session_id={session_id}, "
+                f"path={quoted_file_path}, mime_type=application/{normalized_suffix}, "
+                f"size={file_size}, content_length={len(encoded_data)}"
+            )
+        except Exception as e:
+            logger.warning(f"{channel} failed to cache quoted file: {e}")
 
     def _generate_reply(self, context: Context, reply: Reply = Reply()) -> Reply:
         session_id = context["session_id"]
@@ -289,6 +334,8 @@ class ChatChannel(Channel):
             elif context.type == ContextType.TEXT:
                 # 文字消息
                 with cache_lock: # 等待图片缓存完成后再处理文本
+                    self._cache_quoted_image(context)
+                    self._cache_quoted_file(context)
                     context["channel"] = e_context["channel"]
                     reply = super().build_reply_content(context.content, context)
             elif context.type == ContextType.IMAGE:

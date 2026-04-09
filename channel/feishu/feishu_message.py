@@ -128,6 +128,37 @@ def download_referenced_video(parent_message_id, user_dir):
     get_message_resource(message_id=parent_message_id, file_key=file_key, type=resource_type, file_path=file_path)
     return file_path
 
+
+def download_referenced_file(parent_message_id, user_dir):
+    message = get_message_detail(parent_message_id)
+    if not message or not message.body or not message.body.content or message.msg_type != 'file':
+        return None
+
+    try:
+        content = json.loads(message.body.content)
+    except Exception as e:
+        logger.warning(f"[Lark] failed to parse referenced file body: {e}")
+        return None
+
+    file_key = content.get("file_key")
+    file_name = content.get("file_name")
+    if not file_key or not file_name:
+        return None
+
+    suffix = os.path.splitext(file_name)[1].lstrip(".").lower()
+    if suffix not in {"pdf", "doc", "docx", "plain", "txt"}:
+        logger.info(f"[Lark] skip quoted file download, unsupported suffix={suffix}, parent_id={parent_message_id}")
+        return None
+
+    os.makedirs(user_dir, exist_ok=True)
+    file_path = os.path.join(user_dir, f"quoted_{parent_message_id}_{os.path.basename(file_name)}")
+    logger.info(
+        f"[Lark] downloading quoted file, parent_id={parent_message_id}, "
+        f"file_name={file_name}, suffix={suffix}, path={file_path}"
+    )
+    get_message_resource(message_id=parent_message_id, file_key=file_key, type='file', file_path=file_path)
+    return file_path
+
 def get_file_name(file):
     file_path = file.file_path
     file_name_index = file_path.rfind("/")
@@ -204,3 +235,8 @@ class FeishuMessage(ChatMessage):
         if not self.parent_id:
             return None
         return download_referenced_video(self.parent_id, self.user_dir)
+
+    def get_quoted_file_path(self):
+        if not self.parent_id:
+            return None
+        return download_referenced_file(self.parent_id, self.user_dir)

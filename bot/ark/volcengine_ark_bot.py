@@ -56,14 +56,35 @@ class VolcengineArkBot(Bot):
             image_cache = memory.USER_IMAGE_CACHE.get(session_id)
             video_cache = memory.USER_VIDEO_CACHE.get(session_id)
             file_cache = memory.USER_FILE_CACHE.get(session_id)
+            quoted_image_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
+            quoted_file_cache = memory.USER_QUOTED_FILE_CACHE.get(session_id)
+            logger.info(
+                f"[{self.Model_ID}] cache summary before request, "
+                f"quoted_files={len((quoted_file_cache or {}).get('files', []))}, "
+                f"files={len((file_cache or {}).get('files', []))}, "
+                f"quoted_images={len((quoted_image_cache or {}).get('files', []))}, "
+                f"images={len((image_cache or {}).get('files', []))}, "
+                f"videos={len((video_cache or {}).get('files', []))}"
+            )
 
             media_contents = []
+            if quoted_file_cache:
+                quoted_file_contents = self._build_file_contents(quoted_file_cache)
+                if quoted_file_contents:
+                    media_contents.extend(quoted_file_contents)
+                    logger.info(f"[{self.Model_ID}] 从引用回复文档缓存取内容, count={len(quoted_file_contents)}")
+                memory.USER_QUOTED_FILE_CACHE.pop(session_id, None)
             if file_cache:
                 file_contents = self._build_file_contents(file_cache)
                 if file_contents:
                     media_contents.extend(file_contents)
                     logger.info(f"[{self.Model_ID}] 从内存文档缓存取内容, count={len(file_contents)}")
                 memory.USER_FILE_CACHE.pop(session_id, None)
+            if quoted_image_cache:
+                quoted_image_contents = process_image_files(quoted_image_cache)
+                media_contents.extend(quoted_image_contents)
+                logger.info(f"[{self.Model_ID}] 从引用回复图片缓存取内容, count={len(quoted_image_contents)}")
+                memory.USER_QUOTED_IMAGE_CACHE.pop(session_id, None)
             if image_cache:
                 image_contents = process_image_files(image_cache)
                 media_contents.extend(image_contents)
@@ -75,6 +96,10 @@ class VolcengineArkBot(Bot):
                 logger.info(f"[{self.Model_ID}] 从内存参考视频取内容, count={len(video_contents)}")
                 memory.USER_VIDEO_CACHE.pop(session_id)
             if media_contents:
+                logger.info(
+                    f"[{self.Model_ID}] media injection summary, "
+                    f"blocks={self._summarize_user_media_blocks(media_contents)}"
+                )
                 media_contents.append({"type": "text", "text": query})
                 query = media_contents
 
@@ -256,13 +281,33 @@ class VolcengineArkBot(Bot):
                 continue
 
             mime_type = cached_file.get("mime_type", "")
-            if mime_type != "application/pdf":
-                logger.warning(f"[{self.Model_ID}] unsupported file mime_type: {mime_type}")
+            file_path = cached_file.get("path", "")
+            file_name = os.path.basename(file_path) if file_path else "unknown"
+            file_size = os.path.getsize(file_path) if file_path and os.path.exists(file_path) else 0
+            logger.info(
+                f"[{self.Model_ID}] preparing file block, "
+                f"name={file_name}, mime_type={mime_type}, size={file_size}"
+            )
+            if mime_type == "application/pdf":
+                file_block = self._build_pdf_file_block(cached_file)
+                if file_block is not None:
+                    contents.append(file_block)
                 continue
 
-            file_block = self._build_pdf_file_block(cached_file)
-            if file_block is not None:
-                contents.append(file_block)
+            if mime_type in ("application/docx", "application/doc", "application/plain"):
+                raw_text = cached_file.get("data", "")
+                if raw_text:
+                    contents.append({
+                        "type": "text",
+                        "text": f"<document>\n{raw_text}\n</document>",
+                    })
+                    logger.info(
+                        f"[{self.Model_ID}] document text block added, "
+                        f"name={file_name}, mime_type={mime_type}, text_length={len(raw_text)}"
+                    )
+                continue
+
+            logger.warning(f"[{self.Model_ID}] unsupported file mime_type: {mime_type}")
         return contents
 
     def _build_pdf_file_block(self, cached_file):
@@ -293,6 +338,27 @@ class VolcengineArkBot(Bot):
                 "file_data": f"data:application/pdf;base64,{raw_data}",
             }
         }
+
+    def _summarize_user_media_blocks(self, blocks):
+        summary = {
+            "text": 0,
+            "image": 0,
+            "video": 0,
+            "file": 0,
+        }
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            if block_type == "text":
+                summary["text"] += 1
+            elif block_type == "image_url":
+                summary["image"] += 1
+            elif block_type == "video_url":
+                summary["video"] += 1
+            elif block_type == "file":
+                summary["file"] += 1
+        return summary
 
     def _upload_pdf_to_ark(self, file_path):
         if not file_path or not os.path.exists(file_path):
