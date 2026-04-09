@@ -31,7 +31,7 @@ _GROK_IMAGE_RATIO_MAP = {
     "1:2": 1 / 2,
     "2:1": 2 / 1,
 }
-_GROK_IMAGE_MAX_BYTES = 1024 * 1024 * 2
+_GROK_IMAGE_MAX_BYTES = int(3.5 * 1024 * 1024)
 
 
 class GrokImageBot(Bot):
