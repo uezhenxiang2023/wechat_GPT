@@ -1,5 +1,6 @@
 import base64
 import io
+import re
 import time
 
 from PIL import Image
@@ -12,7 +13,7 @@ from bridge.reply import Reply, ReplyType
 from common import const, memory
 from common.log import logger
 from common.model_status import model_state
-from common.utils import get_chat_session_manager
+from common.utils import get_chat_session_manager, url_to_base64
 from config import conf
 
 
@@ -35,6 +36,23 @@ _GROK_IMAGE_MAX_BYTES = int(3.5 * 1024 * 1024)
 
 
 class GrokImageBot(Bot):
+    _SEQUENTIAL_IMAGE_MAX_COUNT = 10
+    _SEQUENTIAL_IMAGE_CN_NUM_MAP = {
+        "两": 2,
+        "俩": 2,
+        "仨": 3,
+        "一": 1,
+        "二": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+        "十": 10,
+    }
+
     def __init__(self):
         super().__init__()
         self.client = Client(
@@ -57,6 +75,39 @@ class GrokImageBot(Bot):
                 f"reference_count={request_meta['reference_count']}, "
                 f"aspect_ratio={image_args.get('aspect_ratio')}, image_size={image_size}"
             )
+            sequential_image_count = self._parse_sequential_image_count_from_prompt(query)
+            if sequential_image_count:
+                logger.info(
+                    f"[{model.upper()}] 从 prompt 中解析到组图数量: {sequential_image_count}, "
+                    "已启用 sample_batch"
+                )
+                image_urls = self._sample_image_batch_with_retry(
+                    query=query,
+                    model=model,
+                    image_size=image_size,
+                    image_args=image_args,
+                    image_count=sequential_image_count
+                )
+
+                try:
+                    for image_url in image_urls:
+                        base64_data = url_to_base64(image_url)
+                        session_manager.session_inject_media(
+                            session_id=session_id,
+                            media_type="image",
+                            data=base64_data,
+                            source_model=model
+                        )
+                    logger.info(
+                        f"[{model.upper()}] image injected to session, model={model}, "
+                        f"session_id={session_id}, image_count={len(image_urls)}"
+                    )
+                except Exception as e:
+                    logger.warning(f"[{model.upper()}] failed to inject image to session: {e}")
+
+                logger.info(f"[{model.upper()}] image generation finished, image_count={len(image_urls)}")
+                return Reply(ReplyType.IMAGE_URL, image_urls)
+
             response = self._sample_image_with_retry(
                 query=query,
                 model=model,
@@ -237,6 +288,35 @@ class GrokImageBot(Bot):
                 time.sleep(delay)
         raise last_error
 
+    def _sample_image_batch_with_retry(self, query, model, image_size, image_args, image_count):
+        max_attempts = 3
+        retry_delays = [2, 4]
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                responses = self.client.image.sample_batch(
+                    prompt=query,
+                    model=model,
+                    resolution=image_size,
+                    n=image_count,
+                    **image_args
+                )
+                image_urls = [response.url for response in responses if getattr(response, "url", None)]
+                if not image_urls:
+                    raise ValueError("Empty image batch response from Grok.")
+                return image_urls
+            except Exception as e:
+                last_error = e
+                if attempt >= max_attempts or not self._is_retryable_error(e):
+                    raise
+                delay = retry_delays[attempt - 1]
+                logger.warning(
+                    f"[{model.upper()}] image batch request failed temporarily, retry {attempt}/{max_attempts - 1} "
+                    f"after {delay}s: {e}"
+                )
+                time.sleep(delay)
+        raise last_error
+
     def _is_retryable_error(self, error):
         error_text = str(error)
         retry_markers = (
@@ -287,3 +367,33 @@ class GrokImageBot(Bot):
         best_size = sorted(sizes, key=lambda size: size[0] * size[1], reverse=True)[0]
         ratio = round(best_size[0] / best_size[1], 4)
         return min(_GROK_IMAGE_RATIO_MAP, key=lambda key: abs(_GROK_IMAGE_RATIO_MAP[key] - ratio))
+
+    def _parse_sequential_image_count_from_prompt(self, prompt):
+        if not prompt:
+            return None
+
+        normalized_prompt = prompt.replace("张图", "张").replace("幅图", "幅")
+
+        digit_patterns = [
+            r"(?:组图|一组|做|生成|输出|画|给我|来|要)\s*(\d{1,2})\s*(?:张|幅)",
+            r"(\d{1,2})\s*(?:张|幅)\s*(?:组图|系列图|连环图)",
+            r"(?:共|一共|最多|至多|最多生成)\s*(\d{1,2})\s*(?:张|幅)",
+        ]
+        for pattern in digit_patterns:
+            match = re.search(pattern, normalized_prompt, re.IGNORECASE)
+            if match:
+                return self._clamp_sequential_image_count(int(match.group(1)))
+
+        cn_pattern = r"(两|俩|仨|[一二三四五六七八九十])\s*(?:张|幅)\s*(?:组图|系列图|连环图)?"
+        match = re.search(cn_pattern, normalized_prompt)
+        if match:
+            parsed = self._SEQUENTIAL_IMAGE_CN_NUM_MAP.get(match.group(1))
+            if parsed:
+                return self._clamp_sequential_image_count(parsed)
+
+        return None
+
+    def _clamp_sequential_image_count(self, count):
+        if count <= 1:
+            return None
+        return min(count, self._SEQUENTIAL_IMAGE_MAX_COUNT)
