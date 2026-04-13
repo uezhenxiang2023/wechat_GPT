@@ -310,7 +310,7 @@ class KlingImageBot(Bot):
         else:
             return f"[{code}] {desc}" + (f"：{message}" if message else "")
 
-    def _poll_task(self, task_id: str, endpoint: str, model: str, max_retries=60, interval=5) -> tuple:
+    def _poll_task(self, task_id: str, endpoint: str, model: str, max_retries=120, interval=5) -> tuple:
         query_url = f"{self.API_BASE}{endpoint}/{task_id}"
         retry_delay = interval
 
