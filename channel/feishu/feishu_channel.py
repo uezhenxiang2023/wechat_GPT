@@ -464,6 +464,11 @@ class FeiShuChanel(ChatChannel):
         elif reply.type == ReplyType.IMAGE_URL:  # 获取网络资源
             response = reply.content
             if not isinstance(response, str):
+                if isinstance(response, list):
+                    for image_url in response:
+                        image_reply = Reply(ReplyType.IMAGE_URL, image_url)
+                        self.send(image_reply, context)
+                    return
                 if hasattr(response, 'candidates'):
                     # gemini 获取引用的网址链接
                     parts = response.candidates[0].content.parts

@@ -203,18 +203,19 @@ class WechatChannel(ChatChannel):
             itchat.send_file(reply.content, toUserName=receiver)
             logger.info("[WX] sendFile={}, receiver={}".format(reply.content, receiver))
         elif reply.type == ReplyType.IMAGE_URL:  # 从网络下载图片
-            img_url = reply.content
-            logger.debug(f"[WX] start download image, img_url={img_url}")
-            pic_res = requests.get(img_url, stream=True)
-            image_storage = io.BytesIO()
-            size = 0
-            for block in pic_res.iter_content(1024):
-                size += len(block)
-                image_storage.write(block)
-            logger.info(f"[WX] download image success, size={size}, img_url={img_url}")
-            image_storage.seek(0)
-            itchat.send_image(image_storage, toUserName=receiver)
-            logger.info("[WX] sendImage url={}, receiver={}".format(img_url, receiver))
+            image_urls = reply.content if isinstance(reply.content, list) else [reply.content]
+            for img_url in image_urls:
+                logger.debug(f"[WX] start download image, img_url={img_url}")
+                pic_res = requests.get(img_url, stream=True)
+                image_storage = io.BytesIO()
+                size = 0
+                for block in pic_res.iter_content(1024):
+                    size += len(block)
+                    image_storage.write(block)
+                logger.info(f"[WX] download image success, size={size}, img_url={img_url}")
+                image_storage.seek(0)
+                itchat.send_image(image_storage, toUserName=receiver)
+                logger.info("[WX] sendImage url={}, receiver={}".format(img_url, receiver))
         elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
             image_storage = reply.content
             image_storage.seek(0)

@@ -299,14 +299,15 @@ class WeworkChannel(ChatChannel):
             # Remove the temporary file
             os.remove(temp_path)
         elif reply.type == ReplyType.IMAGE_URL:  # 从网络下载图片
-            img_url = reply.content
-            filename = str(uuid.uuid4())
+            image_urls = reply.content if isinstance(reply.content, list) else [reply.content]
+            for img_url in image_urls:
+                filename = str(uuid.uuid4())
 
-            # 调用你的函数，下载图片并保存为本地文件
-            image_path = download_and_compress_image(img_url, filename)
+                # 调用你的函数，下载图片并保存为本地文件
+                image_path = download_and_compress_image(img_url, filename)
 
-            wework.send_image(receiver, file_path=image_path)
-            logger.info("[WX] sendImage url={}, receiver={}".format(img_url, receiver))
+                wework.send_image(receiver, file_path=image_path)
+                logger.info("[WX] sendImage url={}, receiver={}".format(img_url, receiver))
         elif reply.type == ReplyType.VIDEO_URL:
             video_url = reply.content
             filename = str(uuid.uuid4())

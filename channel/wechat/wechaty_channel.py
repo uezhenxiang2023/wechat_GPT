@@ -94,11 +94,12 @@ class WechatyChannel(ChatChannel):
                 pass
             logger.info("[WX] sendVoice={}, receiver={}".format(reply.content, receiver))
         elif reply.type == ReplyType.IMAGE_URL:  # 从网络下载图片
-            img_url = reply.content
-            t = int(time.time())
-            msg = FileBox.from_url(url=img_url, name=str(t) + ".png")
-            asyncio.run_coroutine_threadsafe(receiver.say(msg), loop).result()
-            logger.info("[WX] sendImage url={}, receiver={}".format(img_url, receiver))
+            image_urls = reply.content if isinstance(reply.content, list) else [reply.content]
+            for img_url in image_urls:
+                t = int(time.time())
+                msg = FileBox.from_url(url=img_url, name=str(t) + ".png")
+                asyncio.run_coroutine_threadsafe(receiver.say(msg), loop).result()
+                logger.info("[WX] sendImage url={}, receiver={}".format(img_url, receiver))
         elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
             image_storage = reply.content
             image_storage.seek(0)

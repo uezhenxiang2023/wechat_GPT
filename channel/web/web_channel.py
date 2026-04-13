@@ -67,15 +67,16 @@ class WebChannel(ChatChannel):
                 import requests
                 from PIL import Image
 
-                img_url = reply.content
-                pic_res = requests.get(img_url, stream=True)
-                image_storage = io.BytesIO()
-                for block in pic_res.iter_content(1024):
-                    image_storage.write(block)
-                image_storage.seek(0)
-                img = Image.open(image_storage)
-                print(img_url)
-                img.show()
+                image_urls = reply.content if isinstance(reply.content, list) else [reply.content]
+                for img_url in image_urls:
+                    pic_res = requests.get(img_url, stream=True)
+                    image_storage = io.BytesIO()
+                    for block in pic_res.iter_content(1024):
+                        image_storage.write(block)
+                    image_storage.seek(0)
+                    img = Image.open(image_storage)
+                    print(img_url)
+                    img.show()
             else:
                 print(reply.content)
 

@@ -479,6 +479,20 @@ class TelegramChannel(ChatChannel):
                 logger.info("[TELEGRAMBOT] sendFile={}, receiver={}".format(reply.content, receiver))
             elif reply.type == ReplyType.IMAGE_URL:  # 获取网络资源
                 response = reply.content
+                if isinstance(response, list):
+                    for img_url in response:
+                        logger.debug(f"[TELEGRAMBOT] start download image, img_url={img_url}")
+                        pic_res = requests.get(img_url, stream=True)
+                        image_storage = io.BytesIO()
+                        size = 0
+                        for block in pic_res.iter_content(1024):
+                            size += len(block)
+                            image_storage.write(block)
+                        logger.info(f"[TELEGRAMBOT] download image success, size={size}, img_url={img_url}")
+                        image_storage.seek(0)
+                        await self.application.bot.send_photo(chat_id=receiver, photo=image_storage)
+                        logger.info("[TELEGRAMBOT] sendImage url={}, receiver={}".format(img_url, receiver))
+                    return
                 if hasattr(response, 'candidates'):
                     if not isinstance(response, str):
                         #获取网址

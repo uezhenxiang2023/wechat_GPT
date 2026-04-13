@@ -1,8 +1,10 @@
 import base64
 import io
+import re
 
 from PIL import Image
 from volcenginesdkarkruntime import Ark
+from volcenginesdkarkruntime.types.images.images import SequentialImageGenerationOptions
 
 from bot.bot import Bot
 from bot.ark.ark_media import (
@@ -23,6 +25,22 @@ from config import conf
 
 class DoubaoImageBot(Bot):
     _MAX_REFERENCE_IMAGE_BYTES = int(9.5 * 1024 * 1024)
+    _SEQUENTIAL_IMAGE_MAX_COUNT = 15
+    _SEQUENTIAL_IMAGE_CN_NUM_MAP = {
+        "两": 2,
+        "俩": 2,
+        "仨": 3,
+        "一": 1,
+        "二": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+        "十": 10,
+    }
 
     def __init__(self):
         super().__init__()
@@ -43,6 +61,18 @@ class DoubaoImageBot(Bot):
                 "watermark": False,
                 "sequential_image_generation": "disabled"
             }
+            sequential_image_count = self._parse_sequential_image_count_from_prompt(query)
+            if sequential_image_count and model in const.DOUBAO_SEEDREAM_LIST:
+                params.update({
+                    "sequential_image_generation": "auto",
+                    "sequential_image_generation_options": SequentialImageGenerationOptions(
+                        max_images=sequential_image_count
+                    )
+                })
+                logger.info(
+                    f"[{model.upper()}] 从 prompt 中解析到组图数量: {sequential_image_count}, "
+                    "已启用 sequential_image_generation=auto"
+                )
             default_aspect_ratio = conf().get("image_aspect_ratio", "16:9")
             prompt_aspect_ratio = self._parse_aspect_ratio_from_prompt(query)
             if prompt_aspect_ratio:
@@ -104,21 +134,30 @@ class DoubaoImageBot(Bot):
                     )
 
             response = self.client.images.generate(**params)
-            image_url = response.data[0].url
+            image_urls = [item.url for item in getattr(response, "data", []) if getattr(item, "url", None)]
+            if not image_urls:
+                raise ValueError("Doubao image response missing image url")
 
             try:
-                base64_data = url_to_base64(image_url)
-                session_manager.session_inject_media(
-                    session_id=session_id,
-                    media_type="image",
-                    data=base64_data,
-                    source_model=model
+                for image_url in image_urls:
+                    base64_data = url_to_base64(image_url)
+                    session_manager.session_inject_media(
+                        session_id=session_id,
+                        media_type="image",
+                        data=base64_data,
+                        source_model=model
+                    )
+                logger.info(
+                    f"[{model.upper()}] image injected to session, model={model}, "
+                    f"session_id={session_id}, image_count={len(image_urls)}"
                 )
-                logger.info(f"[{model.upper()}] image injected to session, model={model}, session_id={session_id}")
             except Exception as e:
                 logger.warning(f"[{model.upper()}] failed to inject image to session: {e}")
 
-            return Reply(ReplyType.IMAGE_URL, image_url)
+            logger.info(f"[{model.upper()}] image generation finished, image_count={len(image_urls)}")
+            if len(image_urls) == 1:
+                return Reply(ReplyType.IMAGE_URL, image_urls[0])
+            return Reply(ReplyType.IMAGE_URL, image_urls)
         except Exception as e:
             logger.error(f"[{model.upper()}] fetch reply error: {e}")
             return Reply(ReplyType.ERROR, f"[{model.upper()}]s {e}")
@@ -179,3 +218,33 @@ class DoubaoImageBot(Bot):
 
     def _parse_aspect_ratio_from_prompt(self, prompt):
         return parse_aspect_ratio_from_prompt(prompt)
+
+    def _parse_sequential_image_count_from_prompt(self, prompt):
+        if not prompt:
+            return None
+
+        normalized_prompt = prompt.replace("张图", "张").replace("幅图", "幅")
+
+        digit_patterns = [
+            r"(?:组图|一组|做|生成|输出|画|给我|来|要)\s*(\d{1,2})\s*(?:张|幅)",
+            r"(\d{1,2})\s*(?:张|幅)\s*(?:组图|系列图|连环图)",
+            r"(?:共|一共|最多|至多|最多生成)\s*(\d{1,2})\s*(?:张|幅)",
+        ]
+        for pattern in digit_patterns:
+            match = re.search(pattern, normalized_prompt, re.IGNORECASE)
+            if match:
+                return self._clamp_sequential_image_count(int(match.group(1)))
+
+        cn_pattern = r"(两|俩|仨|[一二三四五六七八九十])\s*(?:张|幅)\s*(?:组图|系列图|连环图)?"
+        match = re.search(cn_pattern, normalized_prompt)
+        if match:
+            parsed = self._SEQUENTIAL_IMAGE_CN_NUM_MAP.get(match.group(1))
+            if parsed:
+                return self._clamp_sequential_image_count(parsed)
+
+        return None
+
+    def _clamp_sequential_image_count(self, count):
+        if count <= 1:
+            return None
+        return min(count, self._SEQUENTIAL_IMAGE_MAX_COUNT)
