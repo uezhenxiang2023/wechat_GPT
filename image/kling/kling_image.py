@@ -23,6 +23,23 @@ class KlingImageBot(Bot):
     ENDPOINT_GENERATIONS = "/v1/images/generations"
     ENDPOINT_OMNI = "/v1/images/omni-image"
     _MAX_REFERENCE_IMAGE_BYTES = int(9.5 * 1024 * 1024)
+    _SERIES_IMAGE_MIN_COUNT = 2
+    _SERIES_IMAGE_MAX_COUNT = 9
+    _SERIES_IMAGE_CN_NUM_MAP = {
+        "两": 2,
+        "俩": 2,
+        "仨": 3,
+        "一": 1,
+        "二": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+        "十": 10,
+    }
 
     def __init__(self):
         super().__init__()
@@ -72,8 +89,20 @@ class KlingImageBot(Bot):
                 "prompt": query,
                 "resolution": self._normalize_resolution(model_state.get_image_size(session_id)),
                 "n": 1,
+                "result_type": "single",
                 "aspect_ratio": self.image_aspect_ratio
             }
+            sequential_image_count = self._parse_sequential_image_count_from_prompt(query)
+            if sequential_image_count:
+                payload.update({
+                    "result_type": "series",
+                    "series_amount": sequential_image_count
+                })
+                payload.pop("n", None)
+                logger.info(
+                    f"[{model.upper()}] 从 prompt 中解析到组图数量: {sequential_image_count}, "
+                    "已启用 result_type=series"
+                )
             # 用户 prompt 中的比例优先级最高
             prompt_ratio = self._parse_aspect_ratio_from_prompt(query)
             if prompt_ratio:
@@ -143,24 +172,31 @@ class KlingImageBot(Bot):
 
             logger.info(f"[{model.upper()}] 任务已提交, task_id={task_id}, model={model}, endpoint={endpoint}")
 
-            img_url, poll_err = self._poll_task(task_id, endpoint, model)
+            image_urls, poll_err = self._poll_task(task_id, endpoint, model)
             if poll_err:
                 return Reply(ReplyType.ERROR, f"[{model.upper()}]出图失败：{poll_err}")
 
             # 图片生成结果注入 session 上下文
             try:
-                base64_data = url_to_base64(img_url)
-                session_manager.session_inject_media(
-                    session_id=session_id,
-                    media_type='image',
-                    data=base64_data,
-                    source_model=model
+                for image_url in image_urls:
+                    base64_data = url_to_base64(image_url)
+                    session_manager.session_inject_media(
+                        session_id=session_id,
+                        media_type='image',
+                        data=base64_data,
+                        source_model=model
+                    )
+                logger.info(
+                    f"[{model.upper()}] image injected to session, model={model}, "
+                    f"session_id={session_id}, image_count={len(image_urls)}"
                 )
-                logger.info(f"[{model.upper()}] image injected to session, model={model}, session_id={session_id}")
             except Exception as e:
                 logger.warning(f"[{model.upper()}] failed to inject image to session: {e}")
 
-            return Reply(ReplyType.IMAGE_URL, img_url)
+            logger.info(f"[{model.upper()}] image generation finished, image_count={len(image_urls)}")
+            if len(image_urls) == 1:
+                return Reply(ReplyType.IMAGE_URL, image_urls[0])
+            return Reply(ReplyType.IMAGE_URL, image_urls)
 
         except Exception as e:
             logger.error(f"[{model.upper()}] fetch reply error: {e}")
@@ -302,9 +338,12 @@ class KlingImageBot(Bot):
                 if status == "succeed":
                     images = data.get("task_result", {}).get("images", [])
                     if images:
-                        url = images[0].get("url")
-                        logger.info(f"[{model.upper()}] 图片生成成功, task_id={task_id}, url={url}")
-                        return url, None
+                        image_urls = [item.get("url") for item in images if item.get("url")]
+                        if image_urls:
+                            logger.info(
+                                f"[{model.upper()}] 图片生成成功, task_id={task_id}, image_count={len(image_urls)}"
+                            )
+                            return image_urls, None
 
                 elif status == "failed":
                     status_msg = data.get("task_status_msg", "")
@@ -352,3 +391,33 @@ class KlingImageBot(Bot):
             return "auto"
         aspect_ratio = parse_aspect_ratio_from_prompt(prompt)
         return self._normalize_aspect_ratio(aspect_ratio) if aspect_ratio else None
+
+    def _parse_sequential_image_count_from_prompt(self, prompt):
+        if not prompt:
+            return None
+
+        normalized_prompt = prompt.replace("张图", "张").replace("幅图", "幅")
+
+        digit_patterns = [
+            r"(?:组图|一组|做|生成|输出|画|给我|来|要)\s*(\d{1,2})\s*(?:张|幅)",
+            r"(\d{1,2})\s*(?:张|幅)\s*(?:组图|系列图|连环图)",
+            r"(?:共|一共|最多|至多|最多生成)\s*(\d{1,2})\s*(?:张|幅)",
+        ]
+        for pattern in digit_patterns:
+            match = re.search(pattern, normalized_prompt, re.IGNORECASE)
+            if match:
+                return self._clamp_sequential_image_count(int(match.group(1)))
+
+        cn_pattern = r"(两|俩|仨|[一二三四五六七八九十])\s*(?:张|幅)\s*(?:组图|系列图|连环图)?"
+        match = re.search(cn_pattern, normalized_prompt)
+        if match:
+            parsed = self._SERIES_IMAGE_CN_NUM_MAP.get(match.group(1))
+            if parsed:
+                return self._clamp_sequential_image_count(parsed)
+
+        return None
+
+    def _clamp_sequential_image_count(self, count):
+        if count < self._SERIES_IMAGE_MIN_COUNT:
+            return None
+        return min(count, self._SERIES_IMAGE_MAX_COUNT)
