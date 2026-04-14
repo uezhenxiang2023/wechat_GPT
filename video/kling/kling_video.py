@@ -51,12 +51,14 @@ class KlingVideoBot(Bot):
         try:
             session_id = context["session_id"]
             model = model_state.get_video_state(session_id) or const.KLING_VIDEO_O1
+            video_mode = model_state.get_video_mode(session_id)
             duration = self._normalize_duration(video_state.get_video_duration(session_id), model)
             resolution = self._normalize_resolution(video_state.get_video_resolution(session_id), model)
             mode = self._mode_from_resolution(resolution)
             session_manager = get_chat_session_manager(session_id)
+            sound = self._get_sound_state()
 
-            logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
+            logger.info(f"[{model.upper()}] query={query}, video_mode={video_mode}, requester={session_id}")
             session_manager.session_query(query, session_id)
 
             payload = {
@@ -65,7 +67,7 @@ class KlingVideoBot(Bot):
                 "mode": mode,
                 "duration": duration,
                 "watermark_info": {"enabled": True},
-                "sound": conf().get("video_sound", "off")
+                "sound": sound
             }
 
             # 用户 prompt 中的比例优先级最高
@@ -88,11 +90,7 @@ class KlingVideoBot(Bot):
                 if paths:
                     if not prompt_ratio:
                         payload["aspect_ratio"] = self._normalize_aspect_ratio(self.aspect_ratio_calculator(paths), model)
-                    image_list = []
-                    for p in paths:
-                        with open(p, "rb") as f:
-                            b64 = base64.b64encode(f.read()).decode("utf-8")
-                        image_list.append({"image_url": b64})
+                    image_list = self._build_image_list_from_paths(paths, video_mode, model)
                     payload["image_list"] = image_list
                     reference_image_count = len(image_list)
                     if memory.USER_QUOTED_IMAGE_CACHE.get(session_id):
@@ -111,18 +109,19 @@ class KlingVideoBot(Bot):
                         self._get_aspect_ratio_from_base64(session_images[0]),
                         model
                     )
-                payload["image_list"] = [
-                    {"image_url": url.split(",", 1)[1]} for url in session_images
-                ]
-                reference_image_count = len(session_images)
+                payload["image_list"] = self._build_image_list_from_session(session_images, video_mode, model)
+                reference_image_count = len(payload["image_list"])
                 logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
             else:
                 # 纯文生视频，必须传 aspect_ratio
                 if not prompt_ratio:
                     payload["aspect_ratio"] = self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model)
 
+            if reference_image_count:
+                logger.info(f"[{model.upper()}] 图片角色识别结果: {self._summarize_image_roles(payload['image_list'])}")
+
             logger.info(
-                f"[{model.upper()}] 参考素材统计: reference_images={reference_image_count}"
+                f"[{model.upper()}] 参考素材统计: reference_images={reference_image_count}, video_mode={video_mode}"
             )
             logger.info(
                 f"[{model.upper()}] 请求参数: mode={payload.get('mode')}, resolution={resolution}, "
@@ -311,3 +310,46 @@ class KlingVideoBot(Bot):
             return float(width) / float(height)
         except (TypeError, ValueError, ZeroDivisionError):
             return None
+
+    def _build_image_list_from_paths(self, paths: list, video_mode: str, model: str) -> list:
+        image_list = []
+        for path in paths:
+            with open(path, "rb") as file:
+                image_list.append({"image_url": base64.b64encode(file.read()).decode("utf-8")})
+        return self._apply_image_types(image_list, video_mode, model)
+
+    def _build_image_list_from_session(self, session_images: list, video_mode: str, model: str) -> list:
+        image_list = [{"image_url": url.split(",", 1)[1]} for url in session_images]
+        return self._apply_image_types(image_list, video_mode, model)
+
+    def _apply_image_types(self, image_list: list, video_mode: str, model: str) -> list:
+        normalized_mode = self._normalize_video_mode(video_mode)
+        if normalized_mode == "first_last":
+            filtered_image_list = image_list[:2]
+            if filtered_image_list:
+                filtered_image_list[0]["type"] = "first_frame"
+            if len(filtered_image_list) >= 2:
+                filtered_image_list[1]["type"] = "end_frame"
+            if len(image_list) > 2:
+                logger.warning(
+                    f"[{model.upper()}] 首尾帧模式仅使用前两张图片，其余 {len(image_list) - 2} 张图片将被过滤"
+                )
+            return filtered_image_list
+
+        for item in image_list:
+            item.pop("type", None)
+        return image_list
+
+    def _summarize_image_roles(self, image_list: list) -> str:
+        return ",".join(item.get("type", "reference") for item in image_list)
+
+    def _normalize_video_mode(self, video_mode: str) -> str:
+        normalized = str(video_mode or "").strip().lower()
+        if normalized == "firstlast":
+            return "first_last"
+        if normalized == "reference":
+            return "reference"
+        return "reference"
+
+    def _get_sound_state(self) -> str:
+        return str(conf().get("video_sound", "off")).strip().lower()
