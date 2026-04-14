@@ -30,8 +30,9 @@ class DoubaoVideoBot(Bot):
         try:
             session_id = context["session_id"]
             model = model_state.get_video_state(session_id)
+            video_mode = model_state.get_video_mode(session_id)
             session_manager = get_chat_session_manager(session_id)
-            logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
+            logger.info(f"[{model.upper()}] query={query}, video_mode={video_mode}, requester={session_id}")
             session_manager.session_query(query, session_id)
 
             quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
@@ -39,7 +40,9 @@ class DoubaoVideoBot(Bot):
             file_cache = memory.USER_IMAGE_CACHE.get(session_id)
             quoted_video_cache = memory.USER_QUOTED_VIDEO_CACHE.get(session_id)
             video_cache = memory.USER_VIDEO_CACHE.get(session_id)
-            has_video_reference_source = bool(quoted_video_cache or video_cache)
+            has_video_reference_source = self._video_mode_supports_reference_media(video_mode) and bool(
+                quoted_video_cache or video_cache
+            )
             duration_seconds = self._normalize_duration_for_model(model, video_state.get_video_duration(session_id))
             configured_resolution = self._normalize_resolution_for_model(
                 model,
@@ -69,23 +72,7 @@ class DoubaoVideoBot(Bot):
                 logger.info(f"[{model.upper()}] 从回复引用图取参考图, count={len(quoted_cache['files'])}")
                 memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
             else:
-                session_images = get_image_urls_from_session(session_id, session_manager)
-                if session_images:
-                    if not has_video_reference_source:
-                        ratio = prompt_ratio or size_calculator_from_data_urls(session_images)
-                    request_resolution = self._normalize_resolution_for_model(model, configured_resolution, has_reference=True)
-                    reference_image_count = len(session_images)
-                    content.extend([
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": image_url
-                            }
-                        }
-                        for image_url in session_images
-                    ])
-                    logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
-                elif file_cache:
+                if file_cache:
                     if not has_video_reference_source:
                         ratio = prompt_ratio or size_calculator(file_cache["files"])
                     request_resolution = self._normalize_resolution_for_model(
@@ -98,23 +85,46 @@ class DoubaoVideoBot(Bot):
                     content.extend(image_contents)
                     logger.info(f"[{model.upper()}] 从内存参考图取参考图, count={len(file_cache['files'])}")
                     memory.USER_IMAGE_CACHE.pop(session_id)
+                else:
+                    session_images = get_image_urls_from_session(session_id, session_manager)
+                    if session_images:
+                        if not has_video_reference_source:
+                            ratio = prompt_ratio or size_calculator_from_data_urls(session_images)
+                        request_resolution = self._normalize_resolution_for_model(model, configured_resolution, has_reference=True)
+                        reference_image_count = len(session_images)
+                        content.extend([
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": image_url
+                                }
+                            }
+                            for image_url in session_images
+                        ])
+                        logger.info(f"[{model.upper()}] 从 session 历史取参考图, count={len(session_images)}")
 
-            if quoted_video_cache:
-                selected_video_cache = quoted_video_cache
-                reference_videos = self._build_reference_videos(quoted_video_cache, model)
-                if reference_videos:
-                    reference_video_count = len(reference_videos)
-                    content.extend(reference_videos)
-                    logger.info(f"[{model.upper()}] 从回复引用视频取参考视频, count={len(reference_videos)}")
-                memory.USER_QUOTED_VIDEO_CACHE.pop(session_id)
-            elif video_cache:
-                selected_video_cache = video_cache
-                reference_videos = self._build_reference_videos(video_cache, model)
-                if reference_videos:
-                    reference_video_count = len(reference_videos)
-                    content.extend(reference_videos)
-                    logger.info(f"[{model.upper()}] 从内存参考视频取参考视频, count={len(reference_videos)}")
-                memory.USER_VIDEO_CACHE.pop(session_id)
+            if self._video_mode_supports_reference_media(video_mode):
+                if quoted_video_cache:
+                    selected_video_cache = quoted_video_cache
+                    reference_videos = self._build_reference_videos(quoted_video_cache, model)
+                    if reference_videos:
+                        reference_video_count = len(reference_videos)
+                        content.extend(reference_videos)
+                        logger.info(f"[{model.upper()}] 从回复引用视频取参考视频, count={len(reference_videos)}")
+                    memory.USER_QUOTED_VIDEO_CACHE.pop(session_id)
+                elif video_cache:
+                    selected_video_cache = video_cache
+                    reference_videos = self._build_reference_videos(video_cache, model)
+                    if reference_videos:
+                        reference_video_count = len(reference_videos)
+                        content.extend(reference_videos)
+                        logger.info(f"[{model.upper()}] 从内存参考视频取参考视频, count={len(reference_videos)}")
+                    memory.USER_VIDEO_CACHE.pop(session_id)
+            else:
+                if quoted_video_cache or video_cache:
+                    logger.info(f"[{model.upper()}] 当前为首尾帧模式，已跳过参考视频素材")
+                memory.USER_QUOTED_VIDEO_CACHE.pop(session_id, None)
+                memory.USER_VIDEO_CACHE.pop(session_id, None)
 
             if reference_video_count and selected_video_cache:
                 video_ratio = self._infer_aspect_ratio_from_video_cache(selected_video_cache, model)
@@ -127,18 +137,19 @@ class DoubaoVideoBot(Bot):
                     logger.info(f"[{model.upper()}] 从参考视频推断分辨率: {video_resolution}")
 
             if reference_image_count:
-                self._mark_images_as_reference(content)
-                logger.info(f"[{model.upper()}] 已将参考图片内容标记为 reference_image")
+                image_role_summary = self._apply_image_roles(content, video_mode, model)
+                logger.info(f"[{model.upper()}] 图片角色识别结果: {image_role_summary}")
 
             final_resolution = self._normalize_resolution_for_model(model, request_resolution, has_reference=bool(content[1:]))
             final_ratio = self._normalize_ratio_for_model(model, ratio)
+            generate_audio = self._should_enable_audio(model)
             logger.info(
                 f"[{model.upper()}] 参考素材统计: reference_images={reference_image_count}, "
-                f"reference_videos={reference_video_count}"
+                f"reference_videos={reference_video_count}, video_mode={video_mode}"
             )
             logger.info(
                 f"[{model.upper()}] 请求参数: resolution={final_resolution}, "
-                f"ratio={final_ratio}, duration={duration_seconds}"
+                f"ratio={final_ratio}, duration={duration_seconds}, generate_audio={generate_audio}"
             )
 
             response = self.client.content_generation.tasks.create(
@@ -185,6 +196,7 @@ class DoubaoVideoBot(Bot):
             time.sleep(30)
 
     def _build_task_params(self, *, model, content, resolution, ratio, duration_seconds):
+        generate_audio = self._should_enable_audio(model)
         params = {
             "model": model,
             "content": content,
@@ -195,10 +207,19 @@ class DoubaoVideoBot(Bot):
             "watermark": True,
         }
 
-        if model == const.DOUBAO_SEEDANCE_15_PRO:
-            params["generate_audio"] = conf().get("video_sound", "off") == "on"
+        if generate_audio is not None:
+            params["generate_audio"] = generate_audio
 
         return params
+
+    def _should_enable_audio(self, model):
+        if model not in {
+            const.DOUBAO_SEEDANCE_15_PRO,
+            const.DOUBAO_SEEDANCE_20,
+            const.DOUBAO_SEEDANCE_20_FAST,
+        }:
+            return None
+        return conf().get("video_sound", "off") == "on"
 
     def _build_reference_videos(self, video_cache, model):
         reference_videos = []
@@ -217,10 +238,41 @@ class DoubaoVideoBot(Bot):
             })
         return reference_videos[:3]
 
-    def _mark_images_as_reference(self, content):
-        for item in content:
-            if item.get("type") == "image_url":
-                item["role"] = "reference_image"
+    def _apply_image_roles(self, content, video_mode, model):
+        image_items = [item for item in content if item.get("type") == "image_url"]
+        if not image_items:
+            return "no_image"
+
+        normalized_mode = self._normalize_video_mode(video_mode)
+        if normalized_mode == "first_last":
+            image_items[0]["role"] = "first_frame"
+            if len(image_items) >= 2:
+                image_items[1]["role"] = "last_frame"
+            for extra_image in image_items[2:]:
+                extra_image.pop("role", None)
+            if len(image_items) > 2:
+                logger.warning(
+                    f"[{model.upper()}] 首尾帧模式仅使用前两张图片，其余 {len(image_items) - 2} 张图片将忽略 role"
+                )
+            return self._summarize_image_roles(image_items)
+
+        for item in image_items:
+            item["role"] = "reference_image"
+        return self._summarize_image_roles(image_items)
+
+    def _summarize_image_roles(self, image_items):
+        return ",".join(item.get("role", "none") for item in image_items)
+
+    def _normalize_video_mode(self, video_mode):
+        normalized = str(video_mode or "").strip().lower()
+        if normalized == "firstlast":
+            return "first_last"
+        if normalized == "reference":
+            return "reference"
+        return "reference"
+
+    def _video_mode_supports_reference_media(self, video_mode):
+        return self._normalize_video_mode(video_mode) == "reference"
 
     def _infer_aspect_ratio_from_video_cache(self, video_cache, model):
         ratio = infer_aspect_ratio_from_video_cache(
