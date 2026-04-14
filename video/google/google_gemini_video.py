@@ -47,6 +47,7 @@ class GoogleGeminiVideoBot(Bot):
                 resolution=video_state.get_video_resolution(session_id),
                 duration=video_state.get_video_duration(session_id),
                 has_reference_images=request_meta["reference_image_count"] > 0 and ref_images is not None,
+                has_last_frame=last_image is not None,
             )
             resolution = video_settings["resolution"]
             duration_seconds = video_settings["duration_seconds"]

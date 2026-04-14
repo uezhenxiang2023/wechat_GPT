@@ -204,11 +204,13 @@ def generate_video(
         resolution or video_state.get_video_resolution(session_id)
     )
     has_reference_images = bool(ref_images_obj)
+    has_last_frame = bool(last_image_genai)
     video_duration = _normalize_gemini_video_duration(
         duration_seconds if duration_seconds is not None else video_state.get_video_duration(session_id),
         video_model,
         video_resolution,
-        has_reference_images=has_reference_images
+        has_reference_images=has_reference_images,
+        has_last_frame=has_last_frame,
     )
     gen_config = types.GenerateVideosConfig(
         number_of_videos=1,
@@ -356,12 +358,14 @@ def _normalize_gemini_video_duration(
     video_model: str,
     resolution: str,
     *,
-    has_reference_images: bool = False
+    has_reference_images: bool = False,
+    has_last_frame: bool = False,
 ) -> int:
     if _must_use_eight_second_duration(
         video_model,
         resolution,
         has_reference_images=has_reference_images,
+        has_last_frame=has_last_frame,
     ):
         return 8
 
@@ -384,6 +388,7 @@ def get_gemini_video_settings(
     resolution=None,
     duration=None,
     has_reference_images: bool = False,
+    has_last_frame: bool = False,
 ) -> dict:
     normalized_resolution = _normalize_gemini_video_resolution(video_model, resolution)
     normalized_duration = _normalize_gemini_video_duration(
@@ -391,6 +396,7 @@ def get_gemini_video_settings(
         video_model,
         normalized_resolution,
         has_reference_images=has_reference_images,
+        has_last_frame=has_last_frame,
     )
     return {
         "resolution": normalized_resolution,
@@ -416,9 +422,12 @@ def _must_use_eight_second_duration(
     video_model: str,
     resolution: str,
     *,
-    has_reference_images: bool = False
+    has_reference_images: bool = False,
+    has_last_frame: bool = False,
 ) -> bool:
     if has_reference_images:
+        return True
+    if has_last_frame:
         return True
     if video_model in {const.VEO_3, const.VEO_3_FAST, const.VEO_31, const.VEO_31_FAST, const.VEO_31_LITE} and resolution == "1080p":
         return True
