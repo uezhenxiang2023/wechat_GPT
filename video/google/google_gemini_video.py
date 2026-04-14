@@ -31,11 +31,12 @@ class GoogleGeminiVideoBot(Bot):
         try:
             session_id = context["session_id"]
             model = model_state.get_video_state(session_id)
+            video_mode = model_state.get_video_mode(session_id)
             session_manager = get_chat_session_manager(session_id) or _gemini_sessions
-            logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
+            logger.info(f"[{model.upper()}] query={query}, video_mode={video_mode}, requester={session_id}")
             session_manager.session_query(query, session_id)
 
-            image, last_image, ref_images, aspect_ratio, reference_image_count = self._get_video_inputs(
+            image, last_image, ref_images, aspect_ratio, request_meta = self._get_video_inputs(
                 query,
                 session_id,
                 model,
@@ -45,14 +46,17 @@ class GoogleGeminiVideoBot(Bot):
                 model,
                 resolution=video_state.get_video_resolution(session_id),
                 duration=video_state.get_video_duration(session_id),
-                has_reference_images=reference_image_count > 0 and ref_images is not None,
+                has_reference_images=request_meta["reference_image_count"] > 0 and ref_images is not None,
             )
             resolution = video_settings["resolution"]
             duration_seconds = video_settings["duration_seconds"]
-            logger.info(f"[{model.upper()}] 参考素材统计: reference_images={reference_image_count}")
+            logger.info(
+                f"[{model.upper()}] 参考素材统计: reference_images={request_meta['reference_image_count']}, "
+                f"video_mode={request_meta['video_mode']}, generation_mode={request_meta['generation_mode']}"
+            )
             logger.info(
                 f"[{model.upper()}] 请求参数: resolution={resolution}, "
-                f"ratio={aspect_ratio}, duration={duration_seconds}"
+                f"ratio={aspect_ratio}, duration={duration_seconds}, sound={request_meta['sound_state']}"
             )
             logger.info(f"[{model.upper()}] polling task status via SDK")
             response = generate_video(
@@ -89,12 +93,19 @@ class GoogleGeminiVideoBot(Bot):
             return Reply(ReplyType.ERROR, "Gemini 视频生成失败，请稍后重试。")
 
     def _get_video_inputs(self, query, session_id, model, session_manager):
+        video_mode = model_state.get_video_mode(session_id)
         prompt_aspect_ratio = self._parse_aspect_ratio_from_prompt(query)
         if prompt_aspect_ratio:
             logger.info(f"[GoogleGeminiVideo] 从 prompt 中解析到比例: {prompt_aspect_ratio}")
         file_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
         images = []
         aspect_ratio = prompt_aspect_ratio
+        request_meta = {
+            "reference_image_count": 0,
+            "video_mode": video_mode,
+            "generation_mode": "text_to_video",
+            "sound_state": self._get_sound_state(),
+        }
         if file_cache:
             images = list(file_cache["files"])
             memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
@@ -103,47 +114,88 @@ class GoogleGeminiVideoBot(Bot):
             )
             logger.info(f"[GoogleGeminiVideo] 从回复引用图取参考图, count={len(images)}")
         else:
-            session_images = get_image_urls_from_session(session_id, session_manager)
-            if session_images:
-                images = [data_url_to_pil_image(image_url) for image_url in session_images]
+            file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+            if file_cache:
+                images = list(file_cache["files"])
+                memory.USER_IMAGE_CACHE.pop(session_id)
                 aspect_ratio = prompt_aspect_ratio or self._normalize_video_aspect_ratio(
-                    infer_gemini_aspect_ratio_from_data_urls(session_images)
+                    infer_gemini_aspect_ratio_from_images(images)
                 )
-                logger.info(f"[GoogleGeminiVideo] 从 session 历史取参考图, count={len(images)}")
+                logger.info(f"[GoogleGeminiVideo] 从内存参考图取参考图, count={len(images)}")
             else:
-                file_cache = memory.USER_IMAGE_CACHE.get(session_id)
-                if file_cache:
-                    images = list(file_cache["files"])
-                    memory.USER_IMAGE_CACHE.pop(session_id)
+                session_images = get_image_urls_from_session(session_id, session_manager)
+                if session_images:
+                    images = [data_url_to_pil_image(image_url) for image_url in session_images]
                     aspect_ratio = prompt_aspect_ratio or self._normalize_video_aspect_ratio(
-                        infer_gemini_aspect_ratio_from_images(images)
+                        infer_gemini_aspect_ratio_from_data_urls(session_images)
                     )
-                    logger.info(f"[GoogleGeminiVideo] 从内存参考图取参考图, count={len(images)}")
+                    logger.info(f"[GoogleGeminiVideo] 从 session 历史取参考图, count={len(images)}")
 
         if images:
             normalized_ratio = aspect_ratio or self._normalize_video_aspect_ratio(None)
-            if self._supports_reference_images(model):
-                reference_images = images[:3]
-                if len(images) > 3:
-                    logger.warning(
-                        f"[GoogleGeminiVideo] reference images exceed limit, "
-                        f"truncated from {len(images)} to {len(reference_images)}"
-                    )
-                logger.info(
-                    f"[GoogleGeminiVideo] 使用参考图模式, count={len(reference_images)}, model={model}"
-                )
-                return None, None, reference_images, normalized_ratio, len(reference_images)
-            if len(images) == 1:
-                logger.info(f"[GoogleGeminiVideo] 当前模型不支持 reference_images，降级为首帧模式")
-                return images[0], None, None, normalized_ratio, 1
-            if len(images) == 2:
-                logger.info(f"[GoogleGeminiVideo] 当前模型不支持 reference_images，降级为首尾帧模式")
-                return images[0], images[1], None, normalized_ratio, 2
-            raise GeminiVideoGenerationError(
-                "Gemini 当前只有 Veo 3.1 和 Veo 3.1 Fast 支持多参考图生成视频。"
-                "请切换到对应模型，或将参考图数量减少到 2 张及以内后再试。"
+            return self._build_video_inputs_from_images(
+                images=images,
+                normalized_ratio=normalized_ratio,
+                model=model,
+                video_mode=video_mode,
+                request_meta=request_meta,
             )
-        return None, None, None, aspect_ratio or self._normalize_video_aspect_ratio(None), 0
+        return None, None, None, aspect_ratio or self._normalize_video_aspect_ratio(None), request_meta
+
+    def _build_video_inputs_from_images(self, *, images, normalized_ratio, model, video_mode, request_meta):
+        normalized_mode = self._normalize_video_mode(video_mode)
+        if normalized_mode == "first_last":
+            request_meta["generation_mode"] = "first_last"
+            request_meta["reference_image_count"] = min(len(images), 2)
+            if len(images) > 2:
+                logger.warning(
+                    f"[GoogleGeminiVideo] 首尾帧模式仅使用前两张图片，其余 {len(images) - 2} 张图片将被过滤"
+                )
+            logger.info(
+                f"[GoogleGeminiVideo] 图片角色识别结果: "
+                f"{'first_frame,end_frame' if len(images) >= 2 else 'first_frame'}"
+            )
+            first_image = images[0]
+            last_image = images[1] if len(images) >= 2 else None
+            return first_image, last_image, None, normalized_ratio, request_meta
+
+        if self._supports_reference_images(model):
+            reference_images = images[:3]
+            request_meta["generation_mode"] = "reference_to_video"
+            request_meta["reference_image_count"] = len(reference_images)
+            if len(images) > 3:
+                logger.warning(
+                    f"[GoogleGeminiVideo] reference images exceed limit, "
+                    f"truncated from {len(images)} to {len(reference_images)}"
+                )
+            logger.info(
+                f"[GoogleGeminiVideo] 图片角色识别结果: {','.join(['reference'] * len(reference_images))}"
+            )
+            logger.info(
+                f"[GoogleGeminiVideo] 使用参考图模式, count={len(reference_images)}, model={model}"
+            )
+            return None, None, reference_images, normalized_ratio, request_meta
+
+        if len(images) == 1:
+            request_meta["generation_mode"] = "image_to_video"
+            request_meta["reference_image_count"] = 1
+            logger.info(f"[GoogleGeminiVideo] 当前模型不支持 reference_images，降级为首帧模式")
+            logger.info(f"[GoogleGeminiVideo] 图片角色识别结果: first_frame")
+            return images[0], None, None, normalized_ratio, request_meta
+
+        if len(images) >= 2:
+            request_meta["generation_mode"] = "first_last_fallback"
+            request_meta["reference_image_count"] = 2
+            if len(images) > 2:
+                logger.warning(
+                    f"[GoogleGeminiVideo] 当前模型不支持 reference_images，已降级为首尾帧模式，额外 {len(images) - 2} 张图片将被过滤"
+                )
+            else:
+                logger.info(f"[GoogleGeminiVideo] 当前模型不支持 reference_images，降级为首尾帧模式")
+            logger.info(f"[GoogleGeminiVideo] 图片角色识别结果: first_frame,end_frame")
+            return images[0], images[1], None, normalized_ratio, request_meta
+
+        return None, None, None, normalized_ratio, request_meta
 
     def _parse_aspect_ratio_from_prompt(self, prompt):
         ratio_map = {
@@ -181,3 +233,14 @@ class GoogleGeminiVideoBot(Bot):
 
     def _supports_reference_images(self, model):
         return model in {const.VEO_31, const.VEO_31_FAST}
+
+    def _normalize_video_mode(self, video_mode):
+        normalized = str(video_mode or "").strip().lower()
+        if normalized == "firstlast":
+            return "first_last"
+        if normalized == "reference":
+            return "reference"
+        return "reference"
+
+    def _get_sound_state(self):
+        return str(conf().get("video_sound", "off")).strip().lower()

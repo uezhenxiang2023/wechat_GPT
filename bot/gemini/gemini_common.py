@@ -206,6 +206,7 @@ def generate_video(
     has_reference_images = bool(ref_images_obj)
     video_duration = _normalize_gemini_video_duration(
         duration_seconds if duration_seconds is not None else video_state.get_video_duration(session_id),
+        video_model,
         video_resolution,
         has_reference_images=has_reference_images
     )
@@ -216,11 +217,15 @@ def generate_video(
         aspect_ratio=_normalize_gemini_video_aspect_ratio(aspect_ratio),
         person_generation="allow_all"
     )
-    gen_source = types.GenerateVideosSource(prompt=prompt)
+    request_kwargs = {
+        "model": video_model,
+        "prompt": prompt,
+        "config": gen_config,
+    }
 
     if image_genai:
         logger.info(f"[{video_model}] Detected Start Image. Using image-to-video mode.")
-        gen_source.image = image_genai
+        request_kwargs["image"] = image_genai
         gen_config.person_generation = "allow_adult"
         if last_image_genai:
             logger.info(f"[{video_model}] Detected Last Image. Using transition mode.")
@@ -235,11 +240,7 @@ def generate_video(
     else:
         logger.info(f"[{video_model}] Text-to-video mode.")
 
-    operation = paid_client.models.generate_videos(
-        model=video_model,
-        source=gen_source,
-        config=gen_config
-    )
+    operation = paid_client.models.generate_videos(**request_kwargs)
 
     poll_interval_seconds = 10
     logger.info(f"[{video_model}] Waiting for video generation to complete...")
@@ -350,18 +351,31 @@ def _get_allowed_gemini_video_resolutions(video_model: str) -> set[str]:
     return {"720p", "1080p"}
 
 
-def _normalize_gemini_video_duration(duration, resolution: str, *, has_reference_images: bool = False) -> int:
-    if has_reference_images or resolution in {"1080p", "4k"}:
+def _normalize_gemini_video_duration(
+    duration,
+    video_model: str,
+    resolution: str,
+    *,
+    has_reference_images: bool = False
+) -> int:
+    if _must_use_eight_second_duration(
+        video_model,
+        resolution,
+        has_reference_images=has_reference_images,
+    ):
         return 8
+
+    allowed_durations = _get_allowed_gemini_video_durations(video_model)
+    fallback = min(allowed_durations)
     try:
-        value = int(duration or 5)
+        value = int(duration or fallback)
     except (TypeError, ValueError):
-        logger.warning(f"[GeminiVideo] invalid duration={duration}, fallback to 5")
-        return 5
-    if 5 <= value <= 8:
+        logger.warning(f"[GeminiVideo] invalid duration={duration}, fallback to {fallback}")
+        return fallback
+    if value in allowed_durations:
         return value
-    logger.warning(f"[GeminiVideo] invalid duration={duration}, fallback to 5")
-    return 5
+    logger.warning(f"[GeminiVideo] invalid duration={duration}, fallback to {fallback}")
+    return fallback
 
 
 def get_gemini_video_settings(
@@ -374,6 +388,7 @@ def get_gemini_video_settings(
     normalized_resolution = _normalize_gemini_video_resolution(video_model, resolution)
     normalized_duration = _normalize_gemini_video_duration(
         duration,
+        video_model,
         normalized_resolution,
         has_reference_images=has_reference_images,
     )
@@ -389,6 +404,27 @@ def _infer_gemini_aspect_ratio_from_sizes(sizes):
     best_size = sorted(sizes, key=lambda size: size[0] * size[1], reverse=True)[0]
     ratio = round(best_size[0] / best_size[1], 4)
     return min(_GEMINI_IMAGE_RATIO_MAP, key=lambda key: abs(_GEMINI_IMAGE_RATIO_MAP[key] - ratio))
+
+
+def _get_allowed_gemini_video_durations(video_model: str) -> set[int]:
+    if video_model == const.VEO_2:
+        return {5, 6, 8}
+    return {4, 6, 8}
+
+
+def _must_use_eight_second_duration(
+    video_model: str,
+    resolution: str,
+    *,
+    has_reference_images: bool = False
+) -> bool:
+    if has_reference_images:
+        return True
+    if video_model in {const.VEO_3, const.VEO_3_FAST, const.VEO_31, const.VEO_31_FAST, const.VEO_31_LITE} and resolution == "1080p":
+        return True
+    if video_model in {const.VEO_3, const.VEO_3_FAST, const.VEO_31, const.VEO_31_FAST} and resolution == "4k":
+        return True
+    return False
 
 
 def _decode_image_size(image_url):
