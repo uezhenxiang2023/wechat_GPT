@@ -20,13 +20,13 @@ class UserModelState:
         return self._model_states[user_id]
     
     def toggle_basic_model(self, user_id, model):
-        """切换用户的基础模型状态"""
+        """切换用户的基础模型"""
         state = self.__get_model_state__(user_id)
         state['model'] = model
         return state['model']
     
     def toggle_image_model(self, user_id, image_model):
-        """切换用户的图像模型状态"""
+        """切换用户的图像模型"""
         state = self.__get_model_state__(user_id)
         state['text_to_image'] = image_model
         return state['text_to_image']
@@ -38,13 +38,13 @@ class UserModelState:
         return state['image_size']
     
     def toggle_voice_model(self, user_id, voice_model):
-        """切换用户的语音模型状态"""
+        """切换用户的语音模型"""
         state = self.__get_model_state__(user_id)
         state['text_to_voice'] = voice_model
         return state['text_to_voice']
     
     def toggle_video_model(self, user_id, video_model):
-        """切换用户的视频模型状态"""
+        """切换用户的视频模型"""
         state = self.__get_model_state__(user_id)
         state['text_to_video'] = video_model
         return state['text_to_video']

@@ -14,6 +14,7 @@ from channel.chat_channel import ChatChannel
 from channel.chat_message import ChatMessage
 from channel.telegram.telegram_message import TelegramMessage
 from common import const
+from common.model_status import model_state
 from common.tool_button import tool_state
 from common.log import logger
 from common.singleton import singleton
@@ -21,11 +22,22 @@ from config import conf
 from channel.telegram.telegram_text_util import escape
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackContext, CallbackQueryHandler, Updater
+from telegram.error import BadRequest
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, CallbackContext, CallbackQueryHandler
 from telegram.request import HTTPXRequest
 
 @singleton
 class TelegramChannel(ChatChannel):
+    _MEDIA_MODEL_DICT = {
+        'Seedream': const.DOUBAO_SEEDREAM_5,
+        'KlingImage': const.KLING_V3_OMNI,
+        'NanoBanana': const.GEMINI_31_FLASH_IMAGE_PREVIEW,
+        'GrokImage': const.GROK_IMAGINE_IMAGE_PRO,
+        'Seedance': const.DOUBAO_SEEDANCE_20,
+        'KlingVideo': const.KLING_V3_OMNI,
+        'Veo': const.VEO_31,
+        'GrokVideo': const.GROK_IMAGINE_VIDEO
+    }
     def __init__(self, session_id=None):
         super().__init__()
         self.last_update_time = time.time()
@@ -33,17 +45,16 @@ class TelegramChannel(ChatChannel):
         self.bot_token = conf().get("telegram_bot_token")
         self.proxy_url =conf().get("telegram_proxy_url")
 
-
-        # Pre-assign menu text
+        # Pre-assign placeholder menu text
         self.FIRST_MENU = "<b>Menu 1</b>\n\nA beautiful menu with a shiny inline button."
         self.SECOND_MENU = "<b>Menu 2</b>\n\nA better menu with even more shiny inline buttons."
 
-        # Pre-assign button text
+        # Pre-assign placeholder button text
         self.NEXT_BUTTON = "Next"
         self.BACK_BUTTON = "Back"
         self.TUTORIAL_BUTTON = "Tutorial"
 
-        # Build keyboards
+        # Build placeholder keyboards
         self.FIRST_MENU_MARKUP = InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton(self.NEXT_BUTTON, callback_data=self.NEXT_BUTTON)]
@@ -56,9 +67,83 @@ class TelegramChannel(ChatChannel):
             ]
         )
 
+        self.SKILL_MENU_TITLE = "<b>Producer Skill</b>\n\nSkills of Production Agent."
+        self.SKILL_CALLBACK_PREFIX = "skill:"
+        self.SKILL_OPTIONS = ["print", "breakdown", "search"]
+        self.VIDEO_MODE_MENU_TITLE = "<b>Video Mode</b>\n\nImage role for image to video generation."
+        self.VIDEO_MODE_CALLBACK_PREFIX = "video_mode:"
+        self.VIDEO_MODE_OPTIONS = ["FirstLast", "Reference"]
+        self.IMAGE_MODEL_MENU_TITLE = "<b>Image Model</b>\n\nPick a image model."
+        self.IMAGE_MODEL_CALLBACK_PREFIX = "image_model:"
+        self.IMAGE_MODEL_OPTIONS = ["Seedream", "KlingImage", "NanoBanana", "GrokImage"]
+        self.VIDEO_MODEL_MENU_TITLE = "<b>Video Model</b>\n\nPick a video model."
+        self.VIDEO_MODEL_CALLBACK_PREFIX = "video_model:"
+        self.VIDEO_MODEL_OPTIONS = ["Seedance", "KlingVideo", "Veo", "GrokVideo"]
+
+        self.SKILL_MAP = {
+            'print': self.print,
+            'breakdown': self.breakdown,
+            'search': self.search
+        }
+
         # 新增：用于存储主事件循环的引用
         #self.main_loop = None
 
+    def _get_current_image_model_id(self, user_id):
+        return model_state.get_image_model(user_id).upper()
+
+    def _get_current_video_model_id(self, user_id):
+        return model_state.get_video_state(user_id).upper()
+
+    def _build_model_switch_text(self, subject_name, model_name):
+        return f"[INFO]\n{subject_name}已切换为：{model_name.upper()}"
+    
+    def _build_skill_markup(self):
+        return InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton(option, callback_data=f"{self.SKILL_CALLBACK_PREFIX}{option}")]
+                for option in self.SKILL_OPTIONS
+            ]
+        )
+
+    def _build_video_mode_markup(self):
+        return InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton(option, callback_data=f"{self.VIDEO_MODE_CALLBACK_PREFIX}{option}")]
+                for option in self.VIDEO_MODE_OPTIONS
+            ]
+        )
+    
+    def _build_video_model_markup(self):
+        return InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton(option, callback_data=f"{self.VIDEO_MODEL_CALLBACK_PREFIX}{option}")]
+                for option in self.VIDEO_MODEL_OPTIONS
+            ]
+        )
+    
+    def _build_image_model_markup(self):
+        return InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton(option, callback_data=f"{self.IMAGE_MODEL_CALLBACK_PREFIX}{option}")]
+                for option in self.IMAGE_MODEL_OPTIONS
+            ]
+        )
+
+    def _build_video_mode_menu_text(self, current_mode):
+        return f"{self.VIDEO_MODE_MENU_TITLE}\n\nCurrent: <b>{current_mode}</b>"
+    
+    def _build_video_model_menu_text(self, current_model):
+        return f"{self.VIDEO_MODEL_MENU_TITLE}\n\nCurrent: <b>{current_model}</b>"
+    
+    def _build_image_model_menu_text(self, current_model):
+        return f"{self.IMAGE_MODEL_MENU_TITLE}\n\nCurrent: <b>{current_model}</b>"
+    
+    def _build_skill_menu_text(self, current_mode):
+        return f"{self.SKILL_MENU_TITLE}\n\nCurrent:\n<b>{current_mode}</b>"
+
+    async def _send_simple_text(self, chat_id, text):
+        await self.application.bot.send_message(chat_id=chat_id, text=text)
 
     async def echo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """
@@ -77,7 +162,10 @@ class TelegramChannel(ChatChannel):
             [TELEGRAMBOT-breakdown] is {tool_state.get_breakdown_state(chat_id)},\
             [TELEGRAMBOT-search] is {tool_state.get_search_state(chat_id)},\
             [TELEGRAMBOT-image] is {tool_state.get_image_state(chat_id)},\
-            [TELEGRAMBOT-video] is {tool_state.get_breakdown_state(chat_id)},\
+            [TELEGRAMBOT-video] is {tool_state.get_edit_state(chat_id)},\
+            [TELEGRAMBOT-image_model] is {model_state.get_image_model(chat_id)},\
+            [TELEGRAMBOT-video_model] is {model_state.get_video_state(chat_id)},\
+            [TELEGRAMBOT-video_mode] is {model_state.get_video_mode(chat_id)},\
             requester={chat_id}')
         
         # 使用 run_in_executor 将同步的业务逻辑扔到子线程
@@ -95,7 +183,7 @@ class TelegramChannel(ChatChannel):
         """
         chat_id = update.effective_chat.id
         if tool_state.get_print_state(chat_id):
-            text = "[INFO]\n剧本排版功能已关闭，可以在消息框输入#print或/print命令，也可以点击输入框左侧菜单选择‘print’随时开启。"
+            text = "[INFO]\n剧本排版功能已关闭，可以在消息框输入#print开启，也可以在‘skills’菜单中点击print开启。"
         else:
             text = "[INFO]\n剧本排版功能已开启,请先上传pdf格式的剧本，再发我编剧姓名。\n我会按照好莱坞编剧工会的标准格式进行排版，让您的剧本看起来更专业、读起来更舒服，大大提升获得‘绿灯’的几率。"
 
@@ -113,7 +201,7 @@ class TelegramChannel(ChatChannel):
         """
         chat_id = update.effective_chat.id
         if tool_state.get_breakdown_state(chat_id):
-            text = "[INFO]\n拆解顺分场表功能已关闭，可以在消息框输入#breakdown或/breakdown命令，也可以点击输入框左侧菜单选择‘breakdown’,随时开启。"
+            text = "[INFO]\n拆解顺分场表功能已关闭，可以在消息框输入#breakdown开启，也可以在‘skills’菜单中点击breakdown开启。"
         else:
             text = "[INFO]\n拆解顺分场表功能已开启。"
 
@@ -131,7 +219,7 @@ class TelegramChannel(ChatChannel):
         """
         chat_id = update.effective_chat.id
         if tool_state.get_search_state(chat_id):
-            text = "[INFO]\n联网功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
+            text = "[INFO]\n联网功能已关闭，如果需要，可以在‘skills’菜单中点击search开启。"
         else:
             text = "[INFO]\n联网搜索功能已开启，需要我帮你查询点啥？"
 
@@ -142,53 +230,61 @@ class TelegramChannel(ChatChannel):
         )
         logger.info(f'[TELEGRAMBOT]{text} requester={chat_id}')
 
-
-    async def image(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """
-        This function handles /image command
-        """
+    async def skill(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
-        if tool_state.get_image_state(chat_id):
-            text = "[INFO]\n图片生成功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
-        else:
-            text = "[INFO]\n图片生成功能已开启，需要我帮你弄点啥图？"
-
-        tool_state.toggle_imaging(chat_id)
-
+        current_mode = (
+            f"print:{tool_state.get_print_state(chat_id)}\nbreakdown:{tool_state.get_breakdown_state(chat_id)}\nsearch:{tool_state.get_search_state(chat_id)}"
+        )
+        menu_text = self._build_skill_menu_text(current_mode)
         await context.bot.send_message(
             chat_id=chat_id,
-            text=text
+            text=menu_text,
+            parse_mode="HTML",
+            reply_markup=self._build_skill_markup(),
         )
-        logger.info(f'[TELEGRAMBOT_{conf().get('text_to_image')}]{text} requester={chat_id}')
+        logger.info(f"[TELEGRAMBOT] skill menu opened, current_mode={current_mode}, requester={chat_id}")
 
-    async def video(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """
-        This function handles /video command
-        """
+    async def video_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
-        if tool_state.get_edit_state(chat_id):
-            text = "[INFO]\n视频生成功能已关闭，如果需要，可以通过消息输入框左侧的命令菜单随时开启。"
-        else:
-            text = "[INFO]\n视频生成功能已开启，需要我帮你弄点啥视频？"
-
-        tool_state.toggle_editing(chat_id)
-
+        current_mode = model_state.get_video_mode(chat_id)
+        menu_text = self._build_video_mode_menu_text(current_mode)
         await context.bot.send_message(
             chat_id=chat_id,
-            text=text
+            text=menu_text,
+            parse_mode="HTML",
+            reply_markup=self._build_video_mode_markup(),
         )
-        logger.info(f'[TELEGRAMBOT_{conf().get('text_to_video')}]{text} requester={chat_id}')
+        logger.info(f"[TELEGRAMBOT] video mode menu opened, current_mode={current_mode}, requester={chat_id}")
 
+    async def video_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = update.effective_chat.id
+        current_video_model = model_state.get_video_state(chat_id)
+        menu_text = self._build_video_model_menu_text(current_video_model)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=menu_text,
+            parse_mode="HTML",
+            reply_markup=self._build_video_model_markup(),
+        )
+        logger.info(f"[TELEGRAMBOT] video model menu opened, current_mode={current_video_model}, requester={chat_id}")
+    
+    async def image_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = update.effective_chat.id
+        current_image_model = model_state.get_image_model(chat_id)
+        menu_text = self._build_image_model_menu_text(current_image_model)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=menu_text,
+            parse_mode="HTML",
+            reply_markup=self._build_image_model_markup(),
+        )
+        logger.info(f"[TELEGRAMBOT] image model menu opened, current_mode={current_image_model}, requester={chat_id}")
 
     async def menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """
-        This handler sends a menu with the inline buttons we pre-assigned above
-        """
-
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=self.FIRST_MENU,
-            parse_mode='HTML',
+            parse_mode="HTML",
             reply_markup=self.FIRST_MENU_MARKUP
         )
 
@@ -197,27 +293,132 @@ class TelegramChannel(ChatChannel):
         """
         This handler processes the inline buttons on the menu
         """
+        query = update.callback_query
+        data = query.data
+        chat_id = query.message.chat_id
 
-        data = update.callback_query.data
-        text = ''
-        markup = None
+        if data.startswith(self.VIDEO_MODE_CALLBACK_PREFIX):
+            target_mode = data[len(self.VIDEO_MODE_CALLBACK_PREFIX):]
+            if target_mode not in self.VIDEO_MODE_OPTIONS:
+                await query.answer("Unsupported mode", show_alert=True)
+                return
+
+            model_state.toggle_video_mode(chat_id, target_mode)
+            text = self._build_video_mode_menu_text(target_mode)
+            await query.answer(f"Video mode: {target_mode}")
+            try:
+                await query.edit_message_text(
+                    text=text,
+                    parse_mode="HTML",
+                    reply_markup=self._build_video_mode_markup(),
+                )
+            except BadRequest as e:
+                if "Message is not modified" in str(e):
+                    logger.info(
+                        f"[TELEGRAMBOT] video mode message unchanged, target_mode={target_mode}, requester={chat_id}"
+                    )
+                else:
+                    raise
+            logger.info(f"[TELEGRAMBOT] video mode switched to {target_mode}, requester={chat_id}")
+            return
+        
+        if data.startswith(self.VIDEO_MODEL_CALLBACK_PREFIX):
+            target_button = data[len(self.VIDEO_MODEL_CALLBACK_PREFIX):]
+            if target_button not in self.VIDEO_MODEL_OPTIONS:
+                await query.answer("Unsupported mode", show_alert=True)
+                return
+            target_model = self._MEDIA_MODEL_DICT[target_button]
+            model_state.toggle_video_model(chat_id, target_model)
+            text = self._build_video_model_menu_text(target_model)
+            await query.answer(f"Video model: {target_model}")
+            try:
+                await query.edit_message_text(
+                    text=text,
+                    parse_mode="HTML",
+                    reply_markup=self._build_video_model_markup(),
+                )
+            except BadRequest as e:
+                if "Message is not modified" in str(e):
+                    logger.info(
+                        f"[TELEGRAMBOT] video model message unchanged, target_model={model_state.get_video_state(chat_id)}, requester={chat_id}"
+                    )
+                else:
+                    raise
+            logger.info(f"[TELEGRAMBOT] video model switched to {target_model}, requester={chat_id}")
+            return
+        
+        if data.startswith(self.IMAGE_MODEL_CALLBACK_PREFIX):
+            target_button = data[len(self.IMAGE_MODEL_CALLBACK_PREFIX):]
+            if target_button not in self.IMAGE_MODEL_OPTIONS:
+                await query.answer("Unsupported mode", show_alert=True)
+                return
+            target_model = self._MEDIA_MODEL_DICT[target_button]
+            model_state.toggle_image_model(chat_id, target_model)
+            text = self._build_image_model_menu_text(target_model)
+            await query.answer(f"Image model: {target_model}")
+            try:
+                await query.edit_message_text(
+                    text=text,
+                    parse_mode="HTML",
+                    reply_markup=self._build_image_model_markup(),
+                )
+            except BadRequest as e:
+                if "Message is not modified" in str(e):
+                    logger.info(
+                        f"[TELEGRAMBOT] image model message unchanged, target_model={model_state.get_image_model(chat_id)}, requester={chat_id}"
+                    )
+                else:
+                    raise
+            logger.info(f"[TELEGRAMBOT] image model switched to {target_model}, requester={chat_id}")
+            return
+        
+        if data.startswith(self.SKILL_CALLBACK_PREFIX):
+            target_button = data[len(self.SKILL_CALLBACK_PREFIX):]
+            if target_button not in self.SKILL_OPTIONS:
+                await query.answer("Unsupported mode", show_alert=True)
+                return
+            await self.SKILL_MAP[target_button](update, context)
+            target_mode = (
+            f"print:{tool_state.get_print_state(chat_id)}\nbreakdown:{tool_state.get_breakdown_state(chat_id)}\nsearch:{tool_state.get_search_state(chat_id)}"
+        )
+            text = self._build_skill_menu_text(target_mode)
+            await query.answer(f"Skill mode: {target_mode}")
+            try:
+                await query.edit_message_text(
+                    text=text,
+                    parse_mode="HTML",
+                    reply_markup=self._build_skill_markup(),
+                )
+            except BadRequest as e:
+                if "Message is not modified" in str(e):
+                    logger.info(
+                        f"[TELEGRAMBOT] skill mode message unchanged, target_mode={target_mode}, requester={chat_id}"
+                    )
+                else:
+                    raise
+            logger.info(f"[TELEGRAMBOT] skill mode switched to {target_mode}, requester={chat_id}")
+            return
 
         if data == self.NEXT_BUTTON:
-            text = self.SECOND_MENU
-            markup = self.SECOND_MENU_MARKUP
-        elif data == self.BACK_BUTTON:
-            text = self.FIRST_MENU
-            markup = self.FIRST_MENU_MARKUP
+            await query.answer()
+            await query.edit_message_text(
+                text=self.SECOND_MENU,
+                parse_mode="HTML",
+                reply_markup=self.SECOND_MENU_MARKUP
+            )
+            return
+
+        if data == self.BACK_BUTTON:
+            await query.answer()
+            await query.edit_message_text(
+                text=self.FIRST_MENU,
+                parse_mode="HTML",
+                reply_markup=self.FIRST_MENU_MARKUP
+            )
+            return
 
         # Close the query to end the client-side loading animation
-        await update.callback_query.answer()
-
-        # Update message content with corresponding menu section
-        await update.callback_query.edit_message_text(
-            text,
-            parse_mode='HTML',
-            reply_markup=markup
-        )
+        await query.answer()
 
     # 定义心跳任务
     async def heartbeat(self, context: ContextTypes.DEFAULT_TYPE):
@@ -323,11 +524,10 @@ class TelegramChannel(ChatChannel):
             logger.info("[TELEGRAM] 心跳保活任务已启动")
 
         # Register commands
-        self.application.add_handler(CommandHandler("print", self.print))
-        self.application.add_handler(CommandHandler("breakdown", self.breakdown))
-        self.application.add_handler(CommandHandler("search", self.search))
-        self.application.add_handler(CommandHandler("image", self.image))
-        self.application.add_handler(CommandHandler("video", self.video))
+        self.application.add_handler(CommandHandler("video_mode", self.video_mode))
+        self.application.add_handler(CommandHandler("image_model", self.image_model))
+        self.application.add_handler(CommandHandler("video_model", self.video_model))
+        self.application.add_handler(CommandHandler("skills", self.skill))
         self.application.add_handler(CommandHandler("menu", self.menu))
 
         # Register handler for inline buttons
@@ -577,18 +777,18 @@ class TelegramChannel(ChatChannel):
                             if part.text:
                                 reply_text = part.text
                                 await self.application.bot.send_message(chat_id=receiver, text=reply_text)
-                                logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(conf().get('text_to_image'), reply_text, receiver))
+                                logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self._get_current_image_model_id(receiver), reply_text, receiver))
                             elif part.inline_data:
                                 image_bytes = part.inline_data.data
                                 image = BytesIO(image_bytes)
-                                logger.info(f"[TELEGRAMBOT_{conf().get('text_to_image')}] reply={image}")
+                                logger.info(f"[TELEGRAMBOT_{self._get_current_image_model_id(receiver)}] reply={image}")
                                 image.seek(0)
                                 await self.application.bot.send_photo(chat_id=receiver, photo=image)
-                                logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(conf().get('text_to_image'), image, receiver))
+                                logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self._get_current_image_model_id(receiver), image, receiver))
                 else:
                     response.seek(0)
                     await self.application.bot.send_photo(chat_id=receiver, photo=response)
-                    logger.info("[TELEGRAMBOT] sendImage binary, receiver={}".format(receiver))
+                    logger.info("[TELEGRAMBOT_{}] sendImage binary, receiver={}".format(self._get_current_image_model_id(receiver), receiver))
             elif reply.type == ReplyType.FILE:  # 新增文件回复类型
                 file_pathes = reply.content['function_response']['file_pathes']
                 reply_text = escape(reply.content['reply_text'])
@@ -599,21 +799,22 @@ class TelegramChannel(ChatChannel):
                 await self.application.bot.send_message(chat_id=receiver, text=reply_text)
                 logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply_text, receiver))
             elif reply.type == ReplyType.VIDEO:  # 新增视频回复类型
-                video_storage = reply.content
-                logger.debug(f"[TELEGRAMBOT] start download video, video_url={video_url}")
-                video_res = requests.get(video_url, stream=True)
-                video_storage = io.BytesIO()
-                size = 0
-                for block in video_res.iter_content(1024):
-                    size += len(block)
-                    video_storage.write(block)
-                logger.info(f"[TELEGRAMBOT] download video success, size={size}, video_url={video_url}")
+                video_model_id = self._get_current_video_model_id(receiver)
+                response = reply.content
+                video_storage = io.BytesIO(response.video_bytes)
                 video_storage.seek(0)
-                await self.application.bot.send_video(chat_id=receiver, video=video_storage)
-                logger.info("[TELEGRAMBOT] sendFile, receiver={}".format(receiver))
+                await self.application.bot.send_video(
+                    chat_id=receiver,
+                    video=video_storage,
+                    read_timeout=120,
+                    write_timeout=120,
+                    connect_timeout=60,
+                )
+                logger.info("[TELEGRAMBOT_{}] sendVideo binary, receiver={}".format(video_model_id, receiver))
             elif reply.type == ReplyType.VIDEO_URL:  # 新增视频URL回复类型
                 video_duration = reply.content[0]
-                video_url = reply.content[1]          
+                video_url = reply.content[1]
+                video_model_id = self._get_current_video_model_id(receiver)
                 await self.application.bot.send_document(
                     chat_id=receiver, 
                     document=video_url, 
@@ -621,7 +822,7 @@ class TelegramChannel(ChatChannel):
                     write_timeout=120,
                     connect_timeout=60
                 )
-                logger.info("[TELEGRAMBOT] sendVideo url={}, receiver={}".format(video_url, receiver))
+                logger.info("[TELEGRAMBOT_{}] sendVideo url={}, duration={}, receiver={}".format(video_model_id, video_url, video_duration, receiver))
             elif reply.type == ReplyType.STREAM:
                 generator = reply.content
                 draft_id = abs(hash(str(receiver))) % (10**9) + 1
