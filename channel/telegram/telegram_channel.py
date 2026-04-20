@@ -668,9 +668,10 @@ class TelegramChannel(ChatChannel):
                 await self.application.bot.send_message(chat_id=receiver, text=reply.content)
                 logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
             elif reply.type == ReplyType.ERROR:
+                error_text = reply.content if reply.content else const.ERROR_RESPONSE
                 logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}".format(reply, receiver))
-                await self.application.bot.send_message(chat_id=receiver, text=const.ERROR_RESPONSE)
-                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
+                await self.application.bot.send_message(chat_id=receiver, text=error_text)
+                logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(error_text, receiver))
             elif reply.type == ReplyType.INFO:
                 await self.application.bot.send_message(chat_id=receiver, text=reply.content)
                 logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply, receiver))
@@ -694,42 +695,40 @@ class TelegramChannel(ChatChannel):
                         logger.info("[TELEGRAMBOT] sendImage url={}, receiver={}".format(img_url, receiver))
                     return
                 if hasattr(response, 'candidates'):
-                    if not isinstance(response, str):
-                        #获取网址
-                        parts = response.candidates[0].content.parts
-                        grouding_metadata = response.candidates[0].grounding_metadata
-                        if parts is None:
-                            finish_reason = response.candidates[0].finish_reason
-                            logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
-                            await self.application.bot.send_message(chat_id=receiver, text=receiver)
-                            logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
-                        elif parts is not None:
-                            reply_text = "\n".join(part.text for part in parts)
-                            safe_reply_text = html.escape(reply_text)
-                        if grouding_metadata is not None:
-                            inline_url = self.get_search_sources(grouding_metadata)
-                        reply_content = safe_reply_text + "\n\n" + inline_url
-                        await self.application.bot.send_message(
-                            chat_id=receiver, 
-                            text=reply_content,
-                            parse_mode='HTML',
-                            disable_web_page_preview=True
-                        )
-                        logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(const.GEMINI_2_FLASH_IMAGE_GENERATION, reply_content, receiver))
-                    else:
-                        # 下载图片
-                        img_url = reply.content
-                        logger.debug(f"[TELEGRAMBOT] start download image, img_url={img_url}")
-                        pic_res = requests.get(img_url, stream=True)
-                        image_storage = io.BytesIO()
-                        size = 0
-                        for block in pic_res.iter_content(1024):
-                            size += len(block)
-                            image_storage.write(block)
-                        logger.info(f"[TELEGRAMBOT] download image success, size={size}, img_url={img_url}")
-                        image_storage.seek(0)
-                        await self.application.bot.send_photo( chat_id=receiver, photo=image_storage)
-                        logger.info("[TELEGRAMBOT] sendImage url={}, receiver={}".format(img_url, receiver))
+                    #获取网址
+                    parts = response.candidates[0].content.parts
+                    grouding_metadata = response.candidates[0].grounding_metadata
+                    if parts is None:
+                        finish_reason = response.candidates[0].finish_reason
+                        logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
+                        await self.application.bot.send_message(chat_id=receiver, text=receiver)
+                        logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
+                    elif parts is not None:
+                        reply_text = "\n".join(part.text for part in parts)
+                        safe_reply_text = html.escape(reply_text)
+                    if grouding_metadata is not None:
+                        inline_url = self.get_search_sources(grouding_metadata)
+                    reply_content = safe_reply_text + "\n\n" + inline_url
+                    await self.application.bot.send_message(
+                        chat_id=receiver, 
+                        text=reply_content,
+                        parse_mode='HTML',
+                        disable_web_page_preview=True
+                    )
+                    logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(const.GEMINI_2_FLASH_IMAGE_GENERATION, reply_content, receiver))
+                elif isinstance(response, str):
+                    img_url = response
+                    logger.debug(f"[TELEGRAMBOT] start download image, img_url={img_url}")
+                    pic_res = requests.get(img_url, stream=True)
+                    image_storage = io.BytesIO()
+                    size = 0
+                    for block in pic_res.iter_content(1024):
+                        size += len(block)
+                        image_storage.write(block)
+                    logger.info(f"[TELEGRAMBOT] download image success, size={size}, img_url={img_url}")
+                    image_storage.seek(0)
+                    await self.application.bot.send_photo(chat_id=receiver, photo=image_storage)
+                    logger.info("[TELEGRAMBOT] sendImage url={}, receiver={}".format(img_url, receiver))
                 elif hasattr(response, 'content'):
                     # ——— Claude web_search response ———
                     import html as html_module
