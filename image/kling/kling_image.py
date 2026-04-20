@@ -156,8 +156,7 @@ class KlingImageBot(Bot):
                 json=payload,
                 timeout=30
             )
-            resp.raise_for_status()
-            data = resp.json()
+            data = self._parse_response_json(resp, model, "submit task")
 
             # 检查业务错误码
             err = self._check_response_error(data)
@@ -201,6 +200,13 @@ class KlingImageBot(Bot):
         except Exception as e:
             logger.error(f"[{model.upper()}] fetch reply error: {e}")
             return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
+
+    def _parse_response_json(self, resp, model, action):
+        try:
+            return resp.json()
+        except ValueError:
+            resp.raise_for_status()
+            raise RuntimeError(f"{action} failed with non-JSON response, status_code={resp.status_code}")
 
     def _normalize_resolution(self, resolution: str) -> str:
         normalized = str(resolution).strip().lower()
@@ -318,8 +324,7 @@ class KlingImageBot(Bot):
             time.sleep(retry_delay)
             try:
                 resp = requests.get(query_url, headers=self._headers(), timeout=15)
-                resp.raise_for_status()
-                result = resp.json()
+                result = self._parse_response_json(resp, model, "poll task")
                 code = result.get("code", 0)
 
                 if code == 1303:
