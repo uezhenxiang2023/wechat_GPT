@@ -6,7 +6,7 @@ from common import const, utils, memory
 from config import conf
 from openai import OpenAI
 
-client = OpenAI(api_key=conf().get("open_ai_api_key")) # Instantiage a client accordinng to the latest openai SDK
+client = OpenAI(api_key=conf().get("openai_api_key")) # Instantiage a client accordinng to the latest openai SDK
 
 # OPENAI提供的图像识别接口
 class OpenAIVision(object):

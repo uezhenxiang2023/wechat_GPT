@@ -7,7 +7,7 @@ from common.token_bucket import TokenBucket
 from config import conf
 from openai import OpenAI
 
-client = OpenAI(api_key=conf().get("open_ai_api_key")) # Instantiate a client according to the latest Openai SDK
+client = OpenAI(api_key=conf().get("openai_api_key")) # Instantiate a client according to the latest Openai SDK
 
 
 # OPENAI提供的画图接口
