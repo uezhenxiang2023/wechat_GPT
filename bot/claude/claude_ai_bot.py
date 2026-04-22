@@ -1,12 +1,10 @@
 import io
 import os
-import time
 import base64
 
 from anthropic import Anthropic
 from bot.bot import Bot
 from bot.claude.claude_ai_session import ClaudeAiSession
-from bot.openai.open_ai_image import OpenAIImage
 from bot.session_manager import SessionManager
 from bridge.context import Context, ContextType
 from bridge.reply import Reply, ReplyType
@@ -18,7 +16,7 @@ from common.tool_button import tool_state
 from common.model_status import model_state
 
 
-class ClaudeAIBot(Bot, OpenAIImage):
+class ClaudeAIBot(Bot):
     _CLAUDE_FILES_API_BETA = "files-api-2025-04-14"
     _CLAUDE_BASE64_PDF_LIMIT_BYTES = 32 * 1024 * 1024
     _CLAUDE_OFFICIAL_BASE_URL = "https://api.anthropic.com"
