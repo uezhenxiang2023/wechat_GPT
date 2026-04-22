@@ -9,8 +9,6 @@ import requests
 from openai import OpenAI
 from bot.bot import Bot
 from bot.chatgpt.chat_gpt_session import ChatGPTSession
-from bot.openai.open_ai_image import OpenAIImage
-from bot.openai.open_ai_vision import OpenAIVision
 from bot.session_manager import SessionManager
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
@@ -22,7 +20,7 @@ from config import conf, load_config
 from PIL import Image
 
 # OpenAI对话模型API (可用)
-class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
+class ChatGPTBot(Bot):
     def __init__(self):
         super().__init__()
         if conf().get("rate_limit_chatgpt"):
@@ -43,7 +41,7 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
         }
 
     def _should_use_responses_api(self, model: str) -> bool:
-        return conf().get("openai_use_responses_api", False) or model in const.GPT54_LIST
+        return self.use_responses_api or model in const.GPT54_LIST
 
     def _normalize_openai_base_url(self, base_url: str | None) -> str:
         normalized = str(base_url or "https://api.openai.com/v1").rstrip("/")
@@ -60,19 +58,6 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
             return Reply(ReplyType.ERROR, "[{}]不支持处理{}类型的消息".format(self.Model_ID, context.type))
 
         logger.info("[{}] query={}".format(self.Model_ID, query))
-        reply = None
-        clear_memory_commands = conf().get("clear_memory_commands", ["#清除记忆"])
-        if query in clear_memory_commands:
-            self.sessions.clear_session(session_id)
-            reply = Reply(ReplyType.INFO, "记忆已清除")
-        elif query == "#清除所有":
-            self.sessions.clear_all_session()
-            reply = Reply(ReplyType.INFO, "所有人记忆已清除")
-        elif query == "#更新配置":
-            load_config()
-            reply = Reply(ReplyType.INFO, "配置已更新")
-        if reply:
-            return reply
 
         session = self.sessions.build_session(session_id)
         session.model = self.model
@@ -409,34 +394,3 @@ class ChatGPTBot(Bot,OpenAIImage,OpenAIVision):
         if output_tokens is not None:
             return output_tokens
         return 0
-
-
-class AzureChatGPTBot(ChatGPTBot):
-    def __init__(self):
-        super().__init__()
-        openai.api_type = "azure"
-        openai.api_version = conf().get("azure_api_version", "2023-06-01-preview")
-        self.args["deployment_id"] = conf().get("azure_deployment_id")
-
-    def create_img(self, query, retry_count=0, api_key=None):
-        api_version = "2022-08-03-preview"
-        url = "{}dalle/text-to-image?api-version={}".format(openai.base_url, api_version)
-        api_key = api_key or openai.api_key
-        headers = {"api-key": api_key, "Content-Type": "application/json"}
-        try:
-            body = {"caption": query, "resolution": conf().get("image_create_size", "256x256")}
-            submission = requests.post(url, headers=headers, json=body)
-            operation_location = submission.headers["Operation-Location"]
-            retry_after = submission.headers["Retry-after"]
-            status = ""
-            image_url = ""
-            while status != "Succeeded":
-                logger.info("waiting for image create..., " + status + ",retry after " + retry_after + " seconds")
-                time.sleep(int(retry_after))
-                response = requests.get(operation_location, headers=headers)
-                status = response.json()["status"]
-            image_url = response.json()["result"]["contentUrl"]
-            return True, image_url
-        except Exception as e:
-            logger.error("create image error: {}".format(e))
-            return False, "图片生成失败"
