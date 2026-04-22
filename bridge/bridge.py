@@ -22,6 +22,8 @@ class Bridge(object):
         }
         self.session_id = session_id
         self.model_type = self.btype['chat']
+        if self.model_type in (const.GPT35_LIST + const.GPT4_LIST + const.GPT_O1_LIST + const.GPT54_LIST):
+            self.btype["chat"] = const.CHATGPT
         if self.model_type in ["text-davinci-003"]:
             self.btype["chat"] = const.OPEN_AI
         if conf().get("use_azure_chatgpt", False):
