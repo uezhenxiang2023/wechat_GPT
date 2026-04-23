@@ -333,9 +333,9 @@ class GPTImageBot(Bot):
 
     def _resolve_orientation(self, aspect_ratio):
         ratio = str(aspect_ratio or "").strip().lower()
-        if ratio in {"9:16", "3:4", "2:3", "1:2"}:
+        if ratio in {"9:16", "3:4", "4:5", "2:3", "1:2"}:
             return "portrait"
-        if ratio in {"16:9", "4:3", "3:2", "2:1", "21:9"}:
+        if ratio in {"16:9", "4:3", "5:4", "3:2", "2:1", "21:9"}:
             return "landscape"
         return "square"
 

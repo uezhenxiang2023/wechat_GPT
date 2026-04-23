@@ -5,6 +5,8 @@ COMMON_PROMPT_RATIO_MAP = {
     1.0: "1:1",
     1.33: "4:3",
     0.75: "3:4",
+    1.25: "5:4",
+    0.8: "4:5",
     1.78: "16:9",
     0.56: "9:16",
     1.5: "3:2",
@@ -26,17 +28,18 @@ def parse_aspect_ratio_from_prompt(prompt: str, ratio_map=None, decimal_toleranc
             return ratio_candidates[closest]
 
     pattern = r'(\d+(?:\.\d+)?)\s*(?::|：|比)\s*(\d+(?:\.\d+)?)'
-    match = re.search(pattern, prompt)
-    if not match:
-        return None
+    for match in re.finditer(pattern, prompt):
+        width = float(match.group(1))
+        height = float(match.group(2))
+        if height == 0:
+            continue
 
-    width = float(match.group(1))
-    height = float(match.group(2))
-    if height == 0:
-        return None
+        ratio = round(width / height, 4)
+        exact_match = next((value for key, value in ratio_candidates.items() if abs(key - ratio) <= 0.02), None)
+        if exact_match:
+            return exact_match
 
-    ratio = round(width / height, 4)
-    closest = min(ratio_candidates, key=lambda key: abs(key - ratio))
-    if abs(closest - ratio) > ratio_tolerance:
-        return None
-    return ratio_candidates[closest]
+        closest = min(ratio_candidates, key=lambda key: abs(key - ratio))
+        if abs(closest - ratio) <= ratio_tolerance:
+            return ratio_candidates[closest]
+    return None
