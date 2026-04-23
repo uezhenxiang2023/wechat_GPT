@@ -24,11 +24,12 @@ _chatgpt_sessions = SessionManager(ChatGPTSession, model="gpt-3.5-turbo")
 class ChatGPTBot(Bot):
     def __init__(self):
         super().__init__()
+        self.api_key = conf().get("openai_api_key")
+        self.use_responses_api = conf().get("openai_use_responses_api", False)
+        self.base_url=self._normalize_openai_base_url(conf().get("openai_api_base"))
+        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         if conf().get("rate_limit_chatgpt"):
             self.tb4chatgpt = TokenBucket(conf().get("rate_limit_chatgpt", 20))
-        self.use_responses_api = conf().get("openai_use_responses_api", False)
-        self.api_key = conf().get("openai_api_key")
-        self.client = OpenAI(api_key=self.api_key, base_url=self._normalize_openai_base_url(conf().get("openai_api_base")))
         self.sessions = _chatgpt_sessions
 
     def _should_use_responses_api(self, model: str) -> bool:
@@ -75,7 +76,7 @@ class ChatGPTBot(Bot):
             session = self.sessions.session_query(query, session_id)
             logger.debug(f"[{self.Model_ID}] session query={session.messages}")
 
-            reply_content = self.reply_text(session_id, session, self.api_key, args=self.args)
+            reply_content = self.reply_text(session_id, session, args=self.args)
             logger.debug(
                 "[{}] new_query={}, session_id={}, reply_cont={}, completion_tokens={}".format(
                     self.Model_ID,
@@ -98,7 +99,7 @@ class ChatGPTBot(Bot):
             logger.error(f"[{self.Model_ID}] fetch reply error, {e}")
             return Reply(ReplyType.ERROR, f"[{self.Model_ID}] {e}")
 
-    def reply_text(self,session_id:str, session: ChatGPTSession, api_key=None, args=None, retry_count=0) -> dict:
+    def reply_text(self,session_id:str, session: ChatGPTSession, args=None, retry_count=0) -> dict:
         """
         call openai's API to get the answer
         :param session: a conversation session
@@ -173,7 +174,7 @@ class ChatGPTBot(Bot):
 
             if need_retry:
                 logger.warn("[{}] 第{}次重试".format(self.model, retry_count + 1))
-                return self.reply_text(session_id,session, api_key, args, retry_count + 1)
+                return self.reply_text(session_id,session, args, retry_count + 1)
             else:
                 return result
 
@@ -191,16 +192,22 @@ class ChatGPTBot(Bot):
             request_kwargs["max_output_tokens"] = max_output_tokens
 
         logger.info(
-            "[{}] call Responses API, base_url={}, use_config_flag={}".format(
+            "[{}] call Responses API, base_url={}, use_config_flag={}, session_previous_response_id={}, remote_history_outdated={}".format(
                 self.Model_ID,
                 self._normalize_openai_base_url(conf().get("openai_api_base")),
                 conf().get("openai_use_responses_api", False),
+                session.previous_response_id,
+                session.remote_history_outdated,
             )
         )
 
         if session.previous_response_id and not session.remote_history_outdated:
             request_kwargs["input"] = self._to_response_input([messages[-1]])
             request_kwargs["previous_response_id"] = session.previous_response_id
+            logger.info(
+                f"[{self.Model_ID}] Responses API using previous_response_id={session.previous_response_id} "
+                f"with latest user turn only"
+            )
             try:
                 response = self.client.responses.create(**request_kwargs)
                 session.previous_response_id = getattr(response, "id", None)
@@ -220,6 +227,10 @@ class ChatGPTBot(Bot):
                 session.remote_history_outdated = True
 
         request_kwargs.pop("previous_response_id", None)
+        logger.info(
+            f"[{self.Model_ID}] Responses API using local history replay, "
+            f"message_count={len(messages)}"
+        )
         response = self.client.responses.create(**request_kwargs)
         session.previous_response_id = getattr(response, "id", None)
         session.remote_history_outdated = False
