@@ -31,6 +31,7 @@ class TelegramChannel(ChatChannel):
     _MEDIA_MODEL_DICT = {
         'Seedream': const.DOUBAO_SEEDREAM_5,
         'KlingImage': const.KLING_V3_OMNI,
+        'GPTImage': const.GPT_IMAGE_2,
         'NanoBanana': const.GEMINI_31_FLASH_IMAGE_PREVIEW,
         'GrokImage': const.GROK_IMAGINE_IMAGE_PRO,
         'Seedance': const.DOUBAO_SEEDANCE_20,
@@ -75,7 +76,7 @@ class TelegramChannel(ChatChannel):
         self.VIDEO_MODE_OPTIONS = ["FirstLast", "Reference"]
         self.IMAGE_MODEL_MENU_TITLE = "<b>Image Model</b>\n\nPick a image model."
         self.IMAGE_MODEL_CALLBACK_PREFIX = "image_model:"
-        self.IMAGE_MODEL_OPTIONS = ["Seedream", "KlingImage", "NanoBanana", "GrokImage"]
+        self.IMAGE_MODEL_OPTIONS = ["Seedream", "KlingImage", "GPTImage", "NanoBanana", "GrokImage"]
         self.VIDEO_MODEL_MENU_TITLE = "<b>Video Model</b>\n\nPick a video model."
         self.VIDEO_MODEL_CALLBACK_PREFIX = "video_model:"
         self.VIDEO_MODEL_OPTIONS = ["Seedance", "KlingVideo", "Veo", "GrokVideo"]
