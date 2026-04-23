@@ -44,6 +44,7 @@ available_setting = {
     "concurrency_in_session": 1,  # 同一会话最多有多少条消息在处理中，大于1可能乱序
     "image_create_size": "256x256",  # 图片大小,可选有 1k、2k、4k(seedream4.5不支持1k,seedream5仅支持2k和3k)
     "image_aspect_ratio":"16:9", # 图片长宽比例，可选有16:9、9:16、1:1、4:3、3:4、3:2、2:3、21:9、auto
+    "image_create_quality": "low",  # GPT Image 质量档位，可选 low、medium、high、auto
     "text_to_video": "doubao-seedance-1-0-pro-250528", # 视频编辑模型
     "video_mode": "FirstLast", # 视频生成模式，可选 FirstLast、Reference
     "duration_seconds": 4, # 视频默认时长

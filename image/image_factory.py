@@ -18,4 +18,7 @@ def create_image(image_type):
     if image_type in const.GROK_IMAGE_LIST:
         from image.grok.grok_image import GrokImageBot
         return GrokImageBot()
+    if image_type in const.GPT_IMAGE_LIST:
+        from image.openai.gpt_image import GPTImageBot
+        return GPTImageBot()
     raise RuntimeError(f"Unsupported image model: {image_type}")
