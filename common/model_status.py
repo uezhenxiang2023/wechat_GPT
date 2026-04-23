@@ -13,6 +13,7 @@ class UserModelState:
                 'model': conf().get('model'),
                 'text_to_image': conf().get('text_to_image'),
                 'image_size': conf().get('image_create_size', '1k'),
+                'image_quality': conf().get('image_create_quality', 'low'),
                 'text_to_voice': conf().get('text_to_voice'),
                 'text_to_video': conf().get('text_to_video'),
                 'video_mode': conf().get('video_mode', 'FirstLast')
@@ -36,6 +37,12 @@ class UserModelState:
         state = self.__get_model_state__(user_id)
         state['image_size'] = image_size
         return state['image_size']
+
+    def toggle_image_quality(self, user_id, image_quality):
+        """切换用户的图片质量状态"""
+        state = self.__get_model_state__(user_id)
+        state['image_quality'] = image_quality
+        return state['image_quality']
     
     def toggle_voice_model(self, user_id, voice_model):
         """切换用户的语音模型"""
@@ -66,6 +73,10 @@ class UserModelState:
     def get_image_size(self, user_id):
         """获取用户图片尺寸状态"""
         return self.__get_model_state__(user_id)['image_size']
+
+    def get_image_quality(self, user_id):
+        """获取用户图片质量状态"""
+        return self.__get_model_state__(user_id)['image_quality']
     
     def get_voice_state(self, user_id):
         """获取用户语音状态"""

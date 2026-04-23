@@ -61,6 +61,7 @@ class GPTImageBot(Bot):
 
     def __init__(self):
         super().__init__()
+        self.context_session_id = None
         self.client = OpenAI(
             api_key=conf().get("openai_api_key"),
             base_url=self._normalize_openai_base_url(conf().get("openai_api_base"))
@@ -70,6 +71,7 @@ class GPTImageBot(Bot):
         model = "gpt-image"
         try:
             session_id = context["session_id"]
+            self.context_session_id = session_id
             model = model_state.get_image_model(session_id)
             session_manager = get_chat_session_manager(session_id)
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
@@ -342,6 +344,13 @@ class GPTImageBot(Bot):
 
     def _build_quality(self, model):
         configured_quality = str(conf().get("image_create_quality", "low") or "low").strip().lower()
+        session_quality = None
+        try:
+            session_quality = model_state.get_image_quality(self.context_session_id)
+        except Exception:
+            session_quality = None
+        if session_quality:
+            configured_quality = str(session_quality).strip().lower()
         if configured_quality in self._SUPPORTED_QUALITIES:
             return configured_quality
         logger.warning(f"[{model.upper()}] invalid image_create_quality={configured_quality}, fallback to low")

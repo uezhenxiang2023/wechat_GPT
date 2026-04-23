@@ -97,6 +97,11 @@ COMMANDS = {
         "args": ["尺寸"],
         "desc": "查看和设置图片尺寸",
     },
+    "image_quality": {
+        "alias": ["image_quality", "图片质量"],
+        "args": ["质量"],
+        "desc": "查看和设置图片质量",
+    },
     "video_model": {
         "alias": ["video_model", "视频模型"],
         "args": ["模型名"],
@@ -469,6 +474,20 @@ class Godcmd(Plugin):
                             ok, result = True, "图片尺寸已切换为：" + image_size
                     else:
                         ok, result = False, "请发送 #image_size 加尺寸，或直接 #image_size 查看当前尺寸"
+                elif cmd == "image_quality":
+                    if len(args) == 0:
+                        image_quality = model_state.get_image_quality(user)
+                        ok, result = True, "当前图片质量为：" + str(image_quality)
+                    elif len(args) == 1:
+                        image_quality = str(args[0]).strip().lower()
+                        available = ["low", "medium", "high", "auto"]
+                        if image_quality not in available:
+                            ok, result = False, "图片质量不存在，可选：\n" + "\n".join(available)
+                        else:
+                            model_state.toggle_image_quality(user, image_quality)
+                            ok, result = True, "图片质量已切换为：" + image_quality
+                    else:
+                        ok, result = False, "请发送 #image_quality 加质量，或直接 #image_quality 查看当前质量"
 
                 elif cmd == "video_model":
                     if len(args) == 0:
