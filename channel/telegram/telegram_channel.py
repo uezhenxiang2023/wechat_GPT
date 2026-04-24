@@ -581,7 +581,7 @@ class TelegramChannel(ChatChannel):
 
     def handler_group_msg(self, msg):
         try:
-            cmsg = TelegramMessage(msg, True)
+            cmsg = TelegramMessage(msg, True, self.main_loop)
         except NotImplementedError as e:
             logger.debug("[TELEGRAMBOT]group message {} skipped: {}".format(msg["MsgId"], e))
             return None
@@ -611,6 +611,18 @@ class TelegramChannel(ChatChannel):
         else:
             logger.debug("[TELEGRAMBOT]receive msg: {}, cmsg={}".format(cmsg.content, cmsg))
         context = self._compose_context(cmsg.ctype, cmsg.content, isgroup=False, msg=cmsg)
+        if context and hasattr(cmsg, "get_quoted_image_path"):
+            quoted_image_path = cmsg.get_quoted_image_path()
+            if quoted_image_path:
+                context["quoted_image_path"] = quoted_image_path
+        if context and hasattr(cmsg, "get_quoted_video_path"):
+            quoted_video_path = cmsg.get_quoted_video_path()
+            if quoted_video_path:
+                context["quoted_video_path"] = quoted_video_path
+        if context and hasattr(cmsg, "get_quoted_file_path"):
+            quoted_file_path = cmsg.get_quoted_file_path()
+            if quoted_file_path:
+                context["quoted_file_path"] = quoted_file_path
         if context:
             self.produce(context)
 
@@ -631,6 +643,18 @@ class TelegramChannel(ChatChannel):
         else:
             logger.debug("[TELEGRAMBOT]receive group msg: {}".format(cmsg.content))
         context = self._compose_context(cmsg.ctype, cmsg.content, isgroup=True, msg=cmsg)
+        if context and hasattr(cmsg, "get_quoted_image_path"):
+            quoted_image_path = cmsg.get_quoted_image_path()
+            if quoted_image_path:
+                context["quoted_image_path"] = quoted_image_path
+        if context and hasattr(cmsg, "get_quoted_video_path"):
+            quoted_video_path = cmsg.get_quoted_video_path()
+            if quoted_video_path:
+                context["quoted_video_path"] = quoted_video_path
+        if context and hasattr(cmsg, "get_quoted_file_path"):
+            quoted_file_path = cmsg.get_quoted_file_path()
+            if quoted_file_path:
+                context["quoted_file_path"] = quoted_file_path
         if context:
             self.produce(context)
 
@@ -664,20 +688,27 @@ class TelegramChannel(ChatChannel):
 
     async def _send_implementation(self, reply: Reply, context: Context):
         receiver = context["receiver"]
+        reply_to_message_id = context.get("msg").parent_id if context.get("msg") else None
+
+        def _reply_kwargs():
+            if not reply_to_message_id:
+                return {}
+            return {"reply_to_message_id": reply_to_message_id}
+
         try:
             if reply.type == ReplyType.TEXT:
-                await self.application.bot.send_message(chat_id=receiver, text=reply.content)
+                await self.application.bot.send_message(chat_id=receiver, text=reply.content, **_reply_kwargs())
                 logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
             elif reply.type == ReplyType.ERROR:
                 error_text = reply.content if reply.content else const.ERROR_RESPONSE
                 logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}".format(reply, receiver))
-                await self.application.bot.send_message(chat_id=receiver, text=error_text)
+                await self.application.bot.send_message(chat_id=receiver, text=error_text, **_reply_kwargs())
                 logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(error_text, receiver))
             elif reply.type == ReplyType.INFO:
-                await self.application.bot.send_message(chat_id=receiver, text=reply.content)
+                await self.application.bot.send_message(chat_id=receiver, text=reply.content, **_reply_kwargs())
                 logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply, receiver))
             elif reply.type == ReplyType.VOICE:
-                await self.application.bot.send_voice(chat_id=receiver, voice=reply.content)
+                await self.application.bot.send_voice(chat_id=receiver, voice=reply.content, **_reply_kwargs())
                 logger.info("[TELEGRAMBOT] sendFile={}, receiver={}".format(reply.content, receiver))
             elif reply.type == ReplyType.IMAGE_URL:  # 获取网络资源
                 response = reply.content
@@ -692,7 +723,7 @@ class TelegramChannel(ChatChannel):
                             image_storage.write(block)
                         logger.info(f"[TELEGRAMBOT] download image success, size={size}, img_url={img_url}")
                         image_storage.seek(0)
-                        await self.application.bot.send_photo(chat_id=receiver, photo=image_storage)
+                        await self.application.bot.send_photo(chat_id=receiver, photo=image_storage, **_reply_kwargs())
                         logger.info("[TELEGRAMBOT] sendImage url={}, receiver={}".format(img_url, receiver))
                     return
                 if hasattr(response, 'candidates'):
@@ -702,7 +733,7 @@ class TelegramChannel(ChatChannel):
                     if parts is None:
                         finish_reason = response.candidates[0].finish_reason
                         logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
-                        await self.application.bot.send_message(chat_id=receiver, text=receiver)
+                        await self.application.bot.send_message(chat_id=receiver, text=receiver, **_reply_kwargs())
                         logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
                     elif parts is not None:
                         reply_text = "\n".join(part.text for part in parts)
@@ -714,7 +745,8 @@ class TelegramChannel(ChatChannel):
                         chat_id=receiver, 
                         text=reply_content,
                         parse_mode='HTML',
-                        disable_web_page_preview=True
+                        disable_web_page_preview=True,
+                        **_reply_kwargs(),
                     )
                     logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(const.GEMINI_2_FLASH_IMAGE_GENERATION, reply_content, receiver))
                 elif isinstance(response, str):
@@ -728,7 +760,7 @@ class TelegramChannel(ChatChannel):
                         image_storage.write(block)
                     logger.info(f"[TELEGRAMBOT] download image success, size={size}, img_url={img_url}")
                     image_storage.seek(0)
-                    await self.application.bot.send_photo(chat_id=receiver, photo=image_storage)
+                    await self.application.bot.send_photo(chat_id=receiver, photo=image_storage, **_reply_kwargs())
                     logger.info("[TELEGRAMBOT] sendImage url={}, receiver={}".format(img_url, receiver))
                 elif hasattr(response, 'content'):
                     # ——— Claude web_search response ———
@@ -760,7 +792,8 @@ class TelegramChannel(ChatChannel):
                         chat_id=receiver,
                         text=reply_content,
                         parse_mode='HTML',
-                        disable_web_page_preview=True
+                        disable_web_page_preview=True,
+                        **_reply_kwargs(),
                     )
                     logger.info(f"[TELEGRAMBOT_CLAUDE] sendMsg={reply_content}, receiver={receiver}")
             elif reply.type == ReplyType.IMAGE:  # 从文件读取图片
@@ -770,33 +803,33 @@ class TelegramChannel(ChatChannel):
                     if parts is None:
                         finish_reason = response.candidates[0].finish_reason
                         logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, finish_reason))
-                        await self.application.bot.send_message(chat_id=receiver, text=const.ERROR_RESPONSE)
+                        await self.application.bot.send_message(chat_id=receiver, text=const.ERROR_RESPONSE, **_reply_kwargs())
                         logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply.content, receiver))
                     else:
                         for part in parts:
                             if part.text:
                                 reply_text = part.text
-                                await self.application.bot.send_message(chat_id=receiver, text=reply_text)
+                                await self.application.bot.send_message(chat_id=receiver, text=reply_text, **_reply_kwargs())
                                 logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self._get_current_image_model_id(receiver), reply_text, receiver))
                             elif part.inline_data:
                                 image_bytes = part.inline_data.data
                                 image = BytesIO(image_bytes)
                                 logger.info(f"[TELEGRAMBOT_{self._get_current_image_model_id(receiver)}] reply={image}")
                                 image.seek(0)
-                                await self.application.bot.send_photo(chat_id=receiver, photo=image)
+                                await self.application.bot.send_photo(chat_id=receiver, photo=image, **_reply_kwargs())
                                 logger.info("[TELEGRAMBOT_{}] sendMsg={}, receiver={}".format(self._get_current_image_model_id(receiver), image, receiver))
                 else:
                     response.seek(0)
-                    await self.application.bot.send_photo(chat_id=receiver, photo=response)
+                    await self.application.bot.send_photo(chat_id=receiver, photo=response, **_reply_kwargs())
                     logger.info("[TELEGRAMBOT_{}] sendImage binary, receiver={}".format(self._get_current_image_model_id(receiver), receiver))
             elif reply.type == ReplyType.FILE:  # 新增文件回复类型
                 file_pathes = reply.content['function_response']['file_pathes']
                 reply_text = escape(reply.content['reply_text'])
                 for file_path in file_pathes:
                     with open(file_path, "rb") as f:
-                        await self.application.bot.send_document(chat_id=receiver, document=f)
+                        await self.application.bot.send_document(chat_id=receiver, document=f, **_reply_kwargs())
                     logger.info("[TELEGRAMBOT] sendFile={}, receiver={}".format(file_path, receiver))
-                await self.application.bot.send_message(chat_id=receiver, text=reply_text)
+                await self.application.bot.send_message(chat_id=receiver, text=reply_text, **_reply_kwargs())
                 logger.info("[TELEGRAMBOT] sendMsg={}, receiver={}".format(reply_text, receiver))
             elif reply.type == ReplyType.VIDEO:  # 新增视频回复类型
                 video_model_id = self._get_current_video_model_id(receiver)
@@ -809,6 +842,7 @@ class TelegramChannel(ChatChannel):
                     read_timeout=120,
                     write_timeout=120,
                     connect_timeout=60,
+                    **_reply_kwargs(),
                 )
                 logger.info("[TELEGRAMBOT_{}] sendVideo binary, receiver={}".format(video_model_id, receiver))
             elif reply.type == ReplyType.VIDEO_URL:  # 新增视频URL回复类型
@@ -820,7 +854,8 @@ class TelegramChannel(ChatChannel):
                     document=video_url, 
                     read_timeout=120,
                     write_timeout=120,
-                    connect_timeout=60
+                    connect_timeout=60,
+                    **_reply_kwargs(),
                 )
                 logger.info("[TELEGRAMBOT_{}] sendVideo url={}, duration={}, receiver={}".format(video_model_id, video_url, video_duration, receiver))
             elif reply.type == ReplyType.STREAM:
@@ -863,13 +898,14 @@ class TelegramChannel(ChatChannel):
                     chat_id=receiver,
                     text=full_text,
                     parse_mode='HTML',
-                    disable_web_page_preview=True
+                    disable_web_page_preview=True,
+                    **_reply_kwargs(),
                 )
                 logger.info(f"[TELEGRAMBOT_STREAM] stream 发送完成, sendMsg={full_text}, receiver={receiver}")
         except Exception as e:
             logger.error("[TELEGRAMBOT] sendMsg error, reply={}, receiver={}, error={}".format(reply, receiver, e))
             # 发送失败时，尝试给用户回个错误提示
-            await self.application.bot.send_message(chat_id=receiver, text=const.ERROR_RESPONSE)
+            await self.application.bot.send_message(chat_id=receiver, text=const.ERROR_RESPONSE, **_reply_kwargs())
 
     def get_search_sources(self, grounding_metadata):
         """

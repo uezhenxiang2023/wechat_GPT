@@ -1,10 +1,9 @@
-import re
+import os
 import asyncio
 from bridge.context import ContextType
 from channel.chat_message import ChatMessage
 from common.log import logger
 from common.tmp_dir import TmpDir
-from config import conf
 
 
 def get_file(file_id):
@@ -52,6 +51,8 @@ class TelegramMessage(ChatMessage):
         self.to_user_id = telegram_message["chat_id"]
         self.other_user_id = self.to_user_id
         self.user_dir = TmpDir().path() + str(self.from_user_id) + '/request/'
+        reply_to_message = telegram_message.reply_to_message
+        self.parent_id = reply_to_message.message_id if reply_to_message else None
 
         def _run_sync(coro):
             """
@@ -147,37 +148,49 @@ class TelegramMessage(ChatMessage):
                 logger.debug(f"[TELEGRAM] Unsupported message type: {telegram_message}")
                 raise NotImplementedError("Unsupported message type")
 
-        """user_id = itchat.instance.storageClass.userName
-        nickname = itchat.instance.storageClass.nickName
+    def _download_quoted_file(self, file_id, file_name):
+        if not file_id or not file_name:
+            return None
+        os.makedirs(self.user_dir, exist_ok=True)
+        quoted_file_path = os.path.join(self.user_dir, f"quoted_{self.parent_id}_{os.path.basename(file_name)}")
+        new_file = self._run_sync(self.bot.get_file(file_id))
+        if not new_file:
+            return None
+        self._run_sync(new_file.download_to_drive(quoted_file_path))
+        return quoted_file_path
 
-        # 虽然from_user_id和to_user_id用的少，但是为了保持一致性，还是要填充一下
-        # 以下很繁琐，一句话总结：能填的都填了。
-        if self.from_user_id == user_id:
-            self.from_user_nickname = nickname
-        if self.to_user_id == user_id:
-            self.to_user_nickname = nickname
-        try:  # 陌生人时候, User字段可能不存在
-            # my_msg 为True是表示是自己发送的消息
-            self.my_msg = telegram_message["ToUserName"] == telegram_message["User"]["UserName"] and \
-                          telegram_message["ToUserName"] != telegram_message["FromUserName"]
-            self.other_user_id = telegram_message["User"]["UserName"]
-            self.other_user_nickname = telegram_message["User"]["NickName"]
-            if self.other_user_id == self.from_user_id:
-                self.from_user_nickname = self.other_user_nickname
-            if self.other_user_id == self.to_user_id:
-                self.to_user_nickname = self.other_user_nickname
-            if telegram_message["User"].get("Self"):
-                # 自身的展示名，当设置了群昵称时，该字段表示群昵称
-                self.self_display_name = telegram_message["User"].get("Self").get("DisplayName")
-        except KeyError as e:  # 处理偶尔没有对方信息的情况
-            logger.warn("[WX]get other_user_id failed: " + str(e))
-            if self.from_user_id == user_id:
-                self.other_user_id = self.to_user_id
-            else:
-                self.other_user_id = self.from_user_id
+    def _run_sync(self, coro):
+        if self.loop:
+            future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+            return future.result()
+        return None
 
-        if self.is_group:
-            self.is_at = telegram_message["IsAt"]
-            self.actual_user_id = telegram_message["ActualUserName"]
-            if self.ctype not in [ContextType.JOIN_GROUP, ContextType.PATPAT, ContextType.EXIT_GROUP]:
-                self.actual_user_nickname = telegram_message["ActualNickName"]"""
+    def get_quoted_image_path(self):
+        reply_to_message = getattr(self._rawmsg, "reply_to_message", None)
+        if not reply_to_message or not reply_to_message.photo:
+            return None
+        photo_obj = reply_to_message.photo[-1]
+        file_name = f"{photo_obj.file_unique_id or photo_obj.file_id}.jpg"
+        return self._download_quoted_file(photo_obj.file_id, file_name)
+
+    def get_quoted_video_path(self):
+        reply_to_message = getattr(self._rawmsg, "reply_to_message", None)
+        if not reply_to_message or not reply_to_message.video:
+            return None
+        video_obj = reply_to_message.video
+        file_name = video_obj.file_name or f"{video_obj.file_unique_id or video_obj.file_id}.mp4"
+        return self._download_quoted_file(video_obj.file_id, file_name)
+
+    def get_quoted_file_path(self):
+        reply_to_message = getattr(self._rawmsg, "reply_to_message", None)
+        if not reply_to_message or not reply_to_message.document:
+            return None
+        document = reply_to_message.document
+        suffix = os.path.splitext(document.file_name or "")[1].lstrip(".").lower()
+        if suffix not in {"pdf", "doc", "docx", "txt"}:
+            logger.info(
+                f"[TELEGRAMBOT] skip quoted file download, unsupported suffix={suffix}, parent_id={self.parent_id}"
+            )
+            return None
+        file_name = document.file_name or f"{document.file_unique_id or document.file_id}"
+        return self._download_quoted_file(document.file_id, file_name)
