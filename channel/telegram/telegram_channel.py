@@ -152,22 +152,45 @@ class TelegramChannel(ChatChannel):
         """
         # 每次收到消息，刷新一下时间
         self.last_update_time = time.time()
-        photo = update.effective_message.photo
-        text = update.effective_message.text
-        logger.info(f"[TELEGRAM] 收到消息: {photo if photo else text}")
-        chat_id = update.effective_chat.id
+        message = update.effective_message
+        chat = update.effective_chat
+        user = update.effective_user
+        chat_id = chat.id
+        from_user_id = user.id if user else None
+        parent_id = getattr(getattr(message, "reply_to_message", None), "message_id", None)
+        message_type = (
+            "text" if message.text else
+            "photo" if message.photo else
+            "document" if message.document else
+            "video" if message.video else
+            "voice" if message.voice else
+            "status_update" if (message.new_chat_members or message.left_chat_member) else
+            "unknown"
+        )
+        logger.info(
+            "[TELEGRAM-event] event_id=%s, message_id=%s, parent_id=%s, create_time=%s, chat_type=%s, chat_id=%s, open_id=%s, message_type=%s",
+            update.update_id,
+            message.message_id,
+            parent_id,
+            message.date,
+            chat.type,
+            chat_id,
+            from_user_id,
+            message_type,
+        )
 
         # Print tool_button stasus to console
         logger.info(
-            f'[TELEGRAMBOT-print] is {tool_state.get_print_state(chat_id)},\
-            [TELEGRAMBOT-breakdown] is {tool_state.get_breakdown_state(chat_id)},\
-            [TELEGRAMBOT-search] is {tool_state.get_search_state(chat_id)},\
-            [TELEGRAMBOT-image] is {tool_state.get_image_state(chat_id)},\
-            [TELEGRAMBOT-video] is {tool_state.get_edit_state(chat_id)},\
-            [TELEGRAMBOT-image_model] is {model_state.get_image_model(chat_id)},\
-            [TELEGRAMBOT-video_model] is {model_state.get_video_state(chat_id)},\
-            [TELEGRAMBOT-video_mode] is {model_state.get_video_mode(chat_id)},\
-            requester={chat_id}')
+            f'[TELEGRAM-search] is {tool_state.get_search_state(chat_id)},\
+            [TELEGRAM-video_mode] is {model_state.get_video_mode(chat_id)},\
+            [TELEGRAM-print] is {tool_state.get_print_state(chat_id)},\
+            [TELEGRAM-breakdown] is {tool_state.get_breakdown_state(chat_id)},\
+            [TELEGRAM-image] is {tool_state.get_image_state(chat_id)},\
+            [TELEGRAM-video] is {tool_state.get_edit_state(chat_id)},\
+            [TELEGRAM-image_model] is {model_state.get_image_model(chat_id)},\
+            [TELEGRAM-video_model] is {model_state.get_video_state(chat_id)},\
+            requester={chat_id}'
+        )
         
         # 使用 run_in_executor 将同步的业务逻辑扔到子线程
         # 这样 handler_single_msg 里的耗时操作（如 GPT 请求）就不会卡死机器人
