@@ -452,7 +452,13 @@ class Godcmd(Plugin):
                     elif not isadmin and not self.is_admin_in_group(e_context["context"]):
                         ok, result = False, "需要管理员权限执行"
                     elif len(args) == 1:
-                        available = const.KLING_IMAGE_LIST + const.DOUBAO_SEEDREAM_LIST + const.GOOGLE_IMAGE_LIST + const.GROK_IMAGE_LIST
+                        available = (
+                            const.KLING_IMAGE_LIST
+                            + const.DOUBAO_SEEDREAM_LIST
+                            + const.GOOGLE_IMAGE_LIST
+                            + const.GROK_IMAGE_LIST
+                            + const.GPT_IMAGE_LIST
+                        )
                         if args[0] not in available:
                             ok, result = False, "图片模型不存在，可选：\n" + "\n".join(available)
                         else:
