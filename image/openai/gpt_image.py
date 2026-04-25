@@ -1,8 +1,11 @@
 import base64
 import io
 import re
+import time
+from types import SimpleNamespace
 
 import openai
+import requests
 from openai import OpenAI
 from PIL import Image
 
@@ -180,6 +183,7 @@ class GPTImageBot(Bot):
         }
 
     def _create_or_edit_image(self, model, prompt, size, quality, images, image_count):
+        base_url = str(getattr(self.client, "base_url", "")).rstrip("/")
         kwargs = {
             "model": model,
             "prompt": prompt,
@@ -187,10 +191,30 @@ class GPTImageBot(Bot):
             "quality": quality,
             "n": image_count,
         }
-        if images:
+        if base_url == "https://api.openai.com/v1":
+            if images:
+                kwargs["image"] = images if len(images) > 1 else images[0]
+                response = self._call_images_api(self.client.images.edit, kwargs, model, "edit")
+            else:
+                response = self._call_images_api(self.client.images.generate, kwargs, model, "generate")
+        elif images:
             kwargs["image"] = images if len(images) > 1 else images[0]
-            return self._call_images_api(self.client.images.edit, kwargs, model, "edit")
-        return self._call_images_api(self.client.images.generate, kwargs, model, "generate")
+            response = self._post_compatible_images_api(
+                f"{base_url}/image-edit",
+                kwargs,
+                model,
+                "edit",
+            )
+        else:
+            response = self._post_compatible_images_api(
+                f"{base_url}/text-to-image",
+                kwargs,
+                model,
+                "generate",
+            )
+        if isinstance(response, dict):
+            return self._to_namespace(response)
+        return response
 
     def _call_images_api(self, api_method, kwargs, model, action):
         attempts = [
@@ -215,13 +239,60 @@ class GPTImageBot(Bot):
             raise last_err
         raise RuntimeError(f"{action} image failed")
 
+    def _post_compatible_images_api(self, url, kwargs, model, action):
+        headers = {
+            "Authorization": f"Bearer {conf().get('openai_api_key')}",
+            "Content-Type": "application/json",
+        }
+        output_format = "png"
+        aspect_ratio = self._size_to_aspect_ratio(kwargs.get("size"))
+        if action == "generate":
+            payload = {
+                "prompt": kwargs["prompt"],
+                "size": kwargs.get("size"),
+                "quality": kwargs.get("quality"),
+                "n": kwargs.get("n"),
+                "aspect_ratio": aspect_ratio,
+                "output_format": output_format,
+            }
+        else:
+            payload = {
+                "prompt": kwargs["prompt"],
+                "images": self._build_compatible_image_inputs(kwargs.get("image")),
+                "size": kwargs.get("size"),
+                "quality": kwargs.get("quality"),
+                "n": kwargs.get("n"),
+                "aspect_ratio": aspect_ratio,
+                "output_format": output_format,
+            }
+
+        debug_payload = {k: v for k, v in payload.items() if k != "images"}
+        if "images" in payload:
+            debug_payload["images_count"] = len(payload["images"])
+        logger.info(f"[{model.upper()}] compatible images api request: action={action}, url={url}, payload={debug_payload}")
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            logger.warning(f"[{model.upper()}] {action} request failed, status={resp.status_code}, body={resp.text[:500]}")
+            raise e
+        return resp.json()
+
     def _extract_images(self, response, model):
         image_results = []
-        for item in getattr(response, "data", []) or []:
+        response_data = getattr(response, "data", None)
+        if isinstance(response_data, list):
+            iterable_data = response_data
+        else:
+            iterable_data = []
+
+        for item in iterable_data:
             if getattr(item, "b64_json", None):
                 # Official SDK examples treat b64_json as raw base64, but some OpenAI-compatible gateways return a data URL here.
                 mime_type, base64_data = self._normalize_base64_image_payload(item.b64_json)
                 image_storage = io.BytesIO(base64.b64decode(base64_data))
+                image_storage.name = self._build_image_filename(mime_type)
                 image_results.append({
                     "mime_type": mime_type,
                     "base64_data": base64_data,
@@ -232,22 +303,39 @@ class GPTImageBot(Bot):
                 continue
 
             if getattr(item, "url", None):
-                import requests
-
-                resp = requests.get(item.url, timeout=60)
-                resp.raise_for_status()
-                mime_type = resp.headers.get("content-type", "image/png").split(";")[0]
-                base64_data = base64.b64encode(resp.content).decode("utf-8")
+                mime_type, base64_data, image_storage = self._download_image_payload(item.url)
                 image_results.append({
                     "mime_type": mime_type,
                     "base64_data": base64_data,
-                    "image_storage": io.BytesIO(resp.content),
+                    "image_storage": image_storage,
                     "data_url": f"data:{mime_type};base64,{base64_data}",
                     "remote_url": item.url,
                 })
                 continue
 
             logger.warning(f"[{model.upper()}] unexpected image item: {item}")
+        if image_results:
+            return image_results
+
+        result_url = None
+        response_urls = getattr(response, "urls", None)
+        if getattr(response_urls, "get", None):
+            result_url = response_urls.get
+        else:
+            data_urls = getattr(response_data, "urls", None)
+            if getattr(data_urls, "get", None):
+                result_url = data_urls.get
+
+        if result_url:
+            mime_type, base64_data, image_storage = self._download_image_payload(result_url)
+            image_results.append({
+                "mime_type": mime_type,
+                "base64_data": base64_data,
+                "image_storage": image_storage,
+                "data_url": f"data:{mime_type};base64,{base64_data}",
+                "remote_url": result_url,
+            })
+
         return image_results
 
     def _normalize_base64_image_payload(self, payload):
@@ -262,6 +350,113 @@ class GPTImageBot(Bot):
         if padding:
             normalized = normalized + ("=" * (4 - padding))
         return mime_type, normalized
+
+    def _download_image_payload(self, url):
+        headers = {}
+        if "api.gptsapi.net" in str(url):
+            headers["Authorization"] = f"Bearer {conf().get('openai_api_key')}"
+        last_payload = None
+        current_url = url
+
+        for attempt in range(1, 11):
+            logger.info(f"[GPT_IMAGE] download image payload attempt={attempt}, url={current_url}")
+            resp = requests.get(current_url, headers=headers, timeout=60)
+            resp.raise_for_status()
+            mime_type = resp.headers.get("content-type", "image/png").split(";")[0]
+            logger.info(
+                f"[GPT_IMAGE] download image payload response: attempt={attempt}, "
+                f"status={resp.status_code}, mime_type={mime_type}, url={current_url}"
+            )
+            if mime_type != "application/json":
+                base64_data = base64.b64encode(resp.content).decode("utf-8")
+                image_storage = io.BytesIO(resp.content)
+                image_storage.name = self._build_image_filename(mime_type)
+                logger.info(
+                    f"[GPT_IMAGE] image payload ready: attempt={attempt}, mime_type={mime_type}, "
+                    f"bytes={len(resp.content)}, filename={image_storage.name}"
+                )
+                return mime_type, base64_data, image_storage
+
+            last_payload = resp.json()
+            payload_data = last_payload.get("data") or {}
+            status = str(payload_data.get("status") or last_payload.get("status") or "").lower()
+            logger.info(
+                f"[GPT_IMAGE] image payload json response: attempt={attempt}, "
+                f"top_level_keys={list(last_payload.keys())}, status={status or 'unknown'}"
+            )
+            outputs = payload_data.get("outputs") or last_payload.get("outputs") or []
+            logger.info(
+                f"[GPT_IMAGE] image payload outputs parsed: attempt={attempt}, "
+                f"outputs_count={len(outputs) if isinstance(outputs, list) else 'non_list'}, "
+                f"outputs_preview={str(outputs)[:300]}"
+            )
+            if status in {"failed", "error", "canceled", "cancelled"}:
+                error_message = payload_data.get("error") or last_payload.get("error") or last_payload.get("message")
+                raise ValueError(f"image result failed: status={status}, error={error_message}")
+
+            if status in {"completed", "succeeded", "success"} and outputs:
+                image_ref = outputs[0]
+                if isinstance(image_ref, str) and image_ref.startswith("http"):
+                    logger.info(f"[GPT_IMAGE] image payload output is url, continue fetching: {image_ref}")
+                    current_url = image_ref
+                    continue
+                if isinstance(image_ref, str) and image_ref.startswith("data:image/"):
+                    mime_type, base64_data = self._normalize_base64_image_payload(image_ref)
+                    image_storage = io.BytesIO(base64.b64decode(base64_data))
+                    image_storage.name = self._build_image_filename(mime_type)
+                    logger.info(
+                        f"[GPT_IMAGE] image payload output is data url: attempt={attempt}, "
+                        f"mime_type={mime_type}, filename={image_storage.name}"
+                    )
+                    return mime_type, base64_data, image_storage
+                if isinstance(image_ref, str):
+                    mime_type, base64_data = self._normalize_base64_image_payload(image_ref)
+                    image_storage = io.BytesIO(base64.b64decode(base64_data))
+                    image_storage.name = self._build_image_filename(mime_type)
+                    logger.info(
+                        f"[GPT_IMAGE] image payload output is raw base64: attempt={attempt}, "
+                        f"mime_type={mime_type}, filename={image_storage.name}"
+                    )
+                    return mime_type, base64_data, image_storage
+
+            logger.info(
+                f"[GPT_IMAGE] image payload not ready, sleep 30s: attempt={attempt}, "
+                f"status={status or 'unknown'}, url={current_url}"
+            )
+            time.sleep(30)
+
+        logger.warning(f"[GPT_IMAGE] image payload polling exhausted, last_payload={str(last_payload)[:1000]}")
+        raise ValueError(f"image result not ready: {last_payload}")
+
+    def _build_compatible_image_inputs(self, images):
+        image_items = images if isinstance(images, list) else [images]
+        compatible_images = []
+        for image in image_items:
+            if not image:
+                continue
+            current_pos = image.tell()
+            image.seek(0)
+            encoded = base64.b64encode(image.read()).decode("utf-8")
+            image.seek(current_pos)
+            mime_type = getattr(image, "mime_type", "image/png")
+            compatible_images.append(f"data:{mime_type};base64,{encoded}")
+        return compatible_images
+
+    def _size_to_aspect_ratio(self, size):
+        normalized = str(size or "").strip().lower()
+        if normalized in {"1024x1536", "1152x2048", "2160x3840"}:
+            return "9:16"
+        if normalized in {"1536x1024", "2048x1152", "3840x2160"}:
+            return "16:9"
+        return "1:1"
+
+    def _build_image_filename(self, mime_type):
+        ext = "png"
+        if mime_type == "image/jpeg":
+            ext = "jpg"
+        elif mime_type == "image/webp":
+            ext = "webp"
+        return f"gpt_image_result.{ext}"
 
     def _build_edit_images(self, image_files, model):
         images = []
@@ -411,7 +606,14 @@ class GPTImageBot(Bot):
         return max(1, min(int(count), self._SEQUENTIAL_IMAGE_MAX_COUNT))
 
     def _normalize_openai_base_url(self, base_url):
-        normalized = str(base_url or "https://api.openai.com/v1").rstrip("/")
-        if not normalized.endswith("/v1"):
-            normalized = f"{normalized}/v1"
-        return normalized
+        normalized = str(base_url or "").rstrip("/")
+        if not normalized or normalized in {"https://api.openai.com", "https://api.openai.com/v1"}:
+            return "https://api.openai.com/v1"
+        return f"{normalized}/api/v3/openai/gpt-image-2-plus"
+
+    def _to_namespace(self, value):
+        if isinstance(value, dict):
+            return SimpleNamespace(**{k: self._to_namespace(v) for k, v in value.items()})
+        if isinstance(value, list):
+            return [self._to_namespace(item) for item in value]
+        return value
