@@ -20,8 +20,9 @@ python-docx
 pypdf
 docx2pdf
 
-# Voice handling enabled in current Feishu config
 openai
+anthropic
+
 # ElevenLabs is required when config.json sets text_to_voice=elevenlabs.
 elevenlabs==1.0.3
 # pydub currently fails on Python 3.14 in this environment because audioop/pyaudioop
