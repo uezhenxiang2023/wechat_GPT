@@ -24,12 +24,12 @@ class ClaudeAIBot(Bot):
     def __init__(self):
         super().__init__()
         self.client = Anthropic(
-            api_key=conf().get("claude_api_key"),
-            base_url=conf().get("claude_base_url")
+            api_key=conf().get("anthropic_api_key"),
+            base_url=conf().get("anthropic_base_url")
         )
         self.sessions = SessionManager(ClaudeAiSession, model=conf().get("model") or "gpt-3.5-turbo")
         self.system_prompt = conf().get("character_desc")
-        self.claude_api_cookie = conf().get("claude_api_cookie")
+        self.claude_api_cookie = conf().get("anthropic_api_cookie")
         self.stream = conf().get("stream")
         self.proxy = conf().get("proxy")
 
@@ -262,7 +262,7 @@ class ClaudeAIBot(Bot):
             )
 
     def _supports_claude_files_api(self):
-        base_url = str(conf().get("claude_base_url") or self._CLAUDE_OFFICIAL_BASE_URL).rstrip("/")
+        base_url = str(conf().get("anthropic_base_url") or self._CLAUDE_OFFICIAL_BASE_URL).rstrip("/")
         return base_url == self._CLAUDE_OFFICIAL_BASE_URL
 
     def _contains_file_document(self, content_blocks):

@@ -74,10 +74,10 @@ available_setting = {
     "xunfei_api_key": "",  # 讯飞 API key
     "xunfei_api_secret": "",  # 讯飞 API secret
     # claude 配置
-    "claude_api_key": "",
-    "claude_base_url": "",
-    "claude_api_cookie": "",
-    "claude_uuid": "",
+    "anthropic_api_key": "",
+    "anthropic_base_url": "",
+    "anthropic_api_cookie": "",
+    "anthropic_uuid": "",
     # 通义千问API, 获取方式查看文档 https://help.aliyun.com/document_detail/2587494.html
     "qwen_access_key_id": "",
     "qwen_access_key_secret": "",
