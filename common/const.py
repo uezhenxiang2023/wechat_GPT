@@ -89,6 +89,7 @@ GEMINI_25_PRO_LIST = [GEMINI_25_PRO_PREVRIEW, GEMINI_25_PRO, GEMINI_25_FLASH_PRE
 GEMINI_3_FLASH_PREVIEW = "gemini-3-flash-preview"
 GEMINI_31_FLASH_LITE_PREVIEW = "gemini-3.1-flash-lite-preview"
 GEMINI_31_PRO_PREVIEW = "gemini-3.1-pro-preview"
+GEMINI_PAID = [GEMINI_25_PRO, GEMINI_31_PRO_PREVIEW]
 
 # Google_Gemini_image
 IMAGEN_4 = "imagen-4.0-generate-001"

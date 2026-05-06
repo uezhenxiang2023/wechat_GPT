@@ -43,6 +43,7 @@ class GoogleGeminiBot(Bot):
     def __init__(self):
         super().__init__()
         self.api_key = conf().get("gemini_api_key")
+        self.api_key_paid = conf().get("gemini_api_key_paid")
         """self.model = conf().get('model')
         self.Model_ID = self.model.upper()
         self.image_model = conf().get('text_to_image')
@@ -82,7 +83,7 @@ class GoogleGeminiBot(Bot):
         ]
         self.tool_config={'function_calling_config': 'AUTO'}
 
-        # Initialize a client according to new genai SDK
+        # Default client; paid models will switch to the paid key dynamically.
         self.client = genai.Client(api_key=self.api_key)
          # schema for screenplay_scenes_breakdown need to be updated
         self.screenplay_scenes_breakdown_schema = FunctionDeclaration(
@@ -352,10 +353,16 @@ class GoogleGeminiBot(Bot):
         # 用字典存储用户会话实例
         self.user_chats = {}
 
+    def _get_client_by_model(self, model):
+        api_key = self.api_key_paid if model in const.GEMINI_PAID else self.api_key
+        return genai.Client(api_key=api_key)
+
     def _get_user_chat(self, session_id, model):
         """获取指定用户的chat实例,如果不存在则创建新的"""
-        if session_id not in self.user_chats:
-            self.user_chats[session_id] = self.client.chats.create(
+        chat_key = f"{session_id}:{model}"
+        self.client = self._get_client_by_model(model)
+        if chat_key not in self.user_chats:
+            self.user_chats[chat_key] = self.client.chats.create(
                 model=model,
                 config=GenerateContentConfig(
                     system_instruction=self.system_prompt,
@@ -370,7 +377,7 @@ class GoogleGeminiBot(Bot):
                     **self.generation_config
                 )
             )
-        return self.user_chats[session_id]
+        return self.user_chats[chat_key]
 
     def _build_request_contents(self, query: str, session_id: str):
         """
@@ -466,6 +473,7 @@ class GoogleGeminiBot(Bot):
             session_id = context["session_id"]
             self.model = model_state.get_basic_state(session_id)
             self.Model_ID = self.model.upper()
+            self.client = self._get_client_by_model(self.model)
 
             if context.type == ContextType.TEXT:
                 logger.info(f"[{self.Model_ID}] query={query}, requester={session_id}")
