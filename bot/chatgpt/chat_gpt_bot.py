@@ -1,6 +1,7 @@
 # encoding:utf-8
 
 import base64
+import json
 import os
 import time
 
@@ -114,10 +115,11 @@ class ChatGPTBot(Bot):
             if self._should_use_responses_api(args["model"]):
                 try:
                     response = self._create_response(session, messages, args)
+                    normalized_response = self._normalize_response_payload(response)
                     return {
-                        "total_tokens": self._extract_response_total_tokens(response),
-                        "completion_tokens": self._extract_response_output_tokens(response),
-                        "content": self._extract_response_text(response),
+                        "total_tokens": self._extract_response_total_tokens(normalized_response),
+                        "completion_tokens": self._extract_response_output_tokens(normalized_response),
+                        "content": self._extract_response_text(normalized_response),
                     }
                 except openai.NotFoundError as e:
                     logger.warning(
@@ -192,10 +194,11 @@ class ChatGPTBot(Bot):
             request_kwargs["max_output_tokens"] = max_output_tokens
 
         logger.info(
-            "[{}] call Responses API, base_url={}, use_config_flag={}, session_previous_response_id={}, remote_history_outdated={}".format(
+            "[{}] call Responses API, base_url={}, use_config_flag={}, stream={}, session_previous_response_id={}, remote_history_outdated={}".format(
                 self.Model_ID,
                 self._normalize_openai_base_url(conf().get("openai_api_base")),
                 conf().get("openai_use_responses_api", False),
+                request_kwargs.get("stream", False),
                 session.previous_response_id,
                 session.remote_history_outdated,
             )
@@ -556,12 +559,14 @@ class ChatGPTBot(Bot):
         return summary
 
     def _extract_response_text(self, response) -> str:
-        output_text = getattr(response, "output_text", None)
+        response = self._normalize_response_payload(response)
+
+        output_text = self._get_attr_or_key(response, "output_text", None)
         if output_text:
             return output_text
 
         collected = []
-        for item in getattr(response, "output", []) or []:
+        for item in self._get_attr_or_key(response, "output", []) or []:
             item_type = self._get_attr_or_key(item, "type")
             if item_type != "message":
                 continue
@@ -571,20 +576,32 @@ class ChatGPTBot(Bot):
                 if text:
                     collected.append(text)
 
-        return "".join(collected)
+        if collected:
+            return "".join(collected)
+
+        if isinstance(response, dict):
+            try:
+                return json.dumps(response, ensure_ascii=False)
+            except TypeError:
+                return str(response)
+        return str(response)
 
     def _extract_response_total_tokens(self, response) -> int:
-        usage = getattr(response, "usage", None)
-        total_tokens = getattr(usage, "total_tokens", None)
+        response = self._normalize_response_payload(response)
+
+        usage = self._get_attr_or_key(response, "usage", None)
+        total_tokens = self._get_attr_or_key(usage, "total_tokens", None)
         if total_tokens is not None:
             return total_tokens
-        input_tokens = getattr(usage, "input_tokens", 0) or 0
-        output_tokens = getattr(usage, "output_tokens", 0) or 0
+        input_tokens = self._get_attr_or_key(usage, "input_tokens", 0) or 0
+        output_tokens = self._get_attr_or_key(usage, "output_tokens", 0) or 0
         return input_tokens + output_tokens
 
     def _extract_response_output_tokens(self, response) -> int:
-        usage = getattr(response, "usage", None)
-        output_tokens = getattr(usage, "output_tokens", None)
+        response = self._normalize_response_payload(response)
+
+        usage = self._get_attr_or_key(response, "usage", None)
+        output_tokens = self._get_attr_or_key(usage, "output_tokens", None)
         if output_tokens is not None:
             return output_tokens
         return 0
@@ -609,3 +626,119 @@ class ChatGPTBot(Bot):
         if isinstance(data, dict):
             return data.get(name, default)
         return getattr(data, name, default)
+
+    def _normalize_response_payload(self, response):
+        if not isinstance(response, str):
+            return response
+
+        parsed_payload, payload_format = self._parse_response_string_payload(response)
+        if parsed_payload is None:
+            logger.warning(
+                f"[{self.Model_ID}] upstream returned raw string payload but parsing failed, "
+                f"base_url={self.base_url}, preview={response[:200]!r}"
+            )
+            return response
+
+        logger.warning(
+            f"[{self.Model_ID}] diagnostic upstream_string_payload "
+            f"format={payload_format} base_url={self.base_url} normalized=true"
+        )
+        if payload_format == "sse":
+            self._log_sse_proxy_diagnostics(response)
+        return parsed_payload
+
+    def _parse_response_string_payload(self, response_text: str):
+        if not isinstance(response_text, str):
+            return None, None
+
+        response_text = response_text.strip()
+        if not response_text:
+            return None, None
+
+        if response_text.startswith("event:"):
+            return self._parse_sse_response_payload(response_text), "sse"
+
+        try:
+            return json.loads(response_text), "json"
+        except json.JSONDecodeError:
+            return None, None
+
+    def _parse_sse_response_payload(self, response_text: str):
+        if not isinstance(response_text, str):
+            return None
+
+        response_text = response_text.strip()
+        if not response_text:
+            return None
+
+        final_message_text = ""
+        completed_response = None
+        event_types = []
+
+        for raw_block in response_text.split("\n\n"):
+            block = raw_block.strip()
+            if not block:
+                continue
+
+            data_lines = []
+            for line in block.splitlines():
+                if line.startswith("data:"):
+                    data_lines.append(line[len("data:"):].strip())
+
+            if not data_lines:
+                continue
+
+            data_str = "\n".join(data_lines)
+            if data_str == "[DONE]":
+                continue
+
+            try:
+                payload = json.loads(data_str)
+            except json.JSONDecodeError:
+                logger.warning(f"[{self.Model_ID}] failed to parse SSE data block")
+                continue
+
+            event_type = payload.get("type")
+            if event_type:
+                event_types.append(event_type)
+            if event_type == "response.output_text.done":
+                final_message_text = payload.get("text", final_message_text)
+            elif event_type == "response.completed":
+                completed_response = payload.get("response")
+
+        if isinstance(completed_response, dict):
+            if final_message_text:
+                completed_response["output_text"] = final_message_text
+            logger.info(
+                f"[{self.Model_ID}] parsed SSE response successfully, "
+                f"event_count={len(event_types)}, completed=true, has_output_text={bool(final_message_text)}"
+            )
+            return completed_response
+
+        if final_message_text:
+            logger.info(
+                f"[{self.Model_ID}] parsed SSE response partially, "
+                f"event_count={len(event_types)}, completed=false, has_output_text=true"
+            )
+            return {"output_text": final_message_text}
+        logger.warning(
+            f"[{self.Model_ID}] parsed SSE response but no completed payload or final text found, "
+            f"event_count={len(event_types)}"
+        )
+        return None
+
+    def _log_sse_proxy_diagnostics(self, response_text: str):
+        preview_lines = []
+        for line in response_text.splitlines():
+            stripped = line.strip()
+            if stripped:
+                preview_lines.append(stripped)
+            if len(preview_lines) >= 4:
+                break
+
+        preview = " | ".join(preview_lines)[:300]
+        logger.warning(
+            f"[{self.Model_ID}] diagnostic sse_proxy_mismatch base_url={self.base_url} "
+            f"stream=false issue='upstream returned SSE text instead of final JSON payload' "
+            f"check='proxy forced streaming or forwarded raw text/event-stream' preview={preview!r}"
+        )
