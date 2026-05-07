@@ -33,7 +33,7 @@ class TelegramChannel(ChatChannel):
         'KlingImage': const.KLING_V3_OMNI,
         'GPTImage': const.GPT_IMAGE_2,
         'NanoBanana': const.GEMINI_31_FLASH_IMAGE_PREVIEW,
-        'GrokImage': const.GROK_IMAGINE_IMAGE_PRO,
+        'GrokImage': const.GROK_IMAGINE_IMAGE_QUALITY,
         'Seedance': const.DOUBAO_SEEDANCE_20,
         'KlingVideo': const.KLING_V3_OMNI,
         'Veo': const.VEO_31,
