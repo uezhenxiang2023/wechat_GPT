@@ -184,9 +184,9 @@ class FeiShuChanel(ChatChannel):
             self.send_text(f"[INFO]\n图片模型已切换为：{const.GEMINI_31_FLASH_IMAGE_PREVIEW}", open_id)
             logger.info(f'[Lark] switch image model to {const.GEMINI_31_FLASH_IMAGE_PREVIEW.upper()}, requester={open_id}')
         elif event_key == 'GrokImage':
-            model_state.toggle_image_model(open_id, const.GROK_IMAGINE_IMAGE_PRO)
-            self.send_text(f"[INFO]\n图片模型已切换为：{const.GROK_IMAGINE_IMAGE_PRO}", open_id)
-            logger.info(f'[Lark] switch image model to {const.GROK_IMAGINE_IMAGE_PRO.upper()}, requester={open_id}')
+            model_state.toggle_image_model(open_id, const.GROK_IMAGINE_IMAGE_QUALITY)
+            self.send_text(f"[INFO]\n图片模型已切换为：{const.GROK_IMAGINE_IMAGE_QUALITY}", open_id)
+            logger.info(f'[Lark] switch image model to {const.GROK_IMAGINE_IMAGE_QUALITY.upper()}, requester={open_id}')
         elif event_key == 'SeedDance':
             model_state.toggle_video_model(open_id, const.DOUBAO_SEEDANCE_15_PRO)
             self.send_text(f"[INFO]\n视频模型已切换为：{const.DOUBAO_SEEDANCE_15_PRO}", open_id)
