@@ -34,6 +34,7 @@ class TelegramChannel(ChatChannel):
         'GPTImage': const.GPT_IMAGE_2,
         'NanoBanana': const.GEMINI_31_FLASH_IMAGE_PREVIEW,
         'GrokImage': const.GROK_IMAGINE_IMAGE_QUALITY,
+        'LumaImage': const.UNI_1,
         'Seedance': const.DOUBAO_SEEDANCE_20,
         'KlingVideo': const.KLING_V3_OMNI,
         'Veo': const.VEO_31,
@@ -71,12 +72,15 @@ class TelegramChannel(ChatChannel):
         self.SKILL_MENU_TITLE = "<b>Producer Skill</b>\n\nSkills of Production Agent."
         self.SKILL_CALLBACK_PREFIX = "skill:"
         self.SKILL_OPTIONS = ["print", "breakdown", "search"]
+        self.IMAGE_MODE_MENU_TITLE = "<b>Image Mode</b>\n\nGenerate new image or edit exiting image."
+        self.IMAGE_MODE_CALLBACK_PREFIX = "image_mode:"
+        self.IMAGE_MODE_OPTIONS = ["Generation", "Editing"]
         self.VIDEO_MODE_MENU_TITLE = "<b>Video Mode</b>\n\nImage role for image to video generation."
         self.VIDEO_MODE_CALLBACK_PREFIX = "video_mode:"
         self.VIDEO_MODE_OPTIONS = ["FirstLast", "Reference"]
         self.IMAGE_MODEL_MENU_TITLE = "<b>Image Model</b>\n\nPick a image model."
         self.IMAGE_MODEL_CALLBACK_PREFIX = "image_model:"
-        self.IMAGE_MODEL_OPTIONS = ["Seedream", "KlingImage", "GPTImage", "NanoBanana", "GrokImage"]
+        self.IMAGE_MODEL_OPTIONS = ["Seedream", "KlingImage", "GPTImage", "NanoBanana", "GrokImage", "LumaImage"]
         self.VIDEO_MODEL_MENU_TITLE = "<b>Video Model</b>\n\nPick a video model."
         self.VIDEO_MODEL_CALLBACK_PREFIX = "video_model:"
         self.VIDEO_MODEL_OPTIONS = ["Seedance", "KlingVideo", "Veo", "GrokVideo"]
@@ -114,6 +118,14 @@ class TelegramChannel(ChatChannel):
                 for option in self.VIDEO_MODE_OPTIONS
             ]
         )
+
+    def _build_image_mode_markup(self):
+        return InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton(option, callback_data=f"{self.IMAGE_MODE_CALLBACK_PREFIX}{option}")]
+                for option in self.IMAGE_MODE_OPTIONS
+            ]
+        )
     
     def _build_video_model_markup(self):
         return InlineKeyboardMarkup(
@@ -133,6 +145,9 @@ class TelegramChannel(ChatChannel):
 
     def _build_video_mode_menu_text(self, current_mode):
         return f"{self.VIDEO_MODE_MENU_TITLE}\n\nCurrent: <b>{current_mode}</b>"
+
+    def _build_image_mode_menu_text(self, current_mode):
+        return f"{self.IMAGE_MODE_MENU_TITLE}\n\nCurrent: <b>{current_mode}</b>"
     
     def _build_video_model_menu_text(self, current_model):
         return f"{self.VIDEO_MODEL_MENU_TITLE}\n\nCurrent: <b>{current_model}</b>"
@@ -186,6 +201,7 @@ class TelegramChannel(ChatChannel):
             [TELEGRAM-print] is {tool_state.get_print_state(chat_id)},\
             [TELEGRAM-breakdown] is {tool_state.get_breakdown_state(chat_id)},\
             [TELEGRAM-image] is {tool_state.get_image_state(chat_id)},\
+            [TELEGRAM-image_mode] is {model_state.get_image_mode(chat_id)},\
             [TELEGRAM-video] is {tool_state.get_edit_state(chat_id)},\
             [TELEGRAM-image_model] is {model_state.get_image_model(chat_id)},\
             [TELEGRAM-video_model] is {model_state.get_video_state(chat_id)},\
@@ -267,6 +283,18 @@ class TelegramChannel(ChatChannel):
             reply_markup=self._build_skill_markup(),
         )
         logger.info(f"[TELEGRAMBOT] skill menu opened, current_mode={current_mode}, requester={chat_id}")
+    
+    async def image_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = update.effective_chat.id
+        current_mode = model_state.get_image_mode(chat_id)
+        menu_text = self._build_image_mode_menu_text(current_mode)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=menu_text,
+            parse_mode="HTML",
+            reply_markup=self._build_image_mode_markup(),
+        )
+        logger.info(f"[TELEGRAMBOT] image mode menu opened, current_mode={current_mode}, requester={chat_id}")
 
     async def video_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id
@@ -344,6 +372,31 @@ class TelegramChannel(ChatChannel):
                 else:
                     raise
             logger.info(f"[TELEGRAMBOT] video mode switched to {target_mode}, requester={chat_id}")
+            return
+
+        if data.startswith(self.IMAGE_MODE_CALLBACK_PREFIX):
+            target_mode = data[len(self.IMAGE_MODE_CALLBACK_PREFIX):]
+            if target_mode not in self.IMAGE_MODE_OPTIONS:
+                await query.answer("Unsupported mode", show_alert=True)
+                return
+
+            model_state.toggle_image_mode(chat_id, target_mode)
+            text = self._build_image_mode_menu_text(target_mode)
+            await query.answer(f"Image mode: {target_mode}")
+            try:
+                await query.edit_message_text(
+                    text=text,
+                    parse_mode="HTML",
+                    reply_markup=self._build_image_mode_markup(),
+                )
+            except BadRequest as e:
+                if "Message is not modified" in str(e):
+                    logger.info(
+                        f"[TELEGRAMBOT] image mode message unchanged, target_mode={target_mode}, requester={chat_id}"
+                    )
+                else:
+                    raise
+            logger.info(f"[TELEGRAMBOT] image mode switched to {target_mode}, requester={chat_id}")
             return
         
         if data.startswith(self.VIDEO_MODEL_CALLBACK_PREFIX):
@@ -548,6 +601,7 @@ class TelegramChannel(ChatChannel):
             logger.info("[TELEGRAM] 心跳保活任务已启动")
 
         # Register commands
+        self.application.add_handler(CommandHandler("image_mode", self.image_mode))
         self.application.add_handler(CommandHandler("video_mode", self.video_mode))
         self.application.add_handler(CommandHandler("image_model", self.image_model))
         self.application.add_handler(CommandHandler("video_model", self.video_model))
