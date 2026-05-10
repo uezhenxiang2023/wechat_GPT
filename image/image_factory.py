@@ -18,6 +18,9 @@ def create_image(image_type):
     if image_type in const.GROK_IMAGE_LIST:
         from image.grok.grok_image import GrokImageBot
         return GrokImageBot()
+    if image_type in const.LUMA_IMAGE_LIST:
+        from image.luma.luma_image import LumaImageBot
+        return LumaImageBot()
     if image_type in const.GPT_IMAGE_LIST:
         from image.openai.gpt_image import GPTImageBot
         return GPTImageBot()

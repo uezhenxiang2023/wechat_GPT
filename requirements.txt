@@ -11,6 +11,7 @@ volcengine-python-sdk
 tos
 xai-sdk
 google-genai
+luma-agents
 
 # Feishu channel media and document handling
 Pillow

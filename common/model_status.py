@@ -12,6 +12,7 @@ class UserModelState:
             self._model_states[user_id] = {
                 'model': conf().get('model'),
                 'text_to_image': conf().get('text_to_image'),
+                'image_mode': conf().get('image_mode', 'Generation'),
                 'image_size': conf().get('image_create_size', '1k'),
                 'image_quality': conf().get('image_create_quality', 'low'),
                 'text_to_voice': conf().get('text_to_voice'),
@@ -31,6 +32,12 @@ class UserModelState:
         state = self.__get_model_state__(user_id)
         state['text_to_image'] = image_model
         return state['text_to_image']
+
+    def toggle_image_mode(self, user_id, image_mode):
+        """切换用户的出图模式"""
+        state = self.__get_model_state__(user_id)
+        state['image_mode'] = image_mode
+        return state['image_mode']
 
     def toggle_image_size(self, user_id, image_size):
         """切换用户的图片尺寸状态"""
@@ -69,6 +76,10 @@ class UserModelState:
     def get_image_model(self, user_id):
         """获取用户图像模型状态"""
         return self.__get_model_state__(user_id)['text_to_image']
+
+    def get_image_mode(self, user_id):
+        """获取用户出图模式状态"""
+        return self.__get_model_state__(user_id).get('image_mode', conf().get('image_mode', 'Generation'))
 
     def get_image_size(self, user_id):
         """获取用户图片尺寸状态"""
