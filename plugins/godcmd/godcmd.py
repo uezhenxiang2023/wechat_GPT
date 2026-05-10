@@ -92,6 +92,10 @@ COMMANDS = {
     "args": ["模型名"],
     "desc": "查看和设置图片模型",
     },
+    "image_mode": {
+        "alias": ["image_mode", "图片模式"],
+        "desc": "查看当前图片模式",
+    },
     "image_size": {
         "alias": ["image_size", "图片尺寸"],
         "args": ["尺寸"],
@@ -458,6 +462,7 @@ class Godcmd(Plugin):
                             + const.GOOGLE_IMAGE_LIST
                             + const.GROK_IMAGE_LIST
                             + const.GPT_IMAGE_LIST
+                            + const.LUMA_IMAGE_LIST
                         )
                         if args[0] not in available:
                             ok, result = False, "图片模型不存在，可选：\n" + "\n".join(available)
@@ -466,6 +471,12 @@ class Godcmd(Plugin):
                             ok, result = True, "图片模型已切换为：" + args[0]
                     else:
                         ok, result = False, "请发送 #image_model 加模型名，或直接 #image_model 查看当前模型"
+                elif cmd == "image_mode":
+                    if len(args) == 0:
+                        image_mode = model_state.get_image_mode(user)
+                        ok, result = True, "当前图片模式为：" + str(image_mode)
+                    else:
+                        ok, result = False, "请直接发送 #image_mode 查看当前图片模式"
                 elif cmd == "image_size":
                     if len(args) == 0:
                         image_size = model_state.get_image_size(user)
