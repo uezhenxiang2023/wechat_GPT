@@ -181,7 +181,7 @@ class LumaImageBot(Bot):
         }
         if normalized_image_mode == "editing":
             params["source"] = image_refs[0]
-            params["image_ref"] = reference_refs[:7]
+            params["image_ref"] = reference_refs[:8]
             logger.info(
                 f"[{model.upper()}] Luma Editing 模式: source=1, image_ref={len(params.get('image_ref', []))}"
             )
