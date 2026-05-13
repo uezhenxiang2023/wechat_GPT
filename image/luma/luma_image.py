@@ -94,12 +94,42 @@ class LumaImageBot(Bot):
             logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
 
         image_mode = model_state.get_image_mode(session_id)
-        request_mode = "edit" if str(image_mode).lower() == "editing" else "generate"
+        normalized_image_mode = str(image_mode).lower()
+        request_mode = "edit" if normalized_image_mode == "editing" else "generate"
         image_size = self._normalize_resolution(model_state.get_image_size(session_id), model)
         quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
+        file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+
+        if normalized_image_mode == "editing" and quoted_cache:
+            source_refs = self._build_image_refs(quoted_cache.get("files", []), model)
+            reference_refs = self._build_image_refs(file_cache.get("files", []), model) if file_cache else []
+            memory.USER_QUOTED_IMAGE_CACHE.pop(session_id, None)
+            if file_cache:
+                memory.USER_IMAGE_CACHE.pop(session_id, None)
+            if source_refs:
+                reference_count = len(source_refs) + len(reference_refs)
+                aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_images(quoted_cache.get("files", []), model)
+                if not prompt_ratio:
+                    logger.info(
+                        f"[{model.upper()}] Editing 模式使用回复引用图作为 source 推断比例: {aspect_ratio}, "
+                        f"source_count={len(source_refs)}, image_ref_count={len(reference_refs)}"
+                    )
+                return self._build_edit_params(
+                    query,
+                    model,
+                    aspect_ratio,
+                    source_refs,
+                    image_mode,
+                    reference_refs=reference_refs,
+                ), {
+                    "mode": request_mode,
+                    "reference_count": reference_count,
+                    "image_size": image_size,
+                }
+
         if quoted_cache:
             image_refs = self._build_image_refs(quoted_cache.get("files", []), model)
-            memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
+            memory.USER_QUOTED_IMAGE_CACHE.pop(session_id, None)
             if image_refs:
                 aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_images(quoted_cache.get("files", []), model)
                 if not prompt_ratio:
@@ -112,10 +142,9 @@ class LumaImageBot(Bot):
                     "image_size": image_size,
                 }
 
-        file_cache = memory.USER_IMAGE_CACHE.get(session_id)
         if file_cache:
             image_refs = self._build_image_refs(file_cache.get("files", []), model)
-            memory.USER_IMAGE_CACHE.pop(session_id)
+            memory.USER_IMAGE_CACHE.pop(session_id, None)
             if image_refs:
                 aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_images(file_cache.get("files", []), model)
                 if not prompt_ratio:
@@ -140,8 +169,8 @@ class LumaImageBot(Bot):
             "image_size": image_size,
         }
 
-    def _build_edit_params(self, query, model, aspect_ratio, image_refs, image_mode):
-        image_refs = image_refs[:8]
+    def _build_edit_params(self, query, model, aspect_ratio, image_refs, image_mode, reference_refs=None):
+        reference_refs = (reference_refs or [])[:8]
         normalized_image_mode = str(image_mode).lower()
         params = {
             "prompt": query,
@@ -152,10 +181,9 @@ class LumaImageBot(Bot):
         }
         if normalized_image_mode == "editing":
             params["source"] = image_refs[0]
-            if len(image_refs) > 1:
-                params["image_ref"] = image_refs[1:]
+            params["image_ref"] = reference_refs[:8]
             logger.info(
-                f"[{model.upper()}] Luma Editing 模式: source=1, image_ref={max(len(image_refs) - 1, 0)}"
+                f"[{model.upper()}] Luma Editing 模式: source=1, image_ref={len(params.get('image_ref', []))}"
             )
         else:
             params["image_ref"] = image_refs
