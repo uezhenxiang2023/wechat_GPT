@@ -202,9 +202,9 @@ class FeiShuChanel(ChatChannel):
             self.send_text(f"[INFO]\n图片模型已切换为：{const.UNI_1}", open_id)
             logger.info(f'[Lark] switch image model to {const.UNI_1.upper()}, requester={open_id}')
         elif event_key == 'SeedDance':
-            model_state.toggle_video_model(open_id, const.DOUBAO_SEEDANCE_15_PRO)
-            self.send_text(f"[INFO]\n视频模型已切换为：{const.DOUBAO_SEEDANCE_15_PRO}", open_id)
-            logger.info(f'[Lark] switch video model to {const.DOUBAO_SEEDANCE_15_PRO.upper()}, requester={open_id}')
+            model_state.toggle_video_model(open_id, const.DOUBAO_SEEDANCE_20)
+            self.send_text(f"[INFO]\n视频模型已切换为：{const.DOUBAO_SEEDANCE_20}", open_id)
+            logger.info(f'[Lark] switch video model to {const.DOUBAO_SEEDANCE_20.upper()}, requester={open_id}')
         elif event_key == 'KlingVideo':
             model_state.toggle_video_model(open_id, const.KLING_V3_OMNI)
             self.send_text(f"[INFO]\n视频模型已切换为：{const.KLING_V3_OMNI}", open_id)
