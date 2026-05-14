@@ -325,13 +325,15 @@ def load_config():
     # 将json字符串反序列化为dict类型
     config = Config(json.loads(config_str))
 
-    # override config with environment variables.
-    # Some online deployment platforms (e.g. Railway) deploy project from github directly. So you shouldn't put your secrets like api key in a config file, instead use environment variables to override the default config.
+    # Fill missing config values with environment variables.
+    # config.json has higher priority; environment variables are only used as fallback.
     for name, value in os.environ.items():
         name = name.lower()
         if name in available_setting:
+            if name in config and config.get(name) not in (None, ""):
+                continue
             display_value = _mask_sensitive_value(value) if _is_sensitive_config_key(name) else value
-            logger.info("[INIT] override config by environ args: {}={}".format(name, display_value))
+            logger.info("[INIT] fallback config by environ args: {}={}".format(name, display_value))
             try:
                 config[name] = eval(value)
             except:
