@@ -20,12 +20,6 @@ https://github.com/zhayujie/chatgpt-on-wechat/assets/26161723/d5154020-36e3-41db
 
 Demo made by [Visionn](https://www.wangpc.cc/)
 
-# 交流群
-
-添加小助手微信进群，请备注 "wechat"：
-
-<img width="240" src="./docs/images/contact.jpg">
-
 # 更新日志
 
 >**2023.11.11：** [1.5.3版本](https://github.com/zhayujie/chatgpt-on-wechat/releases/tag/1.5.3) 和 [1.5.4版本](https://github.com/zhayujie/chatgpt-on-wechat/releases/tag/1.5.4)，新增Google Gemini、通义千问模型
