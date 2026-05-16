@@ -225,7 +225,9 @@ GROK_VIDEO_LIST = [GROK_IMAGINE_VIDEO]
 # Luma_image
 UNI_1 = "uni-1"
 UNI_1_MAX = "uni-1-max"
-LUMA_IMAGE_LIST = [UNI_1, UNI_1_MAX]
+UNI_1_1 = "uni-1.1"
+UNI_1_1_MAX = "uni-1.1-max"
+LUMA_IMAGE_LIST = [UNI_1, UNI_1_MAX, UNI_1_1, UNI_1_1_MAX]
 
 # switch model in cmd
 MODEL_LIST = [
