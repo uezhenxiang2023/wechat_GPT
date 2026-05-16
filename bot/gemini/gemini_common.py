@@ -34,6 +34,7 @@ _GEMINI_IMAGE_RATIO_MAP = {
     "16:9": 16 / 9,
     "21:9": 21 / 9,
 }
+_GEMINI_IMAGE_SIZE_SET = {"512", "1K", "2K", "4K"}
 _GEMINI_VIDEO_RATIO_MAP = {
     "16:9": 16 / 9,
     "9:16": 9 / 16,
@@ -309,7 +310,7 @@ def get_gemini_image_settings_for_session(session_id, aspect_ratio=None):
 
 def _normalize_gemini_image_size(image_size: str) -> str:
     normalized = str(image_size).strip().upper()
-    if normalized in {"512", "1K", "2K", "4K"}:
+    if normalized in _GEMINI_IMAGE_SIZE_SET:
         return normalized
     logger.warning(f"[GeminiImage] invalid image_size={image_size}, fallback to 1K")
     return "1K"
