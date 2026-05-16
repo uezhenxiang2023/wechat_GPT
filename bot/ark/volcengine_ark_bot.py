@@ -11,6 +11,13 @@ import time
 
 from volcenginesdkarkruntime import Ark
 
+from bot.ark.ark_error import (
+    format_ark_api_error,
+    format_ark_connection_error,
+    is_ark_connection_error,
+    is_ark_status_error,
+    is_ark_timeout_error,
+)
 from config import conf
 from bot.bot import Bot
 from bot.ark.ark_media import process_image_files, process_video_files
@@ -132,7 +139,7 @@ class VolcengineArkBot(Bot):
 
         except Exception as e:
             logger.error(f"[{self.Model_ID}] fetch reply error, {e}")
-            return Reply(ReplyType.ERROR, f"[{self.Model_ID}] {e}")
+            return Reply(ReplyType.ERROR, self._format_ark_error_message(e))
 
     def _create_response(self, session, current_query):
         request_kwargs = {
@@ -145,6 +152,8 @@ class VolcengineArkBot(Bot):
             try:
                 return self.client.responses.create(**request_kwargs)
             except Exception as e:
+                if self._is_ark_sdk_error(e):
+                    raise
                 logger.warning(
                     f"[{self.Model_ID}] Responses API continuation failed, fallback to local history replay: {e}"
                 )
@@ -154,6 +163,18 @@ class VolcengineArkBot(Bot):
         request_kwargs["input"] = self._to_response_input(session.messages)
         request_kwargs.pop("previous_response_id", None)
         return self.client.responses.create(**request_kwargs)
+
+    def _format_ark_error_message(self, error):
+        if is_ark_status_error(error):
+            return format_ark_api_error(error, self.model, service_name="火山方舟")
+        if is_ark_timeout_error(error):
+            return format_ark_connection_error(error, self.model, error_type="timeout")
+        if is_ark_connection_error(error):
+            return format_ark_connection_error(error, self.model, error_type="connection")
+        return f"[{self.Model_ID}] {error}"
+
+    def _is_ark_sdk_error(self, error):
+        return is_ark_status_error(error) or is_ark_timeout_error(error) or is_ark_connection_error(error)
 
     def _to_response_input(self, messages):
         response_input = []
