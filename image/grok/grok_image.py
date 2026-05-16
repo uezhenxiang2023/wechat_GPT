@@ -8,6 +8,7 @@ from xai_sdk import Client
 
 from common.aspect_ratio import parse_aspect_ratio_from_prompt
 from bot.bot import Bot
+from bot.grok.grok_error import format_grok_error, is_grok_sdk_error
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
 from common import const, memory
@@ -33,6 +34,7 @@ _GROK_IMAGE_RATIO_MAP = {
     "2:1": 2 / 1,
 }
 _GROK_IMAGE_MAX_BYTES = int(3.5 * 1024 * 1024)
+_GROK_IMAGE_REFERENCE_MAX_COUNT = 3
 
 
 class GrokImageBot(Bot):
@@ -61,14 +63,16 @@ class GrokImageBot(Bot):
         )
 
     def reply(self, query, context: Context = None) -> Reply:
+        model = const.GROK_IMAGINE_IMAGE
         try:
             session_id = context["session_id"]
             model = model_state.get_image_model(session_id)
+            image_mode = model_state.get_image_mode(session_id)
             session_manager = get_chat_session_manager(session_id)
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
             session_manager.session_query(query, session_id)
 
-            image_args, model, request_meta = self._build_image_args(query, session_id, model)
+            image_args, model, request_meta = self._build_image_args(query, session_id, model, image_mode)
             image_size = self._normalize_resolution(model_state.get_image_size(session_id), model)
             logger.info(
                 f"[{model.upper()}] request summary: mode={request_meta['mode']}, "
@@ -132,9 +136,11 @@ class GrokImageBot(Bot):
             return Reply(ReplyType.IMAGE, image_storage)
         except Exception as e:
             logger.error(f"[{model.upper()}] fetch reply error: {e}")
+            if is_grok_sdk_error(e):
+                return Reply(ReplyType.ERROR, format_grok_error(e, model, service_name="Grok 图片"))
             return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
 
-    def _build_image_args(self, query, session_id, model):
+    def _build_image_args(self, query, session_id, model, mode):
         prompt_ratio = self._parse_aspect_ratio_from_prompt(query, model)
         if prompt_ratio:
             logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
@@ -154,8 +160,8 @@ class GrokImageBot(Bot):
                     logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
                 image_args, model = self._build_edit_args(image_urls, aspect_ratio, model)
                 return image_args, model, {
-                    "mode": "edit",
-                    "reference_count": len(image_urls),
+                    "mode": mode,
+                    "reference_count": self._count_submitted_reference_images(image_args),
                 }
 
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
@@ -173,8 +179,8 @@ class GrokImageBot(Bot):
                     logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
                 image_args, model = self._build_edit_args(image_urls, aspect_ratio, model)
                 return image_args, model, {
-                    "mode": "edit",
-                    "reference_count": len(image_urls),
+                    "mode": mode,
+                    "reference_count": self._count_submitted_reference_images(image_args),
                 }
 
         aspect_ratio = prompt_ratio or self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model)
@@ -185,11 +191,17 @@ class GrokImageBot(Bot):
         return {
             "aspect_ratio": aspect_ratio
         }, model, {
-            "mode": "generate",
+            "mode": mode,
             "reference_count": 0,
         }
 
     def _build_edit_args(self, image_urls, aspect_ratio, model):
+        if len(image_urls) > _GROK_IMAGE_REFERENCE_MAX_COUNT:
+            logger.info(
+                f"[{model.upper()}] Grok 多图编辑最多支持 {_GROK_IMAGE_REFERENCE_MAX_COUNT} 张参考图，"
+                f"已从 {len(image_urls)} 张裁剪为 {_GROK_IMAGE_REFERENCE_MAX_COUNT} 张"
+            )
+        image_urls = image_urls[:_GROK_IMAGE_REFERENCE_MAX_COUNT]
         if len(image_urls) == 1:
             return {
                 "image_url": image_urls[0],
@@ -201,9 +213,14 @@ class GrokImageBot(Bot):
             )
             model = const.GROK_IMAGINE_IMAGE
         return {
-            "image_urls": image_urls[:5],
+            "image_urls": image_urls,
             "aspect_ratio": aspect_ratio
         }, model
+
+    def _count_submitted_reference_images(self, image_args):
+        if image_args.get("image_url"):
+            return 1
+        return len(image_args.get("image_urls") or [])
 
     def _split_response_base64(self, encoded):
         if not encoded:
@@ -255,7 +272,7 @@ class GrokImageBot(Bot):
                 width = max(int(width * 0.85), 512)
                 height = max(int(height * 0.85), 512)
                 if (width, height) == resized.size:
-                    logger.warning("[{model.upper()}] 参考图压缩后仍偏大，继续使用当前结果")
+                    logger.warning(f"[{model.upper()}] 参考图压缩后仍偏大，继续使用当前结果")
                     return compressed_url
                 resized = image.resize((width, height), Image.LANCZOS)
                 quality = 85
