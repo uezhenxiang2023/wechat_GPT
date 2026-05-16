@@ -22,6 +22,9 @@ from common.utils import get_chat_session_manager
 from config import conf
 
 
+_GEMINI_IMAGE_REFERENCE_MAX_COUNT = 14
+
+
 class GoogleGeminiImageBot(Bot):
     def __init__(self):
         super().__init__()
@@ -37,8 +40,9 @@ class GoogleGeminiImageBot(Bot):
         try:
             session_id = context["session_id"]
             model = model_state.get_image_model(session_id)
+            image_mode = model_state.get_image_mode(session_id)
             session_manager = get_chat_session_manager(session_id) or _gemini_sessions
-            logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
+            logger.info(f"[{model.upper()}] mode={image_mode}, query={query}, requester={session_id}")
             session_manager.session_query(query, session_id)
 
             request_contents, aspect_ratio = self._build_request_contents(query, session_id, model)
@@ -78,25 +82,27 @@ class GoogleGeminiImageBot(Bot):
             logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_aspect_ratio}")
         quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
         if quoted_cache:
-            request_contents = list(quoted_cache["files"])
+            reference_images = self._limit_reference_images(quoted_cache["files"], model, "回复引用图")
+            request_contents = list(reference_images)
             request_contents.append(text)
-            aspect_ratio = prompt_aspect_ratio or infer_gemini_aspect_ratio_from_images(quoted_cache["files"])
+            aspect_ratio = prompt_aspect_ratio or infer_gemini_aspect_ratio_from_images(reference_images)
             memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
             if not prompt_aspect_ratio:
                 logger.info(
-                    f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(quoted_cache['files'])}"
+                    f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(reference_images)}"
                 )
             return request_contents, aspect_ratio
 
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
         if file_cache:
-            request_contents = list(file_cache["files"])
+            reference_images = self._limit_reference_images(file_cache["files"], model, "内存参考图")
+            request_contents = list(reference_images)
             request_contents.append(text)
-            aspect_ratio = prompt_aspect_ratio or infer_gemini_aspect_ratio_from_images(file_cache["files"])
+            aspect_ratio = prompt_aspect_ratio or infer_gemini_aspect_ratio_from_images(reference_images)
             memory.USER_IMAGE_CACHE.pop(session_id)
             if not prompt_aspect_ratio:
                 logger.info(
-                    f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(file_cache['files'])}"
+                    f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(reference_images)}"
                 )
             return request_contents, aspect_ratio
 
@@ -108,3 +114,12 @@ class GoogleGeminiImageBot(Bot):
 
     def _parse_aspect_ratio_from_prompt(self, prompt):
         return parse_aspect_ratio_from_prompt(prompt)
+
+    def _limit_reference_images(self, images, model, source_name):
+        reference_images = list(images or [])
+        if len(reference_images) > _GEMINI_IMAGE_REFERENCE_MAX_COUNT:
+            logger.info(
+                f"[{model.upper()}] Gemini 图片参考图最多支持 {_GEMINI_IMAGE_REFERENCE_MAX_COUNT} 张，"
+                f"{source_name}已从 {len(reference_images)} 张裁剪为 {_GEMINI_IMAGE_REFERENCE_MAX_COUNT} 张"
+            )
+        return reference_images[:_GEMINI_IMAGE_REFERENCE_MAX_COUNT]
