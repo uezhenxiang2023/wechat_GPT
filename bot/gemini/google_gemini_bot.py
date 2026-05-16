@@ -23,6 +23,7 @@ from bot.gemini.gemini_common import (
     mark_image_context_injected,
     should_inject_image_context,
 )
+from bot.gemini.gemini_error import format_gemini_error, is_gemini_sdk_error
 from bot.gemini.google_gemini_session import _gemini_sessions
 
 from bridge.context import ContextType, Context
@@ -501,28 +502,37 @@ class GoogleGeminiBot(Bot):
                         def stream_generator():
                             full_text = ""
                             final_response = None
-                            if is_searching:
-                                stream_response = user_chat.send_message_stream(
-                                    resquest_contents, config=self.search_config
-                                )
-                            else:
-                                stream_response = user_chat.send_message_stream(resquest_contents)
+                            try:
+                                if is_searching:
+                                    stream_response = user_chat.send_message_stream(
+                                        resquest_contents, config=self.search_config
+                                    )
+                                else:
+                                    stream_response = user_chat.send_message_stream(resquest_contents)
 
-                            for chunk in stream_response:
-                                if chunk.text:
-                                    full_text += chunk.text
-                                    yield chunk.text
-                                final_response = chunk
+                                for chunk in stream_response:
+                                    if chunk.text:
+                                        full_text += chunk.text
+                                        yield chunk.text
+                                    final_response = chunk
 
-                            self.sessions.session_reply(full_text, session_id)
-                            logger.info(f"[{self.Model_ID}] stream 完成, session_id={session_id}")
+                                self.sessions.session_reply(full_text, session_id)
+                                logger.info(f"[{self.Model_ID}] stream 完成, session_id={session_id}")
 
-                            if is_searching and final_response is not None:
-                                grounding_metadata = getattr(
-                                    final_response.candidates[0], "grounding_metadata", None
-                                ) if final_response.candidates else None
-                                if grounding_metadata and grounding_metadata.grounding_chunks:
-                                    yield final_response
+                                if is_searching and final_response is not None:
+                                    grounding_metadata = getattr(
+                                        final_response.candidates[0], "grounding_metadata", None
+                                    ) if final_response.candidates else None
+                                    if grounding_metadata and grounding_metadata.grounding_chunks:
+                                        yield final_response
+                            except Exception as e:
+                                logger.error(f"[{self.Model_ID}] stream fetch reply error, {e}")
+                                if is_gemini_sdk_error(e):
+                                    error_text = format_gemini_error(e, self.model)
+                                else:
+                                    error_text = f"[{self.Model_ID}] {e}"
+                                full_text += error_text
+                                yield error_text
 
                         return Reply(ReplyType.STREAM, stream_generator())
                     else:
@@ -557,6 +567,8 @@ class GoogleGeminiBot(Bot):
                 return Reply(ReplyType.ERROR, f"[{self.Model_ID}] Unsupported message type, type={context.type}")
         except Exception as e:
             logger.error("[{}] fetch reply error, {}".format(self.Model_ID, e))
+            if is_gemini_sdk_error(e):
+                return Reply(ReplyType.ERROR, format_gemini_error(e, self.model))
             return Reply(ReplyType.ERROR, f"[{self.Model_ID}] {e}")
 
     def function_call_reply(self, part):

@@ -10,6 +10,7 @@ from bot.gemini.gemini_common import (
     infer_gemini_aspect_ratio_from_data_urls,
     infer_gemini_aspect_ratio_from_images,
 )
+from bot.gemini.gemini_error import format_gemini_error, is_gemini_sdk_error
 from bot.gemini.google_gemini_session import _gemini_sessions
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
@@ -28,6 +29,7 @@ class GoogleGeminiVideoBot(Bot):
         self.paid_client = get_paid_client(conf().get("gemini_api_key_paid"))
 
     def reply(self, query, context: Context = None) -> Reply:
+        model = "gemini"
         try:
             session_id = context["session_id"]
             model = model_state.get_video_state(session_id)
@@ -88,9 +90,11 @@ class GoogleGeminiVideoBot(Bot):
             return Reply(ReplyType.VIDEO, response)
         except GeminiVideoGenerationError as e:
             logger.error(f"[GoogleGeminiVideo] business error: {e}")
-            return Reply(ReplyType.ERROR, str(e))
+            return Reply(ReplyType.ERROR, format_gemini_error(e, model, service_name="Gemini 视频"))
         except Exception as e:
             logger.error(f"[GoogleGeminiVideo] fetch reply error: {e}")
+            if is_gemini_sdk_error(e):
+                return Reply(ReplyType.ERROR, format_gemini_error(e, model, service_name="Gemini 视频"))
             return Reply(ReplyType.ERROR, "Gemini 视频生成失败，请稍后重试。")
 
     def _get_video_inputs(self, query, session_id, model, session_manager):

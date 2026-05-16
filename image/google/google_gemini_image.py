@@ -11,6 +11,7 @@ from bot.gemini.gemini_common import (
     get_user_image_chat,
     infer_gemini_aspect_ratio_from_images,
 )
+from bot.gemini.gemini_error import format_gemini_error, is_gemini_sdk_error
 from bot.gemini.google_gemini_session import _gemini_sessions
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
@@ -37,6 +38,7 @@ class GoogleGeminiImageBot(Bot):
         ]
 
     def reply(self, query, context: Context = None) -> Reply:
+        model = "gemini"
         try:
             session_id = context["session_id"]
             model = model_state.get_image_model(session_id)
@@ -73,6 +75,8 @@ class GoogleGeminiImageBot(Bot):
             return Reply(ReplyType.IMAGE, response)
         except Exception as e:
             logger.error(f"[{model.upper()}] fetch reply error: {e}")
+            if is_gemini_sdk_error(e):
+                return Reply(ReplyType.ERROR, format_gemini_error(e, model, service_name="Gemini 图片"))
             return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
 
     def _build_request_contents(self, query, session_id, model):
