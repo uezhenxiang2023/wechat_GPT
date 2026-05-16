@@ -70,7 +70,9 @@ class FeiShuChanel(ChatChannel):
             event_handler=self.event_handler,
             log_level=lark.LogLevel.INFO,
         )
-        self._recent_message_events = ExpiredDict(60 * 5)
+        # Feishu can retry webhook events after a long-running image/video request.
+        # Keep message ids long enough to cover delayed retries from async generation.
+        self._recent_message_events = ExpiredDict(60 * 60)
         self._recent_message_events_lock = threading.Lock()
 
     def _get_current_image_model_id(self, user_id):
