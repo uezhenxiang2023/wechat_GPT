@@ -9,6 +9,12 @@ import base64
 from PIL import Image
 
 from bot.bot import Bot
+from bot.kling.kling_error import (
+    format_kling_http_error,
+    format_kling_response_error,
+    format_kling_task_failure,
+    is_kling_retryable,
+)
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
 from common.aspect_ratio import parse_aspect_ratio_from_prompt
@@ -48,6 +54,7 @@ class KlingVideoBot(Bot):
         }
 
     def reply(self, query, context: Context = None) -> Reply:
+        model = const.KLING_VIDEO_O1
         try:
             session_id = context["session_id"]
             model = model_state.get_video_state(session_id) or const.KLING_VIDEO_O1
@@ -137,10 +144,10 @@ class KlingVideoBot(Bot):
             resp.raise_for_status()
             data = resp.json()
 
-            err = self._check_response_error(data)
+            err = format_kling_response_error(data, service_name="可灵视频")
             if err:
                 logger.error(f"[{model.upper()}] 提交任务失败: {err}")
-                return Reply(ReplyType.ERROR, f"可灵出视频失败：{err}")
+                return Reply(ReplyType.ERROR, f"[{model.upper()}] {err}")
 
             task_id = data.get("data", {}).get("task_id")
             if not task_id:
@@ -150,7 +157,7 @@ class KlingVideoBot(Bot):
 
             video_url, video_duration, poll_err = self._poll_task(task_id, model)
             if poll_err:
-                return Reply(ReplyType.ERROR, f"可灵出视频失败：{poll_err}")
+                return Reply(ReplyType.ERROR, f"[{model.upper()}] {poll_err}")
 
             # 视频结果注入 session
             try:
@@ -170,6 +177,9 @@ class KlingVideoBot(Bot):
 
         except Exception as e:
             logger.error(f"[{model.upper()}] fetch reply error: {e}")
+            error_message = format_kling_http_error(e, service_name="可灵视频")
+            if error_message:
+                return Reply(ReplyType.ERROR, f"[{model.upper()}] {error_message}")
             return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
 
     def _poll_task(self, task_id: str, model: str, max_retries=120, interval=5) -> tuple:
@@ -183,14 +193,12 @@ class KlingVideoBot(Bot):
                 resp = requests.get(query_url, headers=self._headers(), timeout=15)
                 resp.raise_for_status()
                 result = resp.json()
-                code = result.get("code", 0)
-
-                if code == 1303:
+                if is_kling_retryable(result):
                     retry_delay = min(retry_delay * 2, 30)
                     logger.warning(f"[{model.upper()}] 并发超限，退避重试 {retry_delay}s")
                     continue
 
-                err = self._check_response_error(result)
+                err = format_kling_response_error(result, service_name="可灵视频")
                 if err:
                     return None, None, err
 
@@ -206,37 +214,21 @@ class KlingVideoBot(Bot):
                         return url, duration, None
 
                 elif status == "failed":
-                    msg = data.get("task_status_msg", "")
-                    logger.error(f"[{model.upper()}] task failed, task_id={task_id}, error={msg}")
-                    return None, None, f"任务失败：{msg}"
+                    task_error = format_kling_task_failure(result, service_name="可灵视频")
+                    logger.error(f"[{model.upper()}] task failed, task_id={task_id}, error={task_error}")
+                    return None, None, task_error
 
                 retry_delay = interval
                 logger.info(f"[{model.upper()}] current status={status}, task_id={task_id}, retry after {retry_delay} seconds")
 
             except Exception as e:
+                http_error = format_kling_http_error(e, service_name="可灵视频")
+                if http_error:
+                    logger.warning(f"[{model.upper()}] 轮询异常: {http_error}")
+                    return None, None, http_error
                 logger.warning(f"[{model.upper()}] 轮询异常: {e}")
 
         return None, None, "任务超时，请稍后重试"
-
-    def _check_response_error(self, data: dict) -> str | None:
-        code = data.get("code", 0)
-        message = data.get("message", "")
-        if code in (0, 1303):
-            return None
-        ERROR_MAP = {
-            1000: "身份验证失败",
-            1101: "账户欠费，请充值",
-            1102: "资源包已用完或过期",
-            1200: "请求参数非法",
-            1201: "参数非法：{}",
-            1301: "内容触发安全策略，请修改提示词",
-            1302: "请求过快，请稍后重试",
-            5000: "服务器内部错误，请稍后重试",
-        }
-        desc = ERROR_MAP.get(code, "未知错误：{}")
-        if '{}' in desc:
-            return f"[{code}] {desc.format(message)}"
-        return f"[{code}] {desc}" + (f"：{message}" if message else "")
 
     def _normalize_duration(self, duration, model) -> str:
         normalized = str(duration).strip()

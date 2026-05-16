@@ -8,6 +8,12 @@ import base64
 from PIL import Image
 
 from bot.bot import Bot
+from bot.kling.kling_error import (
+    format_kling_http_error,
+    format_kling_response_error,
+    format_kling_task_failure,
+    is_kling_retryable,
+)
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
 from common.aspect_ratio import parse_aspect_ratio_from_prompt
@@ -75,6 +81,7 @@ class KlingImageBot(Bot):
         return self.ENDPOINT_GENERATIONS
 
     def reply(self, query, context: Context = None) -> Reply:
+        model = const.KLING_IMAGE_O1
         try:
             session_id = context["session_id"]
             model = model_state.get_image_model(session_id) or const.KLING_IMAGE_O1
@@ -160,10 +167,10 @@ class KlingImageBot(Bot):
             data = self._parse_response_json(resp, model, "submit task")
 
             # 检查业务错误码
-            err = self._check_response_error(data)
+            err = format_kling_response_error(data, service_name="可灵图片")
             if err:
                 logger.info(f"[{model.upper()}] 提交任务失败: {err}, resp={data}")
-                return Reply(ReplyType.ERROR, f"[{model.upper()}]出图失败：{err}")
+                return Reply(ReplyType.ERROR, f"[{model.upper()}] {err}")
 
             task_id = data.get("data", {}).get("task_id")
             if not task_id:
@@ -174,7 +181,7 @@ class KlingImageBot(Bot):
 
             image_urls, poll_err = self._poll_task(task_id, endpoint, model)
             if poll_err:
-                return Reply(ReplyType.ERROR, f"[{model.upper()}]出图失败：{poll_err}")
+                return Reply(ReplyType.ERROR, f"[{model.upper()}] {poll_err}")
 
             # 图片生成结果注入 session 上下文
             try:
@@ -200,6 +207,9 @@ class KlingImageBot(Bot):
 
         except Exception as e:
             logger.error(f"[{model.upper()}] fetch reply error: {e}")
+            error_message = format_kling_http_error(e, service_name="可灵图片")
+            if error_message:
+                return Reply(ReplyType.ERROR, f"[{model.upper()}] {error_message}")
             return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
 
     def _parse_response_json(self, resp, model, action):
@@ -282,41 +292,6 @@ class KlingImageBot(Bot):
             logger.warning(f"[{model.upper()}] failed to compress reference image: {e}")
             return image_base64
 
-    def _check_response_error(self, data: dict) -> str | None:
-        """检查响应中的业务错误码，返回错误描述或 None"""
-        code = data.get("code", 0)
-        message = data.get("message", "")
-        if code in (0, 1303): # 0 成功，1303 单独在轮询里处理退避
-            return None
-        ERROR_MAP = {
-            1000: "身份验证失败，请检查 Authorization 是否正确",
-            1001: "Authorization 为空，请在请求头中填写正确的 Authorization",
-            1002: "Authorization 值非法，请检查 AK/SK 配置",
-            1003: "Authorization 未到有效时间，请等待生效或重新签发 Token",
-            1004: "Authorization 已失效，请重新签发 Token",
-            1100: "账户异常，请检查账户配置信息",
-            1101: "账户欠费，请充值确保余额充足",
-            1102: "资源包已用完或过期，请购买额外资源包或开通后付费",
-            1103: "账户无权限访问该接口或模型，请检查账户权限",
-            1200: "请求参数非法，请检查请求参数是否正确",
-            1201: "参数非法：{}",
-            1202: "请求 method 无效，请查看接口文档使用正确的 method",
-            1203: "请求的资源不存在：{}",
-            1300: "触发平台策略，请检查是否触发平台策略",
-            1301: "内容触发安全策略，请修改提示词后重试",
-            1302: "请求过快，超过速率限制，请降低频率或稍后重试",
-            1304: "触发 IP 白名单策略，请联系客服",
-            5000: "服务器内部错误，请稍后重试",
-            5001: "服务器暂时不可用（维护中），请稍后重试",
-            5002: "服务器内部超时，请稍后重试",
-        }
-        desc = ERROR_MAP.get(code, "未知错误：{}")
-        # 有 {} 占位符的用 message 填充，没有的直接追加 message
-        if '{}' in desc:
-            return f"[{code}] {desc.format(message)}"
-        else:
-            return f"[{code}] {desc}" + (f"：{message}" if message else "")
-
     def _poll_task(self, task_id: str, endpoint: str, model: str, max_retries=120, interval=5) -> tuple:
         query_url = f"{self.API_BASE}{endpoint}/{task_id}"
         retry_delay = interval
@@ -326,14 +301,12 @@ class KlingImageBot(Bot):
             try:
                 resp = requests.get(query_url, headers=self._headers(), timeout=15)
                 result = self._parse_response_json(resp, model, "poll task")
-                code = result.get("code", 0)
-
-                if code == 1303:
+                if is_kling_retryable(result):
                     retry_delay = min(retry_delay * 2, 30)
                     logger.warning(f"[{model.upper()}] 并发超限，退避重试 {retry_delay}s, task_id={task_id}")
                     continue
 
-                err = self._check_response_error(result)
+                err = format_kling_response_error(result, service_name="可灵图片")
                 if err:
                     logger.error(f"[{model.upper()}] 轮询出错: {err}, task_id={task_id}")
                     return None, err
@@ -352,14 +325,18 @@ class KlingImageBot(Bot):
                             return image_urls, None
 
                 elif status == "failed":
-                    status_msg = data.get("task_status_msg", "")
-                    logger.error(f"[{model.upper()}] 任务失败, task_id={task_id}, msg={status_msg}")
-                    return None, f"任务失败：{status_msg}"
+                    task_error = format_kling_task_failure(result, service_name="可灵图片")
+                    logger.error(f"[{model.upper()}] 任务失败, task_id={task_id}, msg={task_error}")
+                    return None, task_error
 
                 retry_delay = interval
                 logger.debug(f"[{model.upper()}] 轮询中 ({i+1}/{max_retries}), status={status}, task_id={task_id}")
 
             except Exception as e:
+                http_error = format_kling_http_error(e, service_name="可灵图片")
+                if http_error:
+                    logger.warning(f"[{model.upper()}] 轮询异常: {http_error}")
+                    return None, http_error
                 logger.warning(f"[{model.upper()}] 轮询异常: {e}")
 
         logger.error(f"[{model.upper()}] 任务超时, task_id={task_id}")
