@@ -58,6 +58,7 @@ class DoubaoImageBot(Bot):
         try:
             session_id = context["session_id"]
             model = model_state.get_image_model(session_id)
+            image_mode = model_state.get_image_mode(session_id)
             error_model = model
             session_manager = get_chat_session_manager(session_id)
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
@@ -101,7 +102,7 @@ class DoubaoImageBot(Bot):
                     "size": image_size
                 })
                 logger.info(
-                    f"[{model.upper()}] request summary: mode=edit, reference_count={len(images)}, "
+                    f"[{model.upper()}] request summary: mode={image_mode}, reference_count={len(images)}, "
                     f"aspect_ratio={aspect_ratio}, image_size={image_size}"
                 )
                 if not prompt_aspect_ratio:
@@ -125,7 +126,7 @@ class DoubaoImageBot(Bot):
                         "size": image_size
                     })
                     logger.info(
-                        f"[{model.upper()}] request summary: mode=edit, reference_count={len(images)}, "
+                        f"[{model.upper()}] request summary: mode={image_mode}, reference_count={len(images)}, "
                         f"aspect_ratio={aspect_ratio}, image_size={image_size}"
                     )
                     if not prompt_aspect_ratio:
@@ -139,7 +140,7 @@ class DoubaoImageBot(Bot):
                     image_size = self._build_image_size(session_id, model, aspect_ratio)
                     params["size"] = image_size
                     logger.info(
-                        f"[{model.upper()}] 当前为文生图模式, aspect_ratio={aspect_ratio}, image_size={image_size}"
+                        f"[{model.upper()}] 当前为文生图模式, mode={image_mode}, aspect_ratio={aspect_ratio}, image_size={image_size}"
                     )
 
             try:
