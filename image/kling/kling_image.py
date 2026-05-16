@@ -78,6 +78,7 @@ class KlingImageBot(Bot):
         try:
             session_id = context["session_id"]
             model = model_state.get_image_model(session_id) or const.KLING_IMAGE_O1
+            image_mode = model_state.get_image_mode(session_id)
             session_manager = get_chat_session_manager(session_id)
 
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
@@ -137,7 +138,7 @@ class KlingImageBot(Bot):
                             b64 = base64.b64encode(f.read()).decode("utf-8")
                         payload["image"] = self._ensure_reference_image_within_limit(b64, model)
                     logger.info(
-                        f"[{model.upper()}] request summary: mode=edit, reference_count={len(paths)}, "
+                        f"[{model.upper()}] request summary: mode={image_mode}, reference_count={len(paths)}, "
                         f"aspect_ratio={payload['aspect_ratio']}, image_size={payload['resolution']}"
                     )
                     logger.info(f"[{model.upper()}] 参考图已注入 payload, model={model}, count={len(paths)}")
