@@ -3,6 +3,13 @@ import time
 from volcenginesdkarkruntime import Ark
 
 from bot.bot import Bot
+from bot.ark.ark_error import (
+    format_ark_api_error,
+    format_ark_connection_error,
+    is_ark_connection_error,
+    is_ark_status_error,
+    is_ark_timeout_error,
+)
 from bot.ark.ark_media import process_image_files, size_calculator, size_calculator_from_data_urls, aspect_ratio_from_size
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
@@ -27,6 +34,7 @@ class DoubaoVideoBot(Bot):
         self.client = Ark(api_key=conf().get("ark_api_key"))
 
     def reply(self, query, context: Context = None) -> Reply:
+        model = const.DOUBAO_SEEDANCE_10_PRO
         try:
             session_id = context["session_id"]
             model = model_state.get_video_state(session_id)
@@ -152,15 +160,22 @@ class DoubaoVideoBot(Bot):
                 f"ratio={final_ratio}, duration={duration_seconds}, generate_audio={generate_audio}"
             )
 
-            response = self.client.content_generation.tasks.create(
-                **self._build_task_params(
-                    model=model,
-                    content=content,
-                    resolution=final_resolution,
-                    ratio=final_ratio,
-                    duration_seconds=duration_seconds
+            try:
+                response = self.client.content_generation.tasks.create(
+                    **self._build_task_params(
+                        model=model,
+                        content=content,
+                        resolution=final_resolution,
+                        ratio=final_ratio,
+                        duration_seconds=duration_seconds
+                    )
                 )
-            )
+            except Exception as e:
+                error_message = self._format_ark_exception(model, e, service_name="豆包视频")
+                if error_message:
+                    logger.warning(f"[{model.upper()}] Ark video task create failed: {error_message}")
+                    return Reply(ReplyType.ERROR, error_message)
+                raise
             video_duration, video_url = self.get_video_info(response.id, model)
 
             try:
@@ -184,7 +199,14 @@ class DoubaoVideoBot(Bot):
     def get_video_info(self, task_id, model):
         logger.info(f"[{model.upper()}] polling task status, task_id={task_id}")
         while True:
-            get_result = self.client.content_generation.tasks.get(task_id=task_id)
+            try:
+                get_result = self.client.content_generation.tasks.get(task_id=task_id)
+            except Exception as e:
+                error_message = self._format_ark_exception(model, e, service_name="豆包视频")
+                if error_message:
+                    logger.warning(f"[{model.upper()}] Ark video task poll failed: {error_message}")
+                    raise RuntimeError(error_message)
+                raise
             status = get_result.status
             if status == "succeeded":
                 logger.info(f"[{model.upper()}] task succeeded, task_id={task_id}")
@@ -393,6 +415,8 @@ class DoubaoVideoBot(Bot):
 
     def _format_error_message(self, model, error):
         error_text = str(error)
+        if error_text.startswith(f"[{model.upper()}]"):
+            return error_text
         if self._is_reference_video_fetch_timeout_error(error_text):
             return (
                 "参考视频拉取超时了。"
@@ -410,6 +434,15 @@ class DoubaoVideoBot(Bot):
                 "请先把视频长度设置为该模型支持的整数范围后，再重新生成。"
             )
         return f"[{model.upper()}] {error_text}"
+
+    def _format_ark_exception(self, model, error, *, service_name):
+        if is_ark_status_error(error):
+            return format_ark_api_error(error, model, service_name=service_name)
+        if is_ark_timeout_error(error):
+            return format_ark_connection_error(error, model, error_type="timeout")
+        if is_ark_connection_error(error):
+            return format_ark_connection_error(error, model, error_type="connection")
+        return None
 
     def _is_reference_video_fetch_timeout_error(self, error_text):
         lowered = error_text.lower()
