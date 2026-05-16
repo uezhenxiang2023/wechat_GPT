@@ -4,6 +4,7 @@ import mimetypes
 import os
 
 from bot.bot import Bot
+from bot.grok.grok_error import format_grok_error, is_grok_sdk_error
 from bot.grok.grok_session import GrokSession
 from bot.session_manager import SessionManager
 from bridge.context import Context, ContextType
@@ -68,6 +69,8 @@ class GrokBot(Bot):
             return Reply(ReplyType.TEXT, reply_text)
         except Exception as e:
             logger.error(f"[{self.Model_ID}] fetch reply error, {e}")
+            if is_grok_sdk_error(e):
+                return Reply(ReplyType.ERROR, format_grok_error(e, self.model))
             return Reply(ReplyType.ERROR, f"[{self.Model_ID}] {e}")
 
     def _stream_reply(self, current_content, session_id, uploaded_file_ids, request_warnings):
@@ -95,6 +98,16 @@ class GrokBot(Bot):
 
                 self.sessions.session_reply(full_text, session_id, total_tokens)
                 logger.info(f"[{self.Model_ID}] stream completed, requester={session_id}, tokens={total_tokens}")
+            except Exception as e:
+                logger.error(f"[{self.Model_ID}] stream reply error, {e}")
+                if is_grok_sdk_error(e):
+                    error_text = format_grok_error(e, self.model)
+                    full_text += error_text
+                    yield error_text
+                    return
+                error_text = f"[{self.Model_ID}] {e}"
+                full_text += error_text
+                yield error_text
             finally:
                 pass
 

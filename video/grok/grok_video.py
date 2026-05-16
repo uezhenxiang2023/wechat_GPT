@@ -3,6 +3,7 @@ import datetime
 from xai_sdk import Client
 
 from bot.bot import Bot
+from bot.grok.grok_error import format_grok_error, is_grok_sdk_error
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
 from common.aspect_ratio import parse_aspect_ratio_from_prompt
@@ -34,6 +35,7 @@ class GrokVideoBot(Bot):
         )
 
     def reply(self, query, context: Context = None) -> Reply:
+        model = "grok"
         try:
             session_id = context["session_id"]
             model = model_state.get_video_state(session_id)
@@ -97,6 +99,8 @@ class GrokVideoBot(Bot):
             return Reply(ReplyType.VIDEO_URL, (video_duration, video_url))
         except Exception as e:
             logger.error(f"[{model.upper()}] fetch reply error: {e}")
+            if is_grok_sdk_error(e):
+                return Reply(ReplyType.ERROR, format_grok_error(e, model, service_name="Grok 视频"))
             return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
 
     def _build_video_args(self, query, session_id, model):
