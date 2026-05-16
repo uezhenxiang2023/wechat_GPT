@@ -161,6 +161,8 @@ available_setting = {
     "feishu_bot_name": "",  # 飞书机器人的名字
     "feishu_websocket": False,  # 是否使用websocket长链接接收飞书事件
     "feishu_webhook_port": 7777, # 本地回调服务器端口
+    "feishu_event_dedupe_seconds": 60 * 60 * 24,  # 飞书事件去重缓存时间，避免平台重投导致重复处理
+    "feishu_event_max_age_seconds": 60 * 10,  # 飞书消息事件最大允许延迟，超过则视为旧重试丢弃
     "media_public_base_url": "",  # 用于对外暴露 tmp 媒体文件的公网根地址，如 https://bot.example.com
     "media_store_provider": "local",  # 媒体对外访问方式，支持：local、tos
     "tos_access_key": "",  # 火山引擎 TOS Access Key

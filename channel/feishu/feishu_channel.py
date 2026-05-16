@@ -7,7 +7,7 @@
 
 # -*- coding=utf-8 -*-
 import cv2
-import io, json, os, uuid, requests, threading, re
+import io, json, os, uuid, requests, threading, re, time
 from io import BytesIO
 from flask import Flask, send_file, abort
 from urllib.parse import urlparse, quote
@@ -72,7 +72,7 @@ class FeiShuChanel(ChatChannel):
         )
         # Feishu can retry webhook events after a long-running image/video request.
         # Keep message ids long enough to cover delayed retries from async generation.
-        self._recent_message_events = ExpiredDict(60 * 60)
+        self._recent_message_events = ExpiredDict(conf().get("feishu_event_dedupe_seconds", 60 * 60 * 24))
         self._recent_message_events_lock = threading.Lock()
 
     def _get_current_image_model_id(self, user_id):
@@ -90,6 +90,30 @@ class FeiShuChanel(ChatChannel):
         sender = event.sender.sender_id
         toUserName = sender.open_id
         event_id = getattr(data.header, "event_id", None)
+        message_create_time = getattr(message, "create_time", None)
+        max_event_age_seconds = conf().get("feishu_event_max_age_seconds", 60 * 10)
+        if message_create_time and max_event_age_seconds:
+            try:
+                event_age_seconds = (time.time() * 1000 - int(message_create_time)) / 1000
+                if event_age_seconds > max_event_age_seconds:
+                    logger.warning(
+                        "[Lark-event] stale event ignored, event_id=%s, message_id=%s, create_time=%s, age=%.1fs, max_age=%ss, open_id=%s",
+                        event_id,
+                        message.message_id,
+                        message_create_time,
+                        event_age_seconds,
+                        max_event_age_seconds,
+                        toUserName,
+                    )
+                    return
+            except (TypeError, ValueError):
+                logger.warning(
+                    "[Lark-event] invalid message create_time, event_id=%s, message_id=%s, create_time=%s, open_id=%s",
+                    event_id,
+                    message.message_id,
+                    message_create_time,
+                    toUserName,
+                )
         dedupe_key = event_id or getattr(message, "message_id", None)
         if dedupe_key:
             with self._recent_message_events_lock:
