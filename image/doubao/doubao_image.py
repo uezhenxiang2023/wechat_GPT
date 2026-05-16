@@ -7,6 +7,13 @@ from volcenginesdkarkruntime import Ark
 from volcenginesdkarkruntime.types.images.images import SequentialImageGenerationOptions
 
 from bot.bot import Bot
+from bot.ark.ark_error import (
+    format_ark_api_error,
+    format_ark_connection_error,
+    is_ark_connection_error,
+    is_ark_status_error,
+    is_ark_timeout_error,
+)
 from bot.ark.ark_media import (
     build_seedream_size,
     encode_image,
@@ -47,9 +54,11 @@ class DoubaoImageBot(Bot):
         self.client = Ark(api_key=conf().get("ark_api_key"))
 
     def reply(self, query, context: Context = None) -> Reply:
+        error_model = const.DOUBAO_SEEDREAM_5
         try:
             session_id = context["session_id"]
             model = model_state.get_image_model(session_id)
+            error_model = model
             session_manager = get_chat_session_manager(session_id)
             logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
             session_manager.session_query(query, session_id)
@@ -133,7 +142,19 @@ class DoubaoImageBot(Bot):
                         f"[{model.upper()}] 当前为文生图模式, aspect_ratio={aspect_ratio}, image_size={image_size}"
                     )
 
-            response = self.client.images.generate(**params)
+            try:
+                response = self.client.images.generate(**params)
+            except Exception as e:
+                if is_ark_status_error(e):
+                    error_message = format_ark_api_error(e, model, service_name="豆包图片")
+                elif is_ark_timeout_error(e):
+                    error_message = format_ark_connection_error(e, model, error_type="timeout")
+                elif is_ark_connection_error(e):
+                    error_message = format_ark_connection_error(e, model, error_type="connection")
+                else:
+                    raise
+                logger.warning(f"[{model.upper()}] Ark image request failed: {error_message}")
+                return Reply(ReplyType.ERROR, error_message)
             image_urls = [item.url for item in getattr(response, "data", []) if getattr(item, "url", None)]
             if not image_urls:
                 raise ValueError("Doubao image response missing image url")
@@ -159,8 +180,8 @@ class DoubaoImageBot(Bot):
                 return Reply(ReplyType.IMAGE_URL, image_urls[0])
             return Reply(ReplyType.IMAGE_URL, image_urls)
         except Exception as e:
-            logger.error(f"[{model.upper()}] fetch reply error: {e}")
-            return Reply(ReplyType.ERROR, f"[{model.upper()}]s {e}")
+            logger.error(f"[{error_model.upper()}] fetch reply error: {e}")
+            return Reply(ReplyType.ERROR, f"[{error_model.upper()}] {e}")
 
     def _build_image_size(self, session_id, model, aspect_ratio):
         image_size = model_state.get_image_size(session_id)
