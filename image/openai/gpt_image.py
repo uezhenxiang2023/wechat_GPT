@@ -10,6 +10,7 @@ from openai import OpenAI
 from PIL import Image
 
 from bot.bot import Bot
+from bot.openai.openai_error import format_openai_error, is_openai_error
 from bridge.context import Context
 from bridge.reply import Reply, ReplyType
 from common import const, memory
@@ -138,6 +139,8 @@ class GPTImageBot(Bot):
             return Reply(ReplyType.IMAGE, image_results[0]["image_storage"])
         except Exception as e:
             logger.error(f"[{model.upper()}] fetch reply error: {e}")
+            if is_openai_error(e):
+                return Reply(ReplyType.ERROR, format_openai_error(e, model, service_name="OpenAI 图片"))
             return Reply(ReplyType.ERROR, f"[{model.upper()}] {e}")
 
     def _build_request_meta(self, query, session_id, model):

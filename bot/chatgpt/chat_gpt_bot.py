@@ -10,6 +10,14 @@ import openai
 from openai import OpenAI
 from bot.bot import Bot
 from bot.chatgpt.chat_gpt_session import ChatGPTSession
+from bot.openai.openai_error import (
+    format_openai_error,
+    is_openai_api_error,
+    is_openai_connection_error,
+    is_openai_error,
+    is_openai_rate_limit_error,
+    is_openai_timeout_error,
+)
 from bot.session_manager import SessionManager
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
@@ -97,8 +105,11 @@ class ChatGPTBot(Bot):
             logger.debug("[{}] reply {} used 0 tokens.".format(self.Model_ID, reply_content))
             return Reply(ReplyType.ERROR, reply_content["content"])
         except Exception as e:
-            logger.error(f"[{self.Model_ID}] fetch reply error, {e}")
-            return Reply(ReplyType.ERROR, f"[{self.Model_ID}] {e}")
+            model_id = getattr(self, "Model_ID", "OPENAI")
+            logger.error(f"[{model_id}] fetch reply error, {e}")
+            if is_openai_error(e):
+                return Reply(ReplyType.ERROR, format_openai_error(e, getattr(self, "model", model_id)))
+            return Reply(ReplyType.ERROR, f"[{model_id}] {e}")
 
     def reply_text(self,session_id:str, session: ChatGPTSession, args=None, retry_count=0) -> dict:
         """
@@ -110,7 +121,12 @@ class ChatGPTBot(Bot):
         """
         try:
             if conf().get("rate_limit_chatgpt") and not self.tb4chatgpt.get_token():
-                raise openai.RateLimitError("RateLimitError: rate limit exceeded")
+                logger.warn("[{}] local rate limit exceeded".format(self.model))
+                return {
+                    "total_tokens": 0,
+                    "completion_tokens": 0,
+                    "content": f"[{self.model.upper()}] OpenAI 当前请求过多，已触发限流，请稍后重试。",
+                }
             messages = session.messages
             if self._should_use_responses_api(args["model"]):
                 try:
@@ -149,26 +165,26 @@ class ChatGPTBot(Bot):
         except Exception as e:
             need_retry = retry_count < 2
             result = {"completion_tokens": 0, "content": "我现在有点累了，等会再来吧"}
-            if isinstance(e, openai.RateLimitError):
+            if is_openai_rate_limit_error(e):
                 logger.warn("[{}] RateLimitError: {}".format(self.model, e))
-                result["content"] = "提问太快啦，请休息一下再问我吧"
+                result["content"] = format_openai_error(e, self.model)
                 if need_retry:
                     time.sleep(20)
-            elif isinstance(e, openai.Timeout):
+            elif is_openai_timeout_error(e):
                 logger.warn("[{}] Timeout: {}".format(self.model, e))
-                result["content"] = "我没有收到你的消息"
+                result["content"] = format_openai_error(e, self.model)
                 if need_retry:
                     time.sleep(5)
-            elif isinstance(e, openai.APIError):
-                logger.warn("[{}] Bad Gateway: {}".format(self.model, e))
-                result["content"] = "请再问我一次"
+            elif is_openai_connection_error(e):
+                logger.warn("[{}] APIConnectionError: {}".format(self.model, e))
+                result["content"] = format_openai_error(e, self.model)
+                if need_retry:
+                    time.sleep(5)
+            elif is_openai_api_error(e):
+                logger.warn("[{}] APIError: {}".format(self.model, e))
+                result["content"] = format_openai_error(e, self.model)
                 if need_retry:
                     time.sleep(10)
-            elif isinstance(e, openai.APIConnectionError):
-                logger.warn("[{}] APIConnectionError: {}".format(self.model, e))
-                result["content"] = "我连接不到你的网络"
-                if need_retry:
-                    time.sleep(5)
             else:
                 logger.exception("[{}] Exception: {}".format(self.model, e))
                 need_retry = False
