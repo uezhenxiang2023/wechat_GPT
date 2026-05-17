@@ -21,6 +21,9 @@ python-docx
 pypdf
 docx2pdf
 
+# Kling
+PyJWT
+
 openai
 anthropic
 
