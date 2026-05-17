@@ -15,6 +15,7 @@ from bridge.reply import Reply, ReplyType
 from common import const, memory
 from common.aspect_ratio import parse_aspect_ratio_from_prompt
 from common.log import logger
+from common.media_store import build_public_media_url
 from common.model_status import model_state
 from common.utils import get_chat_session_manager
 from config import conf
@@ -23,7 +24,7 @@ from config import conf
 class GPTImageBot(Bot):
     _SUPPORTED_SIZES = {"1024x1024", "1536x1024", "1024x1536", "auto"}
     _SUPPORTED_QUALITIES = {"low", "medium", "high", "auto"}
-    _FLEXIBLE_SIZE_MODELS = {const.GPT_IMAGE_2}
+    _FLEXIBLE_SIZE_MODELS = {const.GPT_IMAGE_2, const.GPT_IMAGE_2_PLUS}
     _PRESET_SIZE_MAP = {
         "1k": {
             "square": "1024x1024",
@@ -65,9 +66,11 @@ class GPTImageBot(Bot):
     def __init__(self):
         super().__init__()
         self.context_session_id = None
+        self.base_url = self._normalize_openai_base_url(conf().get("openai_api_base"))
+        self.is_compatible_base_url = self.base_url != "https://api.openai.com/v1"
         self.client = OpenAI(
             api_key=conf().get("openai_api_key"),
-            base_url=self._normalize_openai_base_url(conf().get("openai_api_base"))
+            base_url=self.base_url
         )
 
     def reply(self, query, context: Context = None) -> Reply:
@@ -75,9 +78,13 @@ class GPTImageBot(Bot):
         try:
             session_id = context["session_id"]
             self.context_session_id = session_id
-            model = model_state.get_image_model(session_id)
+            model = const.GPT_IMAGE_2_PLUS if self.is_compatible_base_url else model_state.get_image_model(session_id)
+            image_mode = model_state.get_image_mode(session_id)
             session_manager = get_chat_session_manager(session_id)
-            logger.info(f"[{model.upper()}] query={query}, requester={session_id}")
+            logger.info(
+                f"[{model.upper()}] mode={image_mode}, base_url={self.base_url}, "
+                f"compatible_base_url={self.is_compatible_base_url}, query={query}, requester={session_id}"
+            )
             session_manager.session_query(query, session_id)
 
             request_meta = self._build_request_meta(query, session_id, model)
@@ -140,7 +147,7 @@ class GPTImageBot(Bot):
 
         quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
         if quoted_cache:
-            images = self._build_edit_images(quoted_cache.get("files", []), model)
+            images = self._build_edit_images(quoted_cache.get("files", []), model, quoted_cache.get("path", []))
             memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
             if images:
                 aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_images(quoted_cache.get("files", []))
@@ -157,7 +164,7 @@ class GPTImageBot(Bot):
 
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
         if file_cache:
-            images = self._build_edit_images(file_cache.get("files", []), model)
+            images = self._build_edit_images(file_cache.get("files", []), model, file_cache.get("path", []))
             memory.USER_IMAGE_CACHE.pop(session_id)
             if images:
                 aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_images(file_cache.get("files", []))
@@ -258,7 +265,7 @@ class GPTImageBot(Bot):
         else:
             payload = {
                 "prompt": kwargs["prompt"],
-                "images": self._build_compatible_image_inputs(kwargs.get("image")),
+                "images": self._build_compatible_image_urls(kwargs.get("image"), model),
                 "size": kwargs.get("size"),
                 "quality": kwargs.get("quality"),
                 "n": kwargs.get("n"),
@@ -269,6 +276,8 @@ class GPTImageBot(Bot):
         debug_payload = {k: v for k, v in payload.items() if k != "images"}
         if "images" in payload:
             debug_payload["images_count"] = len(payload["images"])
+            if payload["images"]:
+                debug_payload["first_image_preview"] = payload["images"][0]
         logger.info(f"[{model.upper()}] compatible images api request: action={action}, url={url}, payload={debug_payload}")
         resp = requests.post(url, headers=headers, json=payload, timeout=120)
 
@@ -420,27 +429,44 @@ class GPTImageBot(Bot):
                     return mime_type, base64_data, image_storage
 
             logger.info(
-                f"[GPT_IMAGE] image payload not ready, sleep 30s: attempt={attempt}, "
+                f"[GPT_IMAGE] image payload not ready, sleep 60s: attempt={attempt}, "
                 f"status={status or 'unknown'}, url={current_url}"
             )
-            time.sleep(30)
+            time.sleep(60)
 
         logger.warning(f"[GPT_IMAGE] image payload polling exhausted, last_payload={str(last_payload)[:1000]}")
         raise ValueError(f"image result not ready: {last_payload}")
 
-    def _build_compatible_image_inputs(self, images):
+    def _build_compatible_image_urls(self, images, model):
         image_items = images if isinstance(images, list) else [images]
-        compatible_images = []
-        for image in image_items:
+        image_urls = []
+        for idx, image in enumerate(image_items):
             if not image:
                 continue
-            current_pos = image.tell()
-            image.seek(0)
-            encoded = base64.b64encode(image.read()).decode("utf-8")
-            image.seek(current_pos)
-            mime_type = getattr(image, "mime_type", "image/png")
-            compatible_images.append(f"data:{mime_type};base64,{encoded}")
-        return compatible_images
+            public_url = None
+            source_path = getattr(image, "source_path", None) or getattr(image, "name", None)
+            if source_path:
+                public_url = build_public_media_url(source_path)
+            if not public_url:
+                logger.warning(
+                    f"[{model.upper()}] compatible edit image missing public url, "
+                    f"idx={idx}, source_path={source_path}"
+                )
+                continue
+            if not public_url.startswith(("http://", "https://")):
+                logger.warning(
+                    f"[{model.upper()}] compatible edit image public url is not fully qualified, "
+                    f"idx={idx}, url={public_url}"
+                )
+                continue
+            image_urls.append(public_url)
+
+        if not image_urls:
+            raise ValueError(
+                "compatible image edit requires public image URLs. "
+                "Please set media_public_base_url or media_store_provider=tos."
+            )
+        return image_urls
 
     def _size_to_aspect_ratio(self, size):
         normalized = str(size or "").strip().lower()
@@ -458,15 +484,18 @@ class GPTImageBot(Bot):
             ext = "webp"
         return f"gpt_image_result.{ext}"
 
-    def _build_edit_images(self, image_files, model):
+    def _build_edit_images(self, image_files, model, image_paths=None):
         images = []
         for idx, image_file in enumerate(image_files):
-            file_obj = self._encode_image_file(image_file, model, idx)
+            source_path = None
+            if isinstance(image_paths, list) and idx < len(image_paths):
+                source_path = image_paths[idx]
+            file_obj = self._encode_image_file(image_file, model, idx, source_path)
             if file_obj:
                 images.append(file_obj)
         return images
 
-    def _encode_image_file(self, image, model, idx):
+    def _encode_image_file(self, image, model, idx, source_path=None):
         try:
             if image.mode in ("RGBA", "LA", "P"):
                 fmt = "PNG"
@@ -481,6 +510,7 @@ class GPTImageBot(Bot):
             buf.seek(0)
             buf.name = f"reference_{idx}.{fmt.lower()}"
             buf.mime_type = mime_type
+            buf.source_path = source_path or getattr(image, "filename", None)
             return buf
         except Exception as e:
             logger.warning(f"[{model.upper()}] failed to encode cached image: {e}")

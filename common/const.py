@@ -34,8 +34,9 @@ GPT54_LIST = [GPT54, GPT54_MINI, GPT54_NANO]
 
 # GPT_Image
 GPT_IMAGE_15 = "gpt-image-1.5"
-GPT_IMAGE_2 = "gpt-image-2-plus"
-GPT_IMAGE_LIST = [GPT_IMAGE_15, GPT_IMAGE_2]
+GPT_IMAGE_2 = "gpt-image-2"
+GPT_IMAGE_2_PLUS = "gpt-image-2-plus"
+GPT_IMAGE_LIST = [GPT_IMAGE_15, GPT_IMAGE_2, GPT_IMAGE_2_PLUS]
 
 WHISPER_1 = "whisper-1"
 TTS_1 = "tts-1"
