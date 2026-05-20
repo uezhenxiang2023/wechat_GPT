@@ -88,14 +88,41 @@ class DoubaoImageBot(Bot):
             if prompt_aspect_ratio:
                 logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_aspect_ratio}")
 
+            images = []
+            aspect_ratio_files = None
             quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
+            file_cache = memory.USER_IMAGE_CACHE.get(session_id)
             if quoted_cache:
-                images = [
+                quoted_images = [
                     encode_image(path, file)
                     for path, file in zip(quoted_cache["path"], quoted_cache["files"])
                 ]
-                images = [self._ensure_reference_image_within_limit(image_url, model) for image_url in images]
-                aspect_ratio = prompt_aspect_ratio or size_calculator(quoted_cache["files"])
+                quoted_images = [
+                    self._ensure_reference_image_within_limit(image_url, model)
+                    for image_url in quoted_images
+                ]
+                images.extend(quoted_images)
+                aspect_ratio_files = quoted_cache["files"]
+                logger.info(f"[{model.upper()}] 从回复引用图取参考图, count={len(quoted_images)}")
+                memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
+
+            if file_cache:
+                cached_images = [
+                    encode_image(path, file)
+                    for path, file in zip(file_cache["path"], file_cache["files"])
+                ]
+                cached_images = [
+                    self._ensure_reference_image_within_limit(image_url, model)
+                    for image_url in cached_images
+                ]
+                images.extend(cached_images)
+                if aspect_ratio_files is None:
+                    aspect_ratio_files = file_cache["files"]
+                logger.info(f"[{model.upper()}] 从内存参考图追加入参, count={len(cached_images)}")
+                memory.USER_IMAGE_CACHE.pop(session_id)
+
+            if images:
+                aspect_ratio = prompt_aspect_ratio or size_calculator(aspect_ratio_files)
                 image_size = self._build_image_size(session_id, model, aspect_ratio)
                 params.update({
                     "image": images,
@@ -107,41 +134,16 @@ class DoubaoImageBot(Bot):
                 )
                 if not prompt_aspect_ratio:
                     logger.info(
-                        f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, "
-                        f"size={image_size}, count={len(images)}"
+                        f"[{model.upper()}] 从参考图推断比例: {aspect_ratio}, "
+                        f"size={image_size}, count={len(aspect_ratio_files)}"
                     )
-                memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
             else:
-                file_cache = memory.USER_IMAGE_CACHE.get(session_id)
-                if file_cache:
-                    images = [
-                        encode_image(path, file)
-                        for path, file in zip(file_cache["path"], file_cache["files"])
-                    ]
-                    images = [self._ensure_reference_image_within_limit(image_url, model) for image_url in images]
-                    aspect_ratio = prompt_aspect_ratio or size_calculator(file_cache["files"])
-                    image_size = self._build_image_size(session_id, model, aspect_ratio)
-                    params.update({
-                        "image": images,
-                        "size": image_size
-                    })
-                    logger.info(
-                        f"[{model.upper()}] request summary: mode={image_mode}, reference_count={len(images)}, "
-                        f"aspect_ratio={aspect_ratio}, image_size={image_size}"
-                    )
-                    if not prompt_aspect_ratio:
-                        logger.info(
-                            f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, "
-                            f"size={image_size}, count={len(images)}"
-                        )
-                    memory.USER_IMAGE_CACHE.pop(session_id)
-                else:
-                    aspect_ratio = prompt_aspect_ratio or default_aspect_ratio
-                    image_size = self._build_image_size(session_id, model, aspect_ratio)
-                    params["size"] = image_size
-                    logger.info(
-                        f"[{model.upper()}] 当前为文生图模式, mode={image_mode}, aspect_ratio={aspect_ratio}, image_size={image_size}"
-                    )
+                aspect_ratio = prompt_aspect_ratio or default_aspect_ratio
+                image_size = self._build_image_size(session_id, model, aspect_ratio)
+                params["size"] = image_size
+                logger.info(
+                    f"[{model.upper()}] 当前为文生图模式, mode={image_mode}, aspect_ratio={aspect_ratio}, image_size={image_size}"
+                )
 
             try:
                 response = self.client.images.generate(**params)
