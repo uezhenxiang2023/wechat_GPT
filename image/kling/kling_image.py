@@ -117,46 +117,59 @@ class KlingImageBot(Bot):
                 payload["aspect_ratio"] = prompt_ratio
                 logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
 
-            # 参考图捕获
-            file_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
-            if not file_cache:
-                file_cache = memory.USER_IMAGE_CACHE.get(session_id)
-            if not file_cache:
+            # 参考图捕获：回复引用图优先，内存参考图按缓存顺序追加。
+            reference_paths = []
+            aspect_ratio_paths = None
+            quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
+            file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+            if quoted_cache:
+                quoted_paths = quoted_cache.get("path", [])
+                reference_paths.extend(quoted_paths)
+                if quoted_paths:
+                    aspect_ratio_paths = quoted_paths
+                logger.info(f"[{model.upper()}] 从回复引用图取参考图, count={len(quoted_paths)}")
+                memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
+
+            if file_cache:
+                cached_paths = file_cache.get("path", [])
+                reference_paths.extend(cached_paths)
+                if aspect_ratio_paths is None and cached_paths:
+                    aspect_ratio_paths = cached_paths
+                logger.info(f"[{model.upper()}] 从内存参考图追加入参, count={len(cached_paths)}")
+                memory.USER_IMAGE_CACHE.pop(session_id)
+
+            if not reference_paths:
                 logger.info(
                     f"[{model.upper()}] 当前为文生图模式, aspect_ratio={payload['aspect_ratio']}, image_size={payload['resolution']}"
                 )
-            elif file_cache:
-                paths = file_cache.get("path", [])
-                if paths:
-                    # 如果用户没设置图片比例，则自动从缓存图片的比例
-                    if not prompt_ratio:
-                        payload["aspect_ratio"] = self.aspect_ratio_calculator(paths)
-                    if endpoint == self.ENDPOINT_OMNI:
-                        # omni-image: image_list，支持多图
-                        image_list = []
-                        for p in paths:
-                            with open(p, "rb") as f:
-                                b64 = base64.b64encode(f.read()).decode("utf-8")
-                            image_list.append({"image": self._ensure_reference_image_within_limit(b64, model)})
-                        payload["image_list"] = image_list
-                    else:
-                        # generations: image，只取第一张
-                        with open(paths[0], "rb") as f:
-                            b64 = base64.b64encode(f.read()).decode("utf-8")
-                        payload["image"] = self._ensure_reference_image_within_limit(b64, model)
-                    logger.info(
-                        f"[{model.upper()}] request summary: mode={image_mode}, reference_count={len(paths)}, "
-                        f"aspect_ratio={payload['aspect_ratio']}, image_size={payload['resolution']}"
-                    )
-                    logger.info(f"[{model.upper()}] 参考图已注入 payload, model={model}, count={len(paths)}")
-                    if memory.USER_QUOTED_IMAGE_CACHE.get(session_id):
-                        logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {payload['aspect_ratio']}")
-                    else:
-                        logger.info(f"[{model.upper()}] 从内存参考图推断比例: {payload['aspect_ratio']}")
-                if memory.USER_QUOTED_IMAGE_CACHE.get(session_id):
-                    memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
+            else:
+                # 如果用户没设置图片比例，则自动从参考图的比例推断。引用图存在时优先用引用图推断。
+                if not prompt_ratio:
+                    payload["aspect_ratio"] = self.aspect_ratio_calculator(aspect_ratio_paths)
+                if endpoint == self.ENDPOINT_OMNI:
+                    # omni-image: image_list，支持多图
+                    payload["image_list"] = [
+                        {"image": self._encode_reference_image(path, model)}
+                        for path in reference_paths
+                    ]
                 else:
-                    memory.USER_IMAGE_CACHE.pop(session_id)
+                    # generations: image，只取合并后第一张；引用图排在内存图之前。
+                    payload["image"] = self._encode_reference_image(reference_paths[0], model)
+                    if len(reference_paths) > 1:
+                        logger.info(
+                            f"[{model.upper()}] generations endpoint only accepts one reference image, "
+                            f"using first image, total_reference_count={len(reference_paths)}"
+                        )
+                logger.info(
+                    f"[{model.upper()}] request summary: mode={image_mode}, reference_count={len(reference_paths)}, "
+                    f"aspect_ratio={payload['aspect_ratio']}, image_size={payload['resolution']}"
+                )
+                logger.info(f"[{model.upper()}] 参考图已注入 payload, model={model}, count={len(reference_paths)}")
+                if not prompt_ratio:
+                    logger.info(
+                        f"[{model.upper()}] 从参考图推断比例: {payload['aspect_ratio']}, "
+                        f"count={len(aspect_ratio_paths)}"
+                    )
 
             resp = requests.post(
                 f"{self.API_BASE}{endpoint}",
@@ -243,6 +256,11 @@ class KlingImageBot(Bot):
             return ratio_alias_map[normalized]
         logger.warning(f"[Kling_Image] invalid aspect_ratio={aspect_ratio}, fallback to 16:9")
         return "16:9"
+
+    def _encode_reference_image(self, path, model):
+        with open(path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        return self._ensure_reference_image_within_limit(b64, model)
 
     def _ensure_reference_image_within_limit(self, image_base64, model):
         image_url = f"data:image/jpeg;base64,{image_base64}"
