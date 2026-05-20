@@ -84,30 +84,39 @@ class GoogleGeminiImageBot(Bot):
         prompt_aspect_ratio = self._parse_aspect_ratio_from_prompt(query)
         if prompt_aspect_ratio:
             logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_aspect_ratio}")
+        reference_images = []
+        aspect_ratio_images = None
         quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
-        if quoted_cache:
-            reference_images = self._limit_reference_images(quoted_cache["files"], model, "回复引用图")
-            request_contents = list(reference_images)
-            request_contents.append(text)
-            aspect_ratio = prompt_aspect_ratio or infer_gemini_aspect_ratio_from_images(reference_images)
-            memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
-            if not prompt_aspect_ratio:
-                logger.info(
-                    f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(reference_images)}"
-                )
-            return request_contents, aspect_ratio
-
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+        if quoted_cache:
+            quoted_images = list(quoted_cache.get("files", []) or [])
+            reference_images.extend(quoted_images)
+            if quoted_images:
+                aspect_ratio_images = quoted_images
+            logger.info(f"[{model.upper()}] 从回复引用图取参考图, count={len(quoted_images)}")
+            memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
+
         if file_cache:
-            reference_images = self._limit_reference_images(file_cache["files"], model, "内存参考图")
+            cached_images = list(file_cache.get("files", []) or [])
+            reference_images.extend(cached_images)
+            if aspect_ratio_images is None and cached_images:
+                aspect_ratio_images = cached_images
+            logger.info(f"[{model.upper()}] 从内存参考图追加入参, count={len(cached_images)}")
+            memory.USER_IMAGE_CACHE.pop(session_id)
+
+        if reference_images:
+            reference_images = self._limit_reference_images(reference_images, model, "参考图")
             request_contents = list(reference_images)
             request_contents.append(text)
-            aspect_ratio = prompt_aspect_ratio or infer_gemini_aspect_ratio_from_images(reference_images)
-            memory.USER_IMAGE_CACHE.pop(session_id)
+            aspect_ratio = prompt_aspect_ratio or infer_gemini_aspect_ratio_from_images(aspect_ratio_images)
             if not prompt_aspect_ratio:
                 logger.info(
-                    f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(reference_images)}"
+                    f"[{model.upper()}] 从参考图推断比例: {aspect_ratio}, count={len(aspect_ratio_images)}"
                 )
+            logger.info(
+                f"[{model.upper()}] request summary: mode={model_state.get_image_mode(session_id)}, "
+                f"reference_count={len(reference_images)}, aspect_ratio={aspect_ratio}"
+            )
             return request_contents, aspect_ratio
 
         image_settings = get_gemini_image_settings_for_session(session_id, prompt_aspect_ratio)
