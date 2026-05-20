@@ -145,43 +145,44 @@ class GrokImageBot(Bot):
         if prompt_ratio:
             logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
 
-        file_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
-        if file_cache:
-            image_urls = [
-                self._encode_pil_image(image_file, model)
-                for image_file in file_cache.get("files", [])
-            ]
-            image_urls = [image_url for image_url in image_urls if image_url]
-            memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
-            if image_urls:
-                image_urls = [self._compress_data_url(image_url, model) for image_url in image_urls]
-                aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(image_urls, model)
-                if not prompt_ratio:
-                    logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
-                image_args, model = self._build_edit_args(image_urls, aspect_ratio, model)
-                return image_args, model, {
-                    "mode": mode,
-                    "reference_count": self._count_submitted_reference_images(image_args),
-                }
-
+        image_urls = []
+        aspect_ratio_image_urls = None
+        quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+        if quoted_cache:
+            quoted_image_urls = self._encode_cached_images(quoted_cache, model)
+            image_urls.extend(quoted_image_urls)
+            if quoted_image_urls:
+                aspect_ratio_image_urls = quoted_image_urls
+            logger.info(f"[{model.upper()}] 从回复引用图取参考图, count={len(quoted_image_urls)}")
+            memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
+
         if file_cache:
-            image_urls = [
-                self._encode_pil_image(image_file, model)
-                for image_file in file_cache.get("files", [])
-            ]
-            image_urls = [image_url for image_url in image_urls if image_url]
+            cached_image_urls = self._encode_cached_images(file_cache, model)
+            image_urls.extend(cached_image_urls)
+            if aspect_ratio_image_urls is None and cached_image_urls:
+                aspect_ratio_image_urls = cached_image_urls
+            logger.info(f"[{model.upper()}] 从内存参考图追加入参, count={len(cached_image_urls)}")
             memory.USER_IMAGE_CACHE.pop(session_id)
-            if image_urls:
-                image_urls = [self._compress_data_url(image_url, model) for image_url in image_urls]
-                aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(image_urls, model)
-                if not prompt_ratio:
-                    logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(image_urls)}")
-                image_args, model = self._build_edit_args(image_urls, aspect_ratio, model)
-                return image_args, model, {
-                    "mode": mode,
-                    "reference_count": self._count_submitted_reference_images(image_args),
-                }
+
+        if image_urls:
+            image_urls = [self._compress_data_url(image_url, model) for image_url in image_urls]
+            if aspect_ratio_image_urls:
+                aspect_ratio_image_urls = [
+                    self._compress_data_url(image_url, model)
+                    for image_url in aspect_ratio_image_urls
+                ]
+            aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_data_urls(aspect_ratio_image_urls, model)
+            if not prompt_ratio:
+                logger.info(
+                    f"[{model.upper()}] 从参考图推断比例: {aspect_ratio}, "
+                    f"count={len(aspect_ratio_image_urls)}"
+                )
+            image_args, model = self._build_edit_args(image_urls, aspect_ratio, model)
+            return image_args, model, {
+                "mode": mode,
+                "reference_count": self._count_submitted_reference_images(image_args),
+            }
 
         aspect_ratio = prompt_ratio or self._normalize_aspect_ratio(conf().get("image_aspect_ratio", "16:9"), model)
         image_size = self._normalize_resolution(model_state.get_image_size(session_id), model)
@@ -194,6 +195,13 @@ class GrokImageBot(Bot):
             "mode": mode,
             "reference_count": 0,
         }
+
+    def _encode_cached_images(self, image_cache, model):
+        image_urls = [
+            self._encode_pil_image(image_file, model)
+            for image_file in image_cache.get("files", [])
+        ]
+        return [image_url for image_url in image_urls if image_url]
 
     def _build_edit_args(self, image_urls, aspect_ratio, model):
         if len(image_urls) > _GROK_IMAGE_REFERENCE_MAX_COUNT:
