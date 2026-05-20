@@ -148,39 +148,48 @@ class GPTImageBot(Bot):
         if prompt_ratio:
             logger.info(f"[{model.upper()}] 从 prompt 中解析到比例: {prompt_ratio}")
 
+        images = []
+        aspect_ratio_images = None
         quoted_cache = memory.USER_QUOTED_IMAGE_CACHE.get(session_id)
-        if quoted_cache:
-            images = self._build_edit_images(quoted_cache.get("files", []), model, quoted_cache.get("path", []))
-            memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
-            if images:
-                aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_images(quoted_cache.get("files", []))
-                if not prompt_ratio:
-                    logger.info(f"[{model.upper()}] 从回复引用图取参考图推断比例: {aspect_ratio}, count={len(images)}")
-                return {
-                    "mode": "edit",
-                    "reference_count": len(images),
-                    "aspect_ratio": aspect_ratio,
-                    "size": self._build_size(model_state.get_image_size(session_id), aspect_ratio, model),
-                    "quality": self._build_quality(model),
-                    "images": images,
-                }
-
         file_cache = memory.USER_IMAGE_CACHE.get(session_id)
+        if quoted_cache:
+            quoted_images = self._build_edit_images(
+                quoted_cache.get("files", []),
+                model,
+                quoted_cache.get("path", [])
+            )
+            images.extend(quoted_images)
+            if quoted_images:
+                aspect_ratio_images = quoted_cache.get("files", [])
+            logger.info(f"[{model.upper()}] 从回复引用图取参考图, count={len(quoted_images)}")
+            memory.USER_QUOTED_IMAGE_CACHE.pop(session_id)
+
         if file_cache:
-            images = self._build_edit_images(file_cache.get("files", []), model, file_cache.get("path", []))
+            cached_images = self._build_edit_images(
+                file_cache.get("files", []),
+                model,
+                file_cache.get("path", [])
+            )
+            images.extend(cached_images)
+            if aspect_ratio_images is None and cached_images:
+                aspect_ratio_images = file_cache.get("files", [])
+            logger.info(f"[{model.upper()}] 从内存参考图追加入参, count={len(cached_images)}")
             memory.USER_IMAGE_CACHE.pop(session_id)
-            if images:
-                aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_images(file_cache.get("files", []))
-                if not prompt_ratio:
-                    logger.info(f"[{model.upper()}] 从内存参考图推断比例: {aspect_ratio}, count={len(images)}")
-                return {
-                    "mode": "edit",
-                    "reference_count": len(images),
-                    "aspect_ratio": aspect_ratio,
-                    "size": self._build_size(model_state.get_image_size(session_id), aspect_ratio, model),
-                    "quality": self._build_quality(model),
-                    "images": images,
-                }
+
+        if images:
+            aspect_ratio = prompt_ratio or self._infer_aspect_ratio_from_images(aspect_ratio_images)
+            if not prompt_ratio:
+                logger.info(
+                    f"[{model.upper()}] 从参考图推断比例: {aspect_ratio}, count={len(aspect_ratio_images)}"
+                )
+            return {
+                "mode": "edit",
+                "reference_count": len(images),
+                "aspect_ratio": aspect_ratio,
+                "size": self._build_size(model_state.get_image_size(session_id), aspect_ratio, model),
+                "quality": self._build_quality(model),
+                "images": images,
+            }
 
         aspect_ratio = prompt_ratio or conf().get("image_aspect_ratio", "16:9")
         return {
